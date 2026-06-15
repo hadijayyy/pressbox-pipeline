@@ -25,7 +25,7 @@ def load_token():
     data = json.loads(TOKEN_FILE.read_text())
     return data["access_token"], str(data["user_id"])
 
-def create_container(uid, token, text, reply_to=None, image_url=None, max_retries=3):
+def create_container(uid, token, text, reply_to=None, image_url=None, max_retries=2):
     """Create a media container with retry on transient errors.
     If image_url provided (root slide only), tries IMAGE then falls back to TEXT."""
     if image_url and not reply_to:
@@ -36,27 +36,27 @@ def create_container(uid, token, text, reply_to=None, image_url=None, max_retrie
                 r = _HTTP.post(f"{THREADS_API}/{uid}/threads", data=data)
                 if r.status_code >= 500:
                     if attempt < max_retries:
-                        wait_time = 4 + (attempt * 2)
-                        print(f"   ⚠️ Image HTTP {r.status_code} (Transient) — retry {attempt+1}/{max_retries}", file=sys.stderr)
+                        wait_time = 2 + attempt
+                        print(f"   ⚠️ Image HTTP {r.status_code} — retry {attempt+1}/{max_retries}", file=sys.stderr)
                         time.sleep(wait_time)
                         continue
-                    print(f"   ⚠️ Image container failed (HTTP {r.status_code}), fallback to TEXT", file=sys.stderr)
+                    print(f"   ⚠️ Image failed (HTTP {r.status_code}), fallback to TEXT", file=sys.stderr)
                     break
                 result = r.json()
                 if r.status_code == 200:
                     print(f"   📷 Image attached to root slide", file=sys.stderr)
                     return result["id"]
                 if "transient" in str(result).lower() and attempt < max_retries:
-                    wait_time = 4 + (attempt * 2)
-                    print(f"   ⚠️ Image transient error — retry {attempt+1}/{max_retries}", file=sys.stderr)
+                    wait_time = 2 + attempt
+                    print(f"   ⚠️ Image transient — retry {attempt+1}/{max_retries}", file=sys.stderr)
                     time.sleep(wait_time)
                     continue
-                print(f"   ⚠️ Image container failed ({result.get('error',{}).get('message','?')}), fallback to TEXT", file=sys.stderr)
+                print(f"   ⚠️ Image failed ({result.get('error',{}).get('message','?')}), fallback to TEXT", file=sys.stderr)
                 break
             except httpx.TimeoutException:
                 if attempt < max_retries:
                     print(f"   ⚠️ Image timeout — retry {attempt+1}/{max_retries}", file=sys.stderr)
-                    time.sleep(4)
+                    time.sleep(2)
                     continue
                 print(f"   ⚠️ Image timeout after retries, fallback to TEXT", file=sys.stderr)
                 break
@@ -104,7 +104,7 @@ def create_container(uid, token, text, reply_to=None, image_url=None, max_retrie
             raise
     raise Exception(f"Container create failed after {max_retries} retries")
 
-def publish(uid, token, container_id, max_retries=3):
+def publish(uid, token, container_id, max_retries=2):
     """Publish a container. Returns published post ID."""
     for attempt in range(max_retries + 1):
         try:
@@ -113,8 +113,8 @@ def publish(uid, token, container_id, max_retries=3):
 
             if r.status_code >= 500:
                 if attempt < max_retries:
-                    wait_time = 4 + (attempt * 2)
-                    print(f"   ⚠️ Publish HTTP {r.status_code} (Transient) — retry {attempt+1}/{max_retries}", file=sys.stderr)
+                    wait_time = 2 + attempt
+                    print(f"   ⚠️ Publish HTTP {r.status_code} — retry {attempt+1}/{max_retries}", file=sys.stderr)
                     time.sleep(wait_time)
                     continue
                 raise Exception(f"Publish failed with HTTP {r.status_code}: {r.text}")
@@ -125,8 +125,8 @@ def publish(uid, token, container_id, max_retries=3):
 
             error_msg = result.get("error", {}).get("message", "")
             if "transient" in str(result).lower() and attempt < max_retries:
-                wait_time = 4 + (attempt * 2)
-                print(f"   ⚠️ Publish transient error: {error_msg[:60]} — retry {attempt+1}/{max_retries}", file=sys.stderr)
+                wait_time = 2 + attempt
+                print(f"   ⚠️ Publish transient: {error_msg[:60]} — retry {attempt+1}/{max_retries}", file=sys.stderr)
                 time.sleep(wait_time)
                 continue
 
@@ -134,7 +134,7 @@ def publish(uid, token, container_id, max_retries=3):
         except httpx.TimeoutException:
             if attempt < max_retries:
                 print(f"   ⚠️ Publish timeout — retry {attempt+1}/{max_retries}", file=sys.stderr)
-                time.sleep(4)
+                time.sleep(2)
                 continue
             raise
     raise Exception(f"Publish failed after {max_retries} retries")
@@ -183,8 +183,8 @@ def post_thread(uid, token, slides, image_url=None):
 
         parent_pid = pid
         if i < len(filtered) - 1:
-            print(f"   Waiting 3s for indexing...", file=sys.stderr)
-            time.sleep(3)
+            print(f"   Waiting 2s for indexing...", file=sys.stderr)
+            time.sleep(2)
 
     return post_ids
 
