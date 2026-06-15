@@ -91,12 +91,15 @@ def scrape_rss(url, source, base_score=9, wc_boost_score=12, transfer_boost_scor
             if is_fresh(ts) is False: continue
 
             # Extract image from media:content (RSS media namespace)
+            # Pick the LARGEST available image (highest width)
             image_url = ""
-            for ns, ns_url in [("media", "http://search.yahoo.com/mrss/"), ("", "http://search.yahoo.com/mrss")]:
-                media_el = item.find(f'.//{{{ns_url}}}content')
-                if media_el is not None:
-                    image_url = media_el.get("url", "")
-                    break
+            best_width = 0
+            for ns_url in ["http://search.yahoo.com/mrss/", "http://search.yahoo.com/mrss"]:
+                for mc in item.findall(f'.//{{{ns_url}}}content'):
+                    w = int(mc.get("width", 0))
+                    if w > best_width:
+                        best_width = w
+                        image_url = mc.get("url", "")
             # Fallback: enclosure tag
             if not image_url:
                 enc = item.find('enclosure')
