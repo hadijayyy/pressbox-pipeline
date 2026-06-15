@@ -17,6 +17,7 @@ os.makedirs(f"{HOME}/.hermes/pressbox", exist_ok=True)
 WIB = timezone(timedelta(hours=7))
 
 ALERT_CHAT = "1022032312"
+FEEDBACK_JSON = f"{HOME}/.hermes/pressbox/analytics_feedback.json"
 BOT_TOKEN = None
 try:
     for line in open(f"{HOME}/.hermes/.env"):
@@ -74,8 +75,27 @@ def shell(cmd, timeout=60):
     except Exception as e:
         return str(e), -1
 
+def is_bad_hour():
+    """Check if current hour is in worst_hours from analytics feedback."""
+    try:
+        with open(FEEDBACK_JSON) as f:
+            fb = json.load(f)
+        worst = fb.get("worst_hours", [])
+        if not worst:
+            return False
+        now_hour = datetime.now(WIB).hour
+        return now_hour in worst
+    except:
+        return False
+
 # ===== MAIN =====
 log("=== PRESS BOX POST (Phase 2) ===")
+
+# 0. TIME CHECK — skip if current hour is analytics worst hour
+if is_bad_hour():
+    log("⏰ Bad hour detected — skipping post. [SILENT]")
+    print("⏸️ Post skip — jam ini termasuk worst hour dari analytics. Next jam.")
+    sys.exit(0)
 
 # 1. Read staging (check v3 first, then v2)
 staging_file = STAGING_FILE

@@ -282,6 +282,17 @@ def score_candidate(t):
         s += 50
     
     s = apply_analytics_boost(s, t.get("title", ""), t.get("description", ""))
+    
+    # R4: Time-based boost (best_hours from analytics)
+    now_hour = datetime.now(WIB).hour
+    if _feedback:
+        best_h = _feedback.get("best_hours", [])
+        worst_h = _feedback.get("worst_hours", [])
+        if now_hour in best_h:
+            s += 20  # Boost during peak hours
+        elif now_hour in worst_h:
+            s -= 10  # Reduce during low-engagement hours
+    
     return s
 
 # ===== ARTICLE EXTRACTION =====
