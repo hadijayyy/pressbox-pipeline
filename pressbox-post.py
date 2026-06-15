@@ -105,7 +105,7 @@ def is_posting_too_frequent():
                 try:
                     dt = datetime.fromisoformat(posted)
                     diff = (now - dt).total_seconds() / 60  # minutes
-                    if diff < 60:  # Less than 1 hour since last post
+                    if diff < 30:  # Less than 30 min since last post
                         return True
                 except:
                     pass
