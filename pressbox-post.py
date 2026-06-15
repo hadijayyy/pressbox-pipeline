@@ -88,13 +88,44 @@ def is_bad_hour():
     except:
         return False
 
+def is_posting_too_frequent():
+    """Check if we posted too recently (Quality > Quantity)."""
+    try:
+        with open(POSTED_JSON) as f:
+            data = json.load(f)
+        topics = data.get("topics", [])
+        if not topics:
+            return False
+        # Check last 3 posts timing
+        recent = sorted(topics, key=lambda x: x.get("posted_at", ""), reverse=True)[:3]
+        now = datetime.now(WIB)
+        for t in recent:
+            posted = t.get("posted_at", "")
+            if posted:
+                try:
+                    dt = datetime.fromisoformat(posted)
+                    diff = (now - dt).total_seconds() / 60  # minutes
+                    if diff < 60:  # Less than 1 hour since last post
+                        return True
+                except:
+                    pass
+        return False
+    except:
+        return False
+
 # ===== MAIN =====
 log("=== PRESS BOX POST (Phase 2) ===")
 
 # 0. TIME CHECK — skip if current hour is analytics worst hour
 if is_bad_hour():
     log("⏰ Bad hour detected — skipping post. [SILENT]")
-    print("⏸️ Post skip — jam ini termasuk worst hour dari analytics. Next jam.")
+    print("⏸️ Post skip — jam ini termasuk worst hour. Next jam.")
+    sys.exit(0)
+
+# 0b. FREQUENCY CHECK — Quality > Quantity
+if is_posting_too_frequent():
+    log("⏰ Posting too frequent — skipping for quality. [SILENT]")
+    print("⏸️ Post skip — baru posting < 1 jam lalu. Quality > Quantity.")
     sys.exit(0)
 
 # 1. Read staging (check v3 first, then v2)

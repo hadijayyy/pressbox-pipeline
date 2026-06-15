@@ -248,6 +248,41 @@ def score_candidate(t):
     s = t.get("score", 0)
     text = (t.get("title", "") + " " + t.get("description", "")[:500]).lower()
     
+    # ===== IMPROVEMENT #1: CONTROVERSY > NEWS (70/30 MIX) =====
+    # Heavy boost for controversy/drama (what actually gets 50+ likes)
+    controversy_keywords = [
+        "outrage", "furious", "scandal", "banned", "boycott", "protest",
+        "controversy", "chaos", "crisis", "collapse", "nightmare",
+        "rip off", "steal", "corrupt", "liar", "lie", "fake",
+        "destroy", "ruin", "collapse", "disaster", "embarrass",
+    ]
+    drama_keywords = [
+        "secret", "hidden", "exposed", "revealed", "shocking",
+        "unbelievable", "insane", "crazy", "wild", "epic",
+        "historic", "legend", "hero", "villain", "underdog",
+        "rivalry", "revenge", "comeback", "redemption", "last chance",
+    ]
+    
+    controversy_score = sum(30 for kw in controversy_keywords if kw in text)
+    drama_score = sum(20 for kw in drama_keywords if kw in text)
+    
+    # Penalize boring/generic news
+    boring_keywords = [
+        "team guide", "squad list", "lineup", "preview",
+        "live updates", "live blog", "as it happens",
+        "report", "article", "analysis", "opinion",
+    ]
+    boring_penalty = sum(-15 for kw in boring_keywords if kw in text)
+    
+    s += controversy_score + drama_score + boring_penalty
+    
+    # Boost if title is SHORT and PUNCHY (good hook indicator)
+    title_len = len(t.get("title", "").split())
+    if title_len <= 8:
+        s += 15  # Short titles = better hooks
+    elif title_len > 15:
+        s -= 10  # Long titles = weak hooks
+    
     wc_keywords = ["world cup", "piala dunia", "fifa", "qualifier", "wc 2026"]
     for kw in wc_keywords:
         if kw in text:
@@ -378,11 +413,11 @@ def is_garbage(text):
 # ===== LLM CALL =====
 def call_llm(prompt):
     styles = [
-        "Write like a passionate football fan sharing breaking news with friends.",
-        "Write like a football journalist breaking a major story.",
-        "Write like a football analyst breaking down the key points.",
-        "Write like a football content creator making viral threads.",
-        "Write like a football insider sharing exclusive insights.",
+        "Write like a passionate football fan who is FURIOUS about something. Lead with outrage.",
+        "Write like a football insider breaking EXCLUSIVE news that will SHOCK people.",
+        "Write like a fan who just discovered a HIDDEN TRUTH the media won't tell you.",
+        "Write like a football journalist exposing a SCANDAL that affects every fan.",
+        "Write like a fan sharing a story that will make people ANGRY or EXCITED.",
     ]
     style = random.choice(styles)
     headers = {"Content-Type": "application/json"}
@@ -745,13 +780,12 @@ RULES FOR CONTENT (Strict):
 
 ====== SLIDE 1 — HOOK (10/10 STANDARD) ======
 
-STEP 1 — Identify the EMOTIONAL ANGLE of this story.
-Ask yourself: What emotion will make people stop scrolling?
-  - OUTRAGE? (prices, corruption, ban, unfair treatment, scandal)
-  - CELEBRATION? (historic return, comeback, record broken, dream achieved)
-  - SHOCK? (unexpected result, drama, controversy, chaos)
-  - FEAR? (crisis, injury, threat, collapse, debt, nightmare)
-LEAD with this emotion. Do NOT lead with a person's name or event name.
+STEP 1 — ALWAYS lead with OUTRAGE or SHOCK.
+Every hook MUST make people feel ANGRY or SURPRISED.
+  - OUTRAGE: prices, corruption, ban, unfair treatment, scandal, rip off
+  - SHOCK: unexpected result, drama, controversy, chaos, hidden truth
+  - NEVER lead with celebration or neutral news — those don't go viral.
+  - NEVER lead with a person's name or event name.
 
 STEP 2 — Write the hook as EXACTLY TWO FRAGMENTS separated by period.
 FORMAT: [Big NUMBER] [Context]. [Number/Year] [EMOTIONAL/Drama Word].
@@ -807,6 +841,11 @@ Rules:
   - MUST include PERSONAL word: "you", "we", "fans", "us"
   - NEVER generic. Avoid: "What happens next?" "Will this work?" "Your thoughts?"
   - Instead: "Should WE accept..." "Would YOU pay..." "Are FANS right to..."
+  - BEST: Questions that make people choose a SIDE (for/against)
+  - EXAMPLES:
+    ✅ "Is FIFA deliberately killing football for profit?"
+    ✅ "Should FANS boycott the World Cup over these prices?"
+    ✅ "Are WE being ripped off by greedy football bosses?"
 
   10/10 examples:
   ✅ "Should WE accept empty stadiums while FIFA jacks up prices?"
