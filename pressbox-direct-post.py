@@ -78,8 +78,8 @@ def create_container(uid, token, text, reply_to=None, image_url=None, max_retrie
             # Handle HTTP 500 Transient Server Errors safely
             if r.status_code >= 500:
                 if attempt < max_retries:
-                    wait_time = 4 + (attempt * 2)
-                    print(f"   ⚠️ Container HTTP {r.status_code} (Transient) — retry {attempt+1}/{max_retries}", file=sys.stderr)
+                    wait_time = 2 + attempt
+                    print(f"   ⚠️ Container HTTP {r.status_code} — retry {attempt+1}/{max_retries}", file=sys.stderr)
                     time.sleep(wait_time)
                     continue
                 raise Exception(f"Container create failed with HTTP {r.status_code}: {r.text}")
@@ -90,8 +90,8 @@ def create_container(uid, token, text, reply_to=None, image_url=None, max_retrie
 
             # Retry on explicit transient errors in JSON payload
             if "transient" in str(result).lower() and attempt < max_retries:
-                wait_time = 4 + (attempt * 2)
-                print(f"   ⚠️ Container transient error — retry {attempt+1}/{max_retries}", file=sys.stderr)
+                wait_time = 2 + attempt
+                print(f"   ⚠️ Container transient — retry {attempt+1}/{max_retries}", file=sys.stderr)
                 time.sleep(wait_time)
                 continue
 
@@ -99,7 +99,7 @@ def create_container(uid, token, text, reply_to=None, image_url=None, max_retrie
         except httpx.TimeoutException:
             if attempt < max_retries:
                 print(f"   ⚠️ Container timeout — retry {attempt+1}/{max_retries}", file=sys.stderr)
-                time.sleep(4)
+                time.sleep(2)
                 continue
             raise
     raise Exception(f"Container create failed after {max_retries} retries")
