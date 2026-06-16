@@ -100,6 +100,15 @@ def scrape_rss(url, source, base_score=9, wc_boost_score=12, transfer_boost_scor
                     if w > best_width:
                         best_width = w
                         image_url = mc.get("url", "")
+            # Upgrade image quality: replace width param with 1200 for HD
+            if image_url and "width=" in image_url:
+                import urllib.parse
+                parsed = urllib.parse.urlparse(image_url)
+                params = urllib.parse.parse_qs(parsed.query)
+                params["width"] = ["1200"]
+                params["quality"] = ["85"]
+                new_query = urllib.parse.urlencode(params, doseq=True)
+                image_url = urllib.parse.urlunparse(parsed._replace(query=new_query))
             # Fallback: enclosure tag
             if not image_url:
                 enc = item.find('enclosure')

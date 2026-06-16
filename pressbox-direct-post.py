@@ -279,6 +279,9 @@ def main():
     print(f"📝 {len(slides)} slides detected", file=sys.stderr)
 
     post_ids = post_thread(uid, token, slides, image_url)
+    if not post_ids:
+        print("❌ No slides posted")
+        sys.exit(1)
     print(f"✅ Thread posted: {len(post_ids)} slides")
     print(f"   Root: {post_ids[0]}")
     for pid in post_ids:

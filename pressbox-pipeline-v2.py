@@ -688,7 +688,7 @@ if not candidates:
 
 # 3. Score + Sort
 scored = sorted(candidates, key=score_candidate, reverse=True)
-scores = [score_candidate(t) for t in scored]
+top_scores = [score_candidate(t) for t in scored[:5]]
 
 top_n = min(5, len(scored))
 top_candidates = scored[:top_n]
@@ -872,7 +872,7 @@ Rules:
         result = call_llm(prompt)
         if result:
             if len(result) < 200:
-                time.sleep(3)
+                time.sleep(1)
                 continue
             slides = parse_json_slides(result)
             if slides:
@@ -882,7 +882,7 @@ Rules:
                     success = True
                     break
         if attempt == 0:
-            time.sleep(3)
+            time.sleep(1)
             
     llm_time = time.time() - start_llm
     
@@ -903,20 +903,27 @@ cache[best["url"]] = datetime.now(timezone.utc).isoformat()
 save_scrape_cache(cache)
 
 # 8. Save to staging
-content = '\n---\n'.join(cleaned)
-staging_data = {
-    "topic": best,
-    "content": content,
-    "written_at": datetime.now(WIB).isoformat(),
-    "is_wc": best.get("wc_related", False) or any(k in best.get("title", "").lower() for k in ["world cup", "piala dunia", "fifa"]),
-    "is_transfer": best.get("transfer_related", False),
-    "is_goldmine": False,
-    "mode": "thread",
-    "slides": len(cleaned),
-    "image_url": image_url
-}
-with open(STAGING_FILE, 'w') as f:
-    json.dump(staging_data, f, indent=2)
+try:
+    content = '\\n---\\n'.join(cleaned)
+    staging_data = {
+        "topic": best,
+        "content": content,
+        "written_at": datetime.now(WIB).isoformat(),
+        "is_wc": best.get("wc_related", False) or any(k in best.get("title", "").lower() for k in ["world cup", "piala dunia", "fifa"]),
+        "is_transfer": best.get("transfer_related", False),
+        "is_goldmine": False,
+        "mode": "thread",
+        "slides": len(cleaned),
+        "image_url": image_url
+    }
+    tmp = STAGING_FILE + ".tmp"
+    with open(tmp, 'w') as f:
+        json.dump(staging_data, f, indent=2)
+    os.replace(tmp, STAGING_FILE)
+except Exception as e:
+    log(f"❌ Staging save failed: {e}")
+    send_alert(f"Staging save failed: {e}")
+    sys.exit(1)
 
 # 9. Log stats
 total_time = time.time() - start_scrape
