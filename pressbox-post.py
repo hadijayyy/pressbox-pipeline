@@ -176,11 +176,11 @@ root_id = None
 permalink = None
 post_ids = []
 post_out2 = ""  # Initialize to prevent NameError
-for line in post_out.split('\\n'):
+for line in post_out.split('\n'):
     if line.startswith('Root:'):
-        root_id = line.split('Root:')[1].strip()
+        root_id = line.split('Root:', 1)[1].strip()
     elif line.startswith('Post:'):
-        permalink = line.split('Post:')[1].strip()
+        permalink = line.split('Post:', 1)[1].strip()
     line_stripped = line.strip()
     if line_stripped and line_stripped.isdigit() and len(line_stripped) > 15:
         post_ids.append(line_stripped)
