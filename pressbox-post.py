@@ -4,6 +4,7 @@ PRESS BOX POST — Phase 2.
 Read staging → post to Threads → verify → update tracking.
 """
 import json, os, subprocess, sys, time, requests
+import shlex
 from datetime import datetime, timezone, timedelta
 
 HOME = os.path.expanduser("~")
@@ -163,10 +164,10 @@ os.makedirs(os.path.dirname(LATEST_MD), exist_ok=True)
 with open(LATEST_MD, 'w') as f:
     f.write(content)
 
-# 3. Post to Threads (with retry)
+# 3. Post to Threads (single attempt — no retry to fit 120s cron)
 log("Posting to Threads...")
 image_url = staging.get("image_url") or ""
-image_flag = f" --image '{image_url}'" if image_url else ""
+image_flag = f" --image {shlex.quote(image_url)}" if image_url else ""
 post_cmd = f"python3 {POST_SCRIPT} --file {LATEST_MD}{image_flag} 2>&1"
 post_out, code = shell(post_cmd, timeout=100)
 
@@ -174,7 +175,8 @@ post_out, code = shell(post_cmd, timeout=100)
 root_id = None
 permalink = None
 post_ids = []
-for line in post_out.split('\n'):
+post_out2 = ""  # Initialize to prevent NameError
+for line in post_out.split('\\n'):
     if line.startswith('Root:'):
         root_id = line.split('Root:')[1].strip()
     elif line.startswith('Post:'):
@@ -183,26 +185,11 @@ for line in post_out.split('\n'):
     if line_stripped and line_stripped.isdigit() and len(line_stripped) > 15:
         post_ids.append(line_stripped)
 
-# Retry once on API blip
+# Skip retry — single attempt to fit 120s cron limit
 if not root_id:
-    log(f"⚠️ Post failed (output: {post_out[:300]}), retrying in 10s...")
-    time.sleep(10)
-    post_out2, code2 = shell(post_cmd, timeout=100)
-    root_id = None
-    permalink = None
-    for line in post_out2.split('\n'):
-        if line.startswith('Root:'):
-            root_id = line.split('Root:')[1].strip()
-        elif line.startswith('Post:'):
-            permalink = line.split('Post:')[1].strip()
-        line_stripped = line.strip()
-        if line_stripped and line_stripped.isdigit() and len(line_stripped) > 15:
-            post_ids.append(line_stripped)
-
-if not root_id:
-    log(f"❌ Failed — no root post ID after retry (output: {post_out2[:200]})")
+    log(f"❌ Failed — no root post ID (output: {post_out[:300]})")
     title = topic.get("title", "?")
-    print(f"❌ Post error — gagal setelah retry: {title[:60]}")
+    print(f"❌ Post error: {title[:60]}")
     send_alert(f"POST failed (no root ID)\nTopic: {title[:60]}")
     _cleanup(remove_pending=True, current_topic=topic)
     sys.exit(1)

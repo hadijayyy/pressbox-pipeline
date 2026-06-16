@@ -14,18 +14,20 @@ Usage:
 """
 
 import json, sys, httpx, time, re
+import atexit
 from pathlib import Path
 
 HOME = Path.home()
 TOKEN_FILE = HOME / ".hermes" / "threads_token.json"
 THREADS_API = "https://graph.threads.net/v1.0"
-_HTTP = httpx.Client(timeout=20)
+_HTTP = httpx.Client(timeout=10)
+atexit.register(_HTTP.close)
 
 def load_token():
     data = json.loads(TOKEN_FILE.read_text())
     return data["access_token"], str(data["user_id"])
 
-def create_container(uid, token, text, reply_to=None, image_url=None, max_retries=2):
+def create_container(uid, token, text, reply_to=None, image_url=None, max_retries=1):
     """Create a media container with retry on transient errors.
     If image_url provided (root slide only), tries IMAGE then falls back to TEXT."""
     if image_url and not reply_to:
@@ -104,7 +106,7 @@ def create_container(uid, token, text, reply_to=None, image_url=None, max_retrie
             raise
     raise Exception(f"Container create failed after {max_retries} retries")
 
-def publish(uid, token, container_id, max_retries=2):
+def publish(uid, token, container_id, max_retries=1):
     """Publish a container. Returns published post ID."""
     for attempt in range(max_retries + 1):
         try:
