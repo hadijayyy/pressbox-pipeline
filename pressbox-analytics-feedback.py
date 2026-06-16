@@ -34,7 +34,7 @@ def fetch_engagement(tok, post_id):
     try:
         r = httpx.get(f"https://graph.threads.net/v1.0/{post_id}/insights",
                       params={"access_token": tok, "metric": "likes,replies,reposts,views,quotes", "period": "lifetime"},
-                      timeout=10)
+                      timeout=8)
         m = {"likes": 0, "replies": 0, "reposts": 0, "views": 0, "quotes": 0}
         for x in r.json().get("data", []):
             m[x["name"]] = x["values"][0]["value"]
@@ -143,8 +143,11 @@ def main():
     }
 
     os.makedirs(os.path.dirname(FEEDBACK_PATH), exist_ok=True)
-    with open(FEEDBACK_PATH, "w") as f:
+    # Atomic write — write to temp file then rename (prevents corruption)
+    tmp_path = FEEDBACK_PATH + ".tmp"
+    with open(tmp_path, "w") as f:
         json.dump(feedback, f, indent=2)
+    os.replace(tmp_path, FEEDBACK_PATH)
     print(f"✅ Feedback: {FEEDBACK_PATH}")
 
     # Build report
