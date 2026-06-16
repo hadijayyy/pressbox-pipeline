@@ -168,7 +168,7 @@ log("Posting to Threads...")
 image_url = staging.get("image_url") or ""
 image_flag = f" --image '{image_url}'" if image_url else ""
 post_cmd = f"python3 {POST_SCRIPT} --file {LATEST_MD}{image_flag} 2>&1"
-post_out, code = shell(post_cmd, timeout=180)
+post_out, code = shell(post_cmd, timeout=100)
 
 # 4. Extract root ID and permalink
 root_id = None
@@ -185,9 +185,9 @@ for line in post_out.split('\n'):
 
 # Retry once on API blip
 if not root_id:
-    log(f"⚠️ Post failed (output: {post_out[:300]}), retrying in 30s...")
-    time.sleep(30)
-    post_out2, code2 = shell(post_cmd, timeout=180)
+    log(f"⚠️ Post failed (output: {post_out[:300]}), retrying in 10s...")
+    time.sleep(10)
+    post_out2, code2 = shell(post_cmd, timeout=100)
     root_id = None
     permalink = None
     for line in post_out2.split('\n'):
