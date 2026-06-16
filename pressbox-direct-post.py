@@ -20,7 +20,7 @@ from pathlib import Path
 HOME = Path.home()
 TOKEN_FILE = HOME / ".hermes" / "threads_token.json"
 THREADS_API = "https://graph.threads.net/v1.0"
-_HTTP = httpx.Client(timeout=10)
+_HTTP = httpx.Client(timeout=8)
 atexit.register(_HTTP.close)
 
 def load_token():
@@ -164,7 +164,7 @@ def post_thread(uid, token, slides, image_url=None):
             print(f"   Slide {i+1}: creating root container...", file=sys.stderr)
 
         cid = create_container(uid, token, text, parent_pid, image_url if i == 0 else None)
-        time.sleep(1)
+        time.sleep(0.5)
 
         print(f"   Slide {i+1}: publishing...", file=sys.stderr)
         pid = publish(uid, token, cid)
@@ -172,7 +172,7 @@ def post_thread(uid, token, slides, image_url=None):
         print(f"   Slide {i+1}: → {pid}", file=sys.stderr)
 
         if i == 0:
-            time.sleep(2)
+            time.sleep(1)
             try:
                 r = _HTTP.get(f"{THREADS_API}/{pid}",
                     params={"fields": "permalink", "access_token": token}, timeout=10)
@@ -185,8 +185,8 @@ def post_thread(uid, token, slides, image_url=None):
 
         parent_pid = pid
         if i < len(filtered) - 1:
-            print(f"   Waiting 2s for indexing...", file=sys.stderr)
-            time.sleep(2)
+            print(f"   Waiting 1s for indexing...", file=sys.stderr)
+            time.sleep(1)
 
     return post_ids
 
