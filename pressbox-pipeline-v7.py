@@ -442,17 +442,17 @@ ARTICLE:
 SOURCE: {url}
 
 SLIDE RULES:
-- Slide 1: HOOK — 1-2 punchy sentences. 250-450 chars. Include HD image URL from article if available.
+- Slide 1: HOOK — 1-2 punchy sentences. 150-250 chars. Include HD image URL from article if available.
 - Slides 2-7: STORY ARC — each continues from previous. 250-450 chars.
 - Slide 8: CTA — {cta_pattern if cta_pattern else 'debate question with "?" + personal word (you/we/fans)'}. 3 sentences + Source URL.
 
-CRITICAL: Slides 1-7 MUST be 250-450 chars each. Do NOT write shorter.
+CRITICAL: Slide 1 MUST be 150-250 chars. Slides 2-7 MUST be 250-450 chars each. Do NOT write shorter.
 FORMATTING: Add a blank line between every 2 sentences in each slide for readability.
 TONE: {tone_adjustment}
 
 JSON FORMAT:
 {{
-  "slide_1": {{"title": "HOOK", "content": "1-2 punchy sentences with context, 250-450 chars", "image_url": "HD image URL from article if available"}},
+  "slide_1": {{"title": "HOOK", "content": "1-2 punchy sentences, 150-250 chars", "image_url": "HD image URL from article if available"}},
   "slide_2": {{"title": "THE PROBLEM", "content": "What happened, 250-450 chars"}},
   "slide_3": {{"title": "THE CONTEXT", "content": "Why it matters, 250-450 chars"}},
   "slide_4": {{"title": "THE COMPARISON", "content": "Similar past, 250-450 chars"}},
@@ -538,7 +538,7 @@ for attempt in range(1, MAX_RETRIES + 1):
             log("   ❌ No JSON found, retrying...")
             continue
 
-        # Parse and validate char count (slides 1-7)
+        # Parse and validate char count
         slides_data = json.loads(candidate_json)
         char_issues = []
         for i in range(1, 8):  # slides 1-7
@@ -546,13 +546,16 @@ for attempt in range(1, MAX_RETRIES + 1):
             if key in slides_data:
                 body = slides_data[key].get("content", "")
                 chars = len(body)
-                if chars < MIN_CHARS:
+                # Slide 1: 150-250, Slides 2-7: 250-450
+                min_c = 150 if i == 1 else MIN_CHARS
+                max_c = 250 if i == 1 else MAX_CHARS
+                if chars < min_c:
                     char_issues.append(f"slide_{i}: {chars}c")
-                elif chars > MAX_CHARS:
+                elif chars > max_c:
                     char_issues.append(f"slide_{i}: {chars}c(too long)")
 
         if not char_issues:
-            log(f"   ✅ All slides 2-7 pass char count ({MIN_CHARS}-{MAX_CHARS}c)")
+            log(f"   ✅ All slides pass char count (s1:150-250, s2-7:250-450)")
             raw_json = candidate_json
             break
         else:
@@ -599,13 +602,13 @@ if "?" not in slides[7]["title"]:
 for i, s in enumerate(slides):
     c = s["content"]
     chars = len(c)
-    # Slide 1 (hook): 250-450 chars
+    # Slide 1 (hook): 150-250 chars
     if i == 0:
-        if chars < MIN_CHARS:
-            log(f"⚠️ Slide 1 too short ({chars}c, min {MIN_CHARS})")
+        if chars < 150:
+            log(f"⚠️ Slide 1 too short ({chars}c, min 150)")
             sys.exit(1)
-        elif chars > MAX_CHARS:
-            log(f"⚠️ Slide 1 too long ({chars}c, max {MAX_CHARS})")
+        elif chars > 250:
+            log(f"⚠️ Slide 1 too long ({chars}c, max 250)")
             sys.exit(1)
     # Slides 2-7: enforce 250-450 chars
     elif 1 <= i <= 6:
