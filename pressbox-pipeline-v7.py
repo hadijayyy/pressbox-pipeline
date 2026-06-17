@@ -546,7 +546,8 @@ slide_8: HOT TAKE (150-450 chars, pick a side + source URL)
 
 [FORMATTING]
 - Blank line every 2 sentences per slide
-- No em-dash, no hashtags 1-7, max 1 emoji in 8
+- FORBIDDEN: em-dash (—), en-dash (–), hashtags (#) in slides 1-7, max 1 emoji in 8
+- Use period (.) or comma (,) instead of dashes
 - Conversational English. Short sentences. Facts ONLY.
 - BANNED: "In a stunning turn" / "It's safe to say" / "Time will tell" / "The beautiful game" / "Game changer"
 
@@ -817,6 +818,14 @@ if not ok:
         sys.exit(1)
 
 # Build joined content (no titles, just content)
+# Post-process: replace em-dashes and en-dashes
+for s in slides:
+    s["content"] = s["content"].replace("—", " — ").replace("–", " - ")
+    # Clean up double spaces around replaced dashes
+    s["content"] = re.sub(r"  +", " ", s["content"])
+    s["content"] = re.sub(r" ,", ",", s["content"])
+    s["content"] = re.sub(r" \.", ".", s["content"])
+
 joined = "\n---\n".join(s["content"] for s in slides)
 
 # ── 6. STAGE or DRY RUN ──────────────────────────────────────────
