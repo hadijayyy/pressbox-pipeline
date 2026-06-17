@@ -251,15 +251,29 @@ def validate_image_quality(url):
         return (False, 0, 0)
 
 # ── Guard ───────────────────────────────────────────────────────────
+STAGING_TMP = STAGING + ".tmp"
+ERROR_LOG = f"{HOME}/.hermes/pressbox/pipeline_errors.log"
+
+def log_error(msg):
+    ts = datetime.now(WIB).strftime("%Y-%m-%d %H:%M:%S")
+    with open(ERROR_LOG, "a") as f:
+        f.write(f"[{ts}] {msg}\n")
+
 if os.path.exists(STAGING):
     try:
         with open(STAGING) as f:
             existing = json.load(f)
-        if existing.get("topic") and existing.get("content"):
+        # Validate schema
+        if not existing.get("topic") or not existing.get("content"):
+            log("⚠️ Staging invalid (missing topic/content) — overwriting")
+        elif existing.get("status") == "error":
+            log("⚠️ Staging has error status — overwriting")
+        else:
             log("⏸️ Staging unposted — skip (exit 2)")
             sys.exit(2)
-    except Exception:
-        pass
+    except Exception as e:
+        log_error(f"Guard read error: {e}")
+        log("⚠️ Staging corrupt — overwriting")
 
 START = time.time()
 t_scrape = t_llm = 0
@@ -339,38 +353,33 @@ research_keywords_remove = []
 preferred_hooks = []
 cta_pattern = ""
 tone_adjustment = "Conversational English. Bold numbers. High-impact words."
+analytics_fresh = False
 try:
     with open(ANALYTICS_FEEDBACK) as f:
         fb = json.load(f)
-
-    # Staleness check: skip boosts/skips if >48h old
+    # Stale check: ignore if >48h old
     generated_at = fb.get("generated_at", "")
     if generated_at:
         try:
             gen_dt = datetime.fromisoformat(generated_at)
             if datetime.now(WIB) - gen_dt > timedelta(hours=48):
-                log("   ⚠️ Analytics feedback >48h old — skipping boosts/skips (using defaults)")
-                topic_boosts = {}
-                skip_topics = []
-                best_hours = []
+                log(f"   ⚠️ Analytics feedback >48h old — using defaults")
             else:
                 topic_boosts = fb.get("topic_boosts", {})
                 skip_topics = [s.get("pattern", "") for s in fb.get("skip_topics", [])]
                 best_hours = fb.get("best_hours", [])
-                if topic_boosts or skip_topics:
-                    log(f"   📊 Analytics loaded: {len(topic_boosts)} boosts, {len(skip_topics)} skip patterns")
+                analytics_fresh = True
+                log(f"   📊 Analytics loaded: {len(topic_boosts)} boosts, {len(skip_topics)} skip, best_hours={best_hours}")
         except (ValueError, TypeError):
-            log("   ⚠️ Invalid generated_at in analytics feedback — skipping boosts/skips")
-            topic_boosts = {}
-            skip_topics = []
-            best_hours = []
+            log(f"   ⚠️ Invalid generated_at — using defaults")
     else:
-        # Backward compat: no generated_at field, use as-is
+        # Backward compat: no generated_at, use as-is
         topic_boosts = fb.get("topic_boosts", {})
         skip_topics = [s.get("pattern", "") for s in fb.get("skip_topics", [])]
         best_hours = fb.get("best_hours", [])
+        analytics_fresh = True
         if topic_boosts or skip_topics:
-            log(f"   📊 Analytics loaded: {len(topic_boosts)} boosts, {len(skip_topics)} skip patterns")
+            log(f"   📊 Analytics loaded (no timestamp): {len(topic_boosts)} boosts, {len(skip_topics)} skip")
 except Exception:
     pass
 
