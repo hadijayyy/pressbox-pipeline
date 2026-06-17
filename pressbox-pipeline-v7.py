@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Press Box Pipeline v7 — fast, clean, ~300 lines."""
-import json, os, sys, re, time, subprocess, html, importlib.util
+import json, os, sys, re, time, subprocess, html, importlib.util, struct
 from datetime import datetime, timezone, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -74,6 +74,16 @@ REPLACEMENTS = {
 def log(msg):
     ts = datetime.now(WIB).strftime("%H:%M:%S")
     print(f"[{ts}] {msg}", flush=True, file=sys.stderr)
+
+def log_error(msg):
+    """Append error message to pipeline_errors.log."""
+    ts = datetime.now(WIB).strftime("%Y-%m-%d %H:%M:%S")
+    error_log = f"{HOME}/.hermes/pressbox/pipeline_errors.log"
+    try:
+        with open(error_log, "a") as f:
+            f.write(f"[{ts}] {msg}\n")
+    except Exception:
+        pass  # Don't let error logging fail the pipeline
 
 def clean_words(text):
     t = text.lower()
@@ -187,6 +197,59 @@ def score_topic(t):
     s += t.get("_kw_boost", 0)
     return s
 
+# ── Image quality gate ─────────────────────────────────────────────
+def validate_image_quality(url):
+    """Download first 8KB and parse image dimensions from header bytes.
+    Returns (is_valid, width, height). On any error, returns (False, 0, 0)."""
+    try:
+        result = subprocess.run(
+            ["curl", "-s", "-r", "0-8191", "--max-time", "5", url],
+            capture_output=True, timeout=8
+        )
+        data = result.stdout
+        if len(data) < 12:
+            return (False, 0, 0)
+
+        w = h = 0
+        # PNG: signature starts with b'\x89PNG'
+        if data[:4] == b'\x89PNG':
+            if len(data) >= 24 and data[12:16] == b'IHDR':
+                w = struct.unpack('>I', data[16:20])[0]
+                h = struct.unpack('>I', data[20:24])[0]
+            else:
+                return (False, 0, 0)
+
+        # JPEG: starts with 0xFFD8
+        elif data[:2] == b'\xff\xd8':
+            i = 2
+            while i < len(data) - 1:
+                if data[i] != 0xFF:
+                    break
+                marker = data[i + 1]
+                # SOF0 (0xC0), SOF1 (0xC1), SOF2 (0xC2)
+                if marker in (0xC0, 0xC1, 0xC2):
+                    if i + 10 <= len(data):
+                        h = struct.unpack('>H', data[i+5:i+7])[0]
+                        w = struct.unpack('>H', data[i+7:i+9])[0]
+                    break
+                i += 2
+                if i + 1 < len(data):
+                    seg_len = struct.unpack('>H', data[i:i+2])[0]
+                    i += seg_len
+                else:
+                    break
+        else:
+            return (False, 0, 0)
+
+        if w >= 400 and h > 0:
+            ratio = w / h
+            if 0.5 <= ratio <= 2.5:
+                return (True, w, h)
+
+        return (False, w, h)
+    except:
+        return (False, 0, 0)
+
 # ── Guard ───────────────────────────────────────────────────────────
 if os.path.exists(STAGING):
     try:
@@ -279,11 +342,35 @@ tone_adjustment = "Conversational English. Bold numbers. High-impact words."
 try:
     with open(ANALYTICS_FEEDBACK) as f:
         fb = json.load(f)
-    topic_boosts = fb.get("topic_boosts", {})
-    skip_topics = [s.get("pattern", "") for s in fb.get("skip_topics", [])]
-    best_hours = fb.get("best_hours", [])
-    if topic_boosts or skip_topics:
-        log(f"   📊 Analytics loaded: {len(topic_boosts)} boosts, {len(skip_topics)} skip patterns")
+
+    # Staleness check: skip boosts/skips if >48h old
+    generated_at = fb.get("generated_at", "")
+    if generated_at:
+        try:
+            gen_dt = datetime.fromisoformat(generated_at)
+            if datetime.now(WIB) - gen_dt > timedelta(hours=48):
+                log("   ⚠️ Analytics feedback >48h old — skipping boosts/skips (using defaults)")
+                topic_boosts = {}
+                skip_topics = []
+                best_hours = []
+            else:
+                topic_boosts = fb.get("topic_boosts", {})
+                skip_topics = [s.get("pattern", "") for s in fb.get("skip_topics", [])]
+                best_hours = fb.get("best_hours", [])
+                if topic_boosts or skip_topics:
+                    log(f"   📊 Analytics loaded: {len(topic_boosts)} boosts, {len(skip_topics)} skip patterns")
+        except (ValueError, TypeError):
+            log("   ⚠️ Invalid generated_at in analytics feedback — skipping boosts/skips")
+            topic_boosts = {}
+            skip_topics = []
+            best_hours = []
+    else:
+        # Backward compat: no generated_at field, use as-is
+        topic_boosts = fb.get("topic_boosts", {})
+        skip_topics = [s.get("pattern", "") for s in fb.get("skip_topics", [])]
+        best_hours = fb.get("best_hours", [])
+        if topic_boosts or skip_topics:
+            log(f"   📊 Analytics loaded: {len(topic_boosts)} boosts, {len(skip_topics)} skip patterns")
 except Exception:
     pass
 
@@ -370,6 +457,8 @@ article_text = re.sub(r"\s+", " ", article_text).strip()[:2000]
 
 # Extract og:image — but validate it works (Guardian blocks hotlinking)
 image_url = ""
+image_width = 0
+image_height = 0
 for pattern in [
     r'<meta\s+property="og:image"\s+content="([^"]+)"',
     r'<meta\s+name="og:image"\s+content="([^"]+)"',
@@ -385,8 +474,14 @@ for pattern in [
                 ["curl", "-sIL", "--max-time", "5", candidate],
                 capture_output=True, text=True, timeout=8)
             if "200" in hr.stdout:
-                image_url = candidate
-                break
+                is_valid, w, h = validate_image_quality(candidate)
+                if is_valid:
+                    image_url = candidate
+                    image_width = w
+                    image_height = h
+                    break
+                else:
+                    log(f"Image rejected: {w}x{h} (min 400px, ratio 0.5-2.5)")
         except:
             pass
 
@@ -399,8 +494,14 @@ if not image_url:
                 ["curl", "-sIL", "--max-time", "5", body_img],
                 capture_output=True, text=True, timeout=8)
             if "200" in hr.stdout:
-                image_url = body_img
-                log(f"   ✅ Body image found: {image_url[:80]}")
+                is_valid, w, h = validate_image_quality(body_img)
+                if is_valid:
+                    image_url = body_img
+                    image_width = w
+                    image_height = h
+                    log(f"   ✅ Body image found: {image_url[:80]}")
+                else:
+                    log(f"Image rejected: {w}x{h} (min 400px, ratio 0.5-2.5)")
         except:
             pass
 
@@ -413,7 +514,13 @@ if not image_url:
                 ["curl", "-sIL", "--max-time", "5", candidate],
                 capture_output=True, text=True, timeout=8)
             if "200" in hr.stdout:
-                image_url = candidate
+                is_valid, w, h = validate_image_quality(candidate)
+                if is_valid:
+                    image_url = candidate
+                    image_width = w
+                    image_height = h
+                else:
+                    log(f"Image rejected: {w}x{h} (min 400px, ratio 0.5-2.5)")
         except:
             pass
 
@@ -442,17 +549,17 @@ ARTICLE:
 SOURCE: {url}
 
 SLIDE RULES:
-- Slide 1: HOOK — 1-2 punchy sentences. 150-250 chars. Include HD image URL from article if available.
+- Slide 1: HOOK — 1-2 punchy sentences. 150-300 chars. Include HD image URL from article if available.
 - Slides 2-7: STORY ARC — each continues from previous. 250-450 chars.
 - Slide 8: CTA — {cta_pattern if cta_pattern else 'debate question with "?" + personal word (you/we/fans)'}. 3 sentences + Source URL.
 
-CRITICAL: Slide 1 MUST be 150-250 chars. Slides 2-7 MUST be 250-450 chars each. Do NOT write shorter.
+CRITICAL: Slide 1 MUST be 150-300 chars. Slides 2-7 MUST be 250-450 chars each. Do NOT write shorter.
 FORMATTING: Add a blank line between every 2 sentences in each slide for readability.
 TONE: {tone_adjustment}
 
 JSON FORMAT:
 {{
-  "slide_1": {{"title": "HOOK", "content": "1-2 punchy sentences, 150-250 chars", "image_url": "HD image URL from article if available"}},
+  "slide_1": {{"title": "HOOK", "content": "1-2 punchy sentences, 150-300 chars", "image_url": "HD image URL from article if available"}},
   "slide_2": {{"title": "THE PROBLEM", "content": "What happened, 250-450 chars"}},
   "slide_3": {{"title": "THE CONTEXT", "content": "Why it matters, 250-450 chars"}},
   "slide_4": {{"title": "THE COMPARISON", "content": "Similar past, 250-450 chars"}},
@@ -548,7 +655,7 @@ for attempt in range(1, MAX_RETRIES + 1):
                 chars = len(body)
                 # Slide 1: 150-250, Slides 2-7: 250-450
                 min_c = 150 if i == 1 else MIN_CHARS
-                max_c = 250 if i == 1 else MAX_CHARS
+                max_c = 300 if i == 1 else MAX_CHARS
                 if chars < min_c:
                     char_issues.append(f"slide_{i}: {chars}c")
                 elif chars > max_c:
@@ -602,13 +709,13 @@ if "?" not in slides[7]["title"]:
 for i, s in enumerate(slides):
     c = s["content"]
     chars = len(c)
-    # Slide 1 (hook): 150-250 chars
+    # Slide 1 (hook): 150-300 chars
     if i == 0:
         if chars < 150:
             log(f"⚠️ Slide 1 too short ({chars}c, min 150)")
             sys.exit(1)
-        elif chars > 250:
-            log(f"⚠️ Slide 1 too long ({chars}c, max 250)")
+        elif chars > 300:
+            log(f"⚠️ Slide 1 too long ({chars}c, max 300)")
             sys.exit(1)
     # Slides 2-7: enforce 250-450 chars
     elif 1 <= i <= 6:
@@ -633,6 +740,8 @@ joined = "\n---\n".join(s["content"] for s in slides)
 
 # ── 6. STAGE (atomic write) ──────────────────────────────────────
 staging_obj = {
+    "schema_version": 1,
+    "status": "ready",
     "topic": best,
     "content": joined,
     "written_at": datetime.now(WIB).isoformat(),
@@ -641,14 +750,20 @@ staging_obj = {
     "mode": "thread",
     "slides": 8,
     "image_url": image_url,
+    "image_width": image_width,
+    "image_height": image_height,
 }
 
-tmp = STAGING + ".tmp"
-with open(tmp, "w") as f:
-    json.dump(staging_obj, f, indent=2)
-os.replace(tmp, STAGING)
-
-log(f"✅ {best['title']}  (8 slides) [{'WC' if staging_obj['is_wc'] else 'Transfer' if staging_obj['is_transfer'] else 'General'}]")
+try:
+    tmp = STAGING + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(staging_obj, f, indent=2)
+    os.replace(tmp, STAGING)
+    log(f"✅ {best['title']}  (8 slides) [{'WC' if staging_obj['is_wc'] else 'Transfer' if staging_obj['is_transfer'] else 'General'}]")
+except Exception as e:
+    log_error(f"Staging write failed: {e}")
+    log(f"❌ Staging write failed: {e}")
+    sys.exit(1)
 
 total = time.time() - START
 log(f"⏱️ Scrape:{t_scrape:.1f}s  LLM:{t_llm:.1f}s  Total:{total:.1f}s")
