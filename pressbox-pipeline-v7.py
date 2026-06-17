@@ -278,7 +278,7 @@ for pattern in [
         # Quick HEAD check — Guardian blocks most og:image URLs
         try:
             hr = subprocess.run(
-                ["curl", "-sI", "--max-time", "5", candidate],
+                ["curl", "-sIL", "--max-time", "5", candidate],
                 capture_output=True, text=True, timeout=8)
             if "200" in hr.stdout:
                 image_url = candidate
@@ -286,9 +286,22 @@ for pattern in [
         except:
             pass
 
-# Fallback to image_url from research module (RSS — works reliably)
+# Fallback to image_url from research module (RSS — but validate it works)
 if not image_url:
-    image_url = best.get("image_url", "") or ""
+    candidate = best.get("image_url", "") or ""
+    if candidate:
+        # Skip Guardian images — they block hotlinking (401)
+        if "guim.co.uk" in candidate or "guardian" in candidate.lower():
+            log(f"   ⚠️ Skipping Guardian image (blocks hotlinking)")
+        else:
+            try:
+                hr = subprocess.run(
+                    ["curl", "-sIL", "--max-time", "5", candidate],
+                    capture_output=True, text=True, timeout=8)
+                if "200" in hr.stdout:
+                    image_url = candidate
+            except:
+                pass
 
 log(f"   Article: {len(article_text)} chars, image: {'yes' if image_url else 'no'}")
 
