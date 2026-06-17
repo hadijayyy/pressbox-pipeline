@@ -1,20 +1,17 @@
 #!/usr/bin/env python3
 """Press Box Pipeline v7 — fast, clean, ~300 lines."""
-import json, os, sys, re, time, subprocess, html, importlib.util, struct
+import json, os, sys, re, time, subprocess, importlib.util, struct
 from datetime import datetime, timezone, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+from pressbox_common import WIB, HOME, SCRIPTS, STAGING, POSTED, load_env, log
+from pressbox_common import clean_words, is_similar, classify_topic_type
+from pressbox_common import STOPWORDS, REPLACEMENTS
 
 import requests
 
 # ── Flags ──────────────────────────────────────────────────────────
 DRY_RUN = "--dry-run" in sys.argv
-
-# ── Paths ───────────────────────────────────────────────────────────
-HOME = os.path.expanduser("~")
-SCRIPTS = f"{HOME}/.hermes/scripts"
-STAGING = f"{HOME}/.hermes/pressbox/staging.json"
-POSTED = f"{HOME}/.hermes/pressbox/posted_topics.json"
-WIB = timezone(timedelta(hours=7))
 
 os.makedirs(f"{HOME}/.hermes/pressbox", exist_ok=True)
 
@@ -33,105 +30,10 @@ except Exception as e:
     sys.exit(1)
 
 # ── Load env ────────────────────────────────────────────────────────
-def load_env():
-    env = {}
-    env_path = f"{HOME}/.hermes/.env"
-    if os.path.exists(env_path):
-        with open(env_path) as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith("#") and "=" in line:
-                    k, v = line.split("=", 1)
-                    env[k.strip()] = v.strip().strip("\"'")
-    return env
-
 env_config = load_env()
 API_KEY = env_config.get("OPENCODE_GO_API_KEY", "")
 API_URL = "https://opencode.ai/zen/go/v1/chat/completions"
 MODEL = "deepseek-v4-flash"
-
-# ── Helpers ─────────────────────────────────────────────────────────
-STOPWORDS = frozenset([
-    "the", "a", "an", "in", "on", "at", "to", "for", "of", "with", "by",
-    "as", "is", "was", "are", "were", "be", "been", "has", "have", "had",
-    "it", "its", "this", "that", "these", "those", "and", "or", "but",
-    "not", "no", "if", "from", "up", "down", "out", "off", "over", "under",
-    "about", "into", "than", "then", "also", "just", "will", "can", "all",
-    "who", "what", "when", "where", "why", "how", "their", "his", "her",
-    "our", "your", "my", "we", "he", "she", "they", "do", "does", "did",
-])
-
-REPLACEMENTS = {
-    "manchester city": "man city",
-    "manchester united": "man utd",
-    "real madrid": "madrid",
-    "barcelona": "barca",
-    "tottenham": "spurs",
-    "newcastle": "toon",
-    "nottingham": "nottm",
-    "wolverhampton": "wolves",
-    "leicester": "foxes",
-    "southampton": "saints",
-    "west ham": "westham",
-}
-
-def log(msg):
-    ts = datetime.now(WIB).strftime("%H:%M:%S")
-    print(f"[{ts}] {msg}", flush=True, file=sys.stderr)
-
-def log_error(msg):
-    """Append error message to pipeline_errors.log."""
-    ts = datetime.now(WIB).strftime("%Y-%m-%d %H:%M:%S")
-    error_log = f"{HOME}/.hermes/pressbox/pipeline_errors.log"
-    try:
-        with open(error_log, "a") as f:
-            f.write(f"[{ts}] {msg}\n")
-    except Exception:
-        pass  # Don't let error logging fail the pipeline
-
-def clean_words(text):
-    t = text.lower()
-    for old, new in REPLACEMENTS.items():
-        t = t.replace(old, new)
-    t = re.sub(r"[^\w\s]", " ", t)
-    words = t.split()
-    return frozenset(w for w in words if w not in STOPWORDS and len(w) > 1)
-
-def is_similar(new_title, posted_ws, threshold=0.35):
-    nw = clean_words(new_title)
-    if not nw:
-        return False
-    for pw in posted_ws:
-        if not pw:
-            continue
-        intersection = len(nw & pw)
-        union = len(nw | pw)
-        if union == 0:
-            continue
-        if intersection / union >= threshold:
-            return True
-    return False
-
-def classify_topic_type(text):
-    """Classify topic into category (mirrors analytics-llm.py)."""
-    if not text:
-        return "other"
-    lower = text.lower()
-    if any(w in lower for w in ["transfer", "signs", "signing", "move to", "bid", "contract"]):
-        return "transfer_rumor"
-    if any(w in lower for w in ["world cup", "wc", "2026", "tournament"]):
-        if any(w in lower for w in ["guide", "preview", "squad", "team guide"]):
-            return "WC_team_guide"
-        return "tournament_news"
-    if any(w in lower for w in ["controversy", "drama", "storms", "backlash", "fans react"]):
-        return "controversy"
-    if any(w in lower for w in ["analysis", "tactical", "formation", "system"]):
-        return "tactical_analysis"
-    if any(w in lower for w in ["profile", "career", "who is", "story of"]) or len(text.split()) < 30:
-        return "player_profile"
-    if any(w in lower for w in ["injury", "out for", "sidelined", "fitness"]):
-        return "injury_update"
-    return "other"
 
 def extract_body_image(raw_html):
     """Extract best <img> from article body (fallback when og:image fails).
@@ -302,13 +204,16 @@ def validate_image_quality(url):
         return (False, 0, 0)
 
 # ── Guard ───────────────────────────────────────────────────────────
-STAGING_TMP = STAGING + ".tmp"
 ERROR_LOG = f"{HOME}/.hermes/pressbox/pipeline_errors.log"
 
 def log_error(msg):
+    """Append error message to pipeline_errors.log."""
     ts = datetime.now(WIB).strftime("%Y-%m-%d %H:%M:%S")
-    with open(ERROR_LOG, "a") as f:
-        f.write(f"[{ts}] {msg}\n")
+    try:
+        with open(ERROR_LOG, "a") as f:
+            f.write(f"[{ts}] {msg}\n")
+    except Exception:
+        pass  # Don't let error logging fail the pipeline
 
 if os.path.exists(STAGING) and not DRY_RUN:
     try:
@@ -327,7 +232,11 @@ if os.path.exists(STAGING) and not DRY_RUN:
         log("⚠️ Staging corrupt — overwriting")
 
 START = time.time()
-t_scrape = t_llm = 0
+t_scrape = t_llm = t0 = 0
+prompt_tok = completion_tok = total_tok = 0
+content = ""
+reasoning = ""
+article_cache = {}
 
 # ── 1. SCRAPE ─────────────────────────────────────────────────────
 log("Scraping Mirror + Sky Sports + Goal.com...")
@@ -945,7 +854,7 @@ else:
         sys.exit(1)
 
 total = time.time() - START
-llm_time = time.time() - t0 if 't0' in dir() else 0
+llm_time = time.time() - t0
 
 # Metrics logging
 metrics = {
@@ -953,16 +862,16 @@ metrics = {
     "topic": best.get("title", "")[:60],
     "url": url,
     "scrape_s": round(t_scrape, 1),
-    "llm_s": round(time.time() - t0, 1) if 't0' in dir() else 0,
+    "llm_s": round(time.time() - t0, 1),
     "total_s": round(total, 1),
     "slides": len(slides),
-    "prompt_tok": prompt_tok if 'prompt_tok' in dir() else 0,
-    "completion_tok": completion_tok if 'completion_tok' in dir() else 0,
-    "total_tok": total_tok if 'total_tok' in dir() else 0,
-    "reasoning_c": len(reasoning) if 'reasoning' in dir() else 0,
-    "content_c": len(content) if 'content' in dir() else 0,
+    "prompt_tok": prompt_tok,
+    "completion_tok": completion_tok,
+    "total_tok": total_tok,
+    "reasoning_c": len(reasoning),
+    "content_c": len(content),
     "image": bool(image_url),
-    "cached": url in article_cache if 'article_cache' in dir() else False,
+    "cached": url in article_cache,
 }
 METRICS_LOG = f"{HOME}/.hermes/pressbox/metrics.jsonl"
 try:

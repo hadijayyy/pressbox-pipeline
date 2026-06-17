@@ -5,64 +5,37 @@ Read staging → post to Threads → verify → update tracking.
 """
 import json, os, subprocess, sys, time, requests
 import shlex
-from datetime import datetime, timezone, timedelta
+from datetime import datetime
+from pressbox_common import log, send_alert, load_env, WIB, STAGING, POSTED, HOME
 
-HOME = os.path.expanduser("~")
-STAGING_FILE = f"{HOME}/.hermes/pressbox/staging.json"
-STAGING_V3 = f"{HOME}/.hermes/pressbox/staging-v3.json"
 POST_SCRIPT = f"{HOME}/.hermes/scripts/pressbox-direct-post.py"
 VERIFY_SCRIPT = f"{HOME}/.hermes/scripts/verify-last-slide.py"
-POSTED_JSON = f"{HOME}/.hermes/pressbox/posted_topics.json"
 LATEST_MD = f"{HOME}/.hermes/content-pipeline/drafts/football/latest.md"
-os.makedirs(f"{HOME}/.hermes/pressbox", exist_ok=True)
-WIB = timezone(timedelta(hours=7))
-
-ALERT_CHAT = "1022032312"
 FEEDBACK_JSON = f"{HOME}/.hermes/pressbox/analytics_feedback.json"
-BOT_TOKEN = None
-try:
-    for line in open(f"{HOME}/.hermes/.env"):
-        if line.startswith("TELEGRAM_BOT_TOKEN="):
-            BOT_TOKEN = line.strip().split("=", 1)[1].strip('"').strip("'")
-            break
-except: pass
-
-def send_alert(msg):
-    if not BOT_TOKEN:
-        return
-    try:
-        text = f"⚠️ PRESS BOX ERROR — {msg}"
-        requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-            json={"chat_id": ALERT_CHAT, "text": text},
-            timeout=10)
-    except: pass
+os.makedirs(f"{HOME}/.hermes/pressbox", exist_ok=True)
 
 def _cleanup(remove_pending=True, current_topic=None):
     """Clear staging + optionally remove [PENDING] tracking safely"""
     if remove_pending and current_topic:
         try:
-            with open(POSTED_JSON) as f:
+            with open(POSTED) as f:
                 data = json.load(f)
             data["topics"] = [
                 t for t in data.get("topics", []) 
                 if not (t.get("post_id") == "[PENDING]" and t.get("title") == current_topic.get("title"))
             ]
-            with open(POSTED_JSON, 'w') as f:
+            with open(POSTED, 'w') as f:
                 json.dump(data, f, indent=2)
         except FileNotFoundError:
             pass # Safe to ignore if tracking file doesn't exist yet
             
     # Clear both staging files
-    for sf in [STAGING_FILE, STAGING_V3]:
+    for sf in [STAGING["v2"], STAGING["v3"]]:
         try:
             with open(sf, 'w') as f:
                 json.dump({"topic": None, "written_at": None}, f)
         except Exception:
             pass
-
-def log(msg):
-    ts = datetime.now(WIB).strftime("%H:%M WIB")
-    print(f"[{ts}] [POST] {msg}", flush=True, file=sys.stderr)
 
 def shell(cmd, timeout=60):
     try:
@@ -92,7 +65,7 @@ def is_bad_hour():
 def is_posting_too_frequent():
     """Check if we posted too recently (Quality > Quantity)."""
     try:
-        with open(POSTED_JSON) as f:
+        with open(POSTED) as f:
             data = json.load(f)
         topics = data.get("topics", [])
         if not topics:
@@ -115,33 +88,33 @@ def is_posting_too_frequent():
         return False
 
 # ===== MAIN =====
-log("=== PRESS BOX POST (Phase 2) ===")
+log('POST', "=== PRESS BOX POST (Phase 2) ===")
 
 # 0. TIME CHECK — skip if current hour is analytics worst hour
 if is_bad_hour():
-    log("⏰ Bad hour detected — skipping post. [SILENT]")
+    log('POST', "⏰ Bad hour detected — skipping post. [SILENT]")
     print("⏸️ Post skip — jam ini termasuk worst hour. Next jam.")
     sys.exit(0)
 
 # 0b. FREQUENCY CHECK — Quality > Quantity
 if is_posting_too_frequent():
-    log("⏰ Posting too frequent — skipping for quality. [SILENT]")
+    log('POST', "⏰ Posting too frequent — skipping for quality. [SILENT]")
     print("⏸️ Post skip — baru posting < 30 menit lalu. Quality > Quantity.")
     sys.exit(0)
 
 # 1. Read staging (check v3 first, then v2)
-staging_file = STAGING_FILE
-if os.path.exists(STAGING_V3):
-    with open(STAGING_V3) as f:
+staging_file = STAGING["v2"]
+if os.path.exists(STAGING["v3"]):
+    with open(STAGING["v3"]) as f:
         staging = json.load(f)
     if staging.get("topic") and staging.get("content"):
-        staging_file = STAGING_V3
+        staging_file = STAGING["v3"]
     else:
-        staging_file = STAGING_FILE
-elif os.path.exists(STAGING_FILE):
-    staging_file = STAGING_FILE
+        staging_file = STAGING["v2"]
+elif os.path.exists(STAGING["v2"]):
+    staging_file = STAGING["v2"]
 else:
-    log("No staging file — nothing to post. [SILENT]")
+    log('POST', "No staging file — nothing to post. [SILENT]")
     print(f"⏸️ Post skip — belum ada konten di staging.")
     sys.exit(0)
 
@@ -153,7 +126,7 @@ content = staging.get("content")
 written_at = staging.get("written_at")
 
 if not topic or not content:
-    log("Staging empty — nothing to post. [SILENT]")
+    log('POST', "Staging empty — nothing to post. [SILENT]")
     print(f"⏸️ Post skip — staging kosong.")
     sys.exit(0)
 
@@ -161,18 +134,18 @@ if not topic or not content:
 topic_url = topic.get("url", "")
 if topic_url:
     try:
-        with open(POSTED_JSON) as f:
+        with open(POSTED) as f:
             posted_data = json.load(f)
         for t in posted_data.get("topics", []):
             if t.get("url") == topic_url:
-                log(f"🔁 Duplicate detected — already posted: {topic['title'][:50]}")
+                log('POST', f"🔁 Duplicate detected — already posted: {topic['title'][:50]}")
                 print(f"⏭️ Skip — sudah pernah dipost: {topic['title'][:60]}")
                 _cleanup(remove_pending=True, current_topic=topic)
                 sys.exit(0)
     except FileNotFoundError:
         pass
 
-log(f"Staging loaded: {topic['title']} (written at {written_at})")
+log('POST', f"Staging loaded: {topic['title']} (written at {written_at})")
 
 # 2. Write content to latest.md
 os.makedirs(os.path.dirname(LATEST_MD), exist_ok=True)
@@ -180,7 +153,7 @@ with open(LATEST_MD, 'w') as f:
     f.write(content)
 
 # 3. Post to Threads (single attempt — no retry to fit 120s cron)
-log("Posting to Threads...")
+log('POST', "Posting to Threads...")
 image_url = staging.get("image_url") or ""
 image_flag = f" --image {shlex.quote(image_url)}" if image_url else ""
 post_cmd = f"python3 {POST_SCRIPT} --file {LATEST_MD}{image_flag} 2>&1"
@@ -202,7 +175,7 @@ for line in post_out.split('\n'):
 
 # Skip retry — single attempt to fit 120s cron limit
 if not root_id:
-    log(f"❌ Failed — no root post ID (output: {post_out[:300]})")
+    log('POST', f"❌ Failed — no root post ID (output: {post_out[:300]})")
     title = topic.get("title", "?")
     print(f"❌ Post error: {title[:60]}")
     send_alert(f"POST failed (no root ID)\nTopic: {title[:60]}")
@@ -212,7 +185,7 @@ if not root_id:
 # 5. SAFETY: if partial post (< 4 slides), auto-delete (unless single paragraph mode)
 mode = staging.get("mode", "thread")
 if mode != "single_paragraph" and len(post_ids) < 4:
-    log(f"⚠️ Partial post ({len(post_ids)} slides), deleting...")
+    log('POST', f"⚠️ Partial post ({len(post_ids)} slides), deleting...")
     shell(f"python3 {POST_SCRIPT} --delete {root_id}", timeout=15)
     print(f"❌ Post delete — partial post ({len(post_ids)} slides), dihapus.")
     _cleanup(remove_pending=True, current_topic=topic)
@@ -222,7 +195,7 @@ if mode != "single_paragraph" and len(post_ids) < 4:
 verify_out, _ = shell(f"python3 {VERIFY_SCRIPT} {root_id}", timeout=15)
 
 # 7. Update tracking
-with open(POSTED_JSON) as f:
+with open(POSTED) as f:
     data = json.load(f)
 # Try to update [PENDING] entry first
 found = False
@@ -244,8 +217,8 @@ if not found:
         "url": "",
         "posted_at": datetime.now(WIB).isoformat()
     })
-    log(f"📝 New tracking entry: {topic.get('title','?')[:50]}")
-with open(POSTED_JSON, 'w') as f:
+    log('POST', f"📝 New tracking entry: {topic.get('title','?')[:50]}")
+with open(POSTED, 'w') as f:
     json.dump(data, f, indent=2)
 
 # 8. Cleanup
