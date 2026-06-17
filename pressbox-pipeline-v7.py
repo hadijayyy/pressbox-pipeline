@@ -529,10 +529,11 @@ You are a strict, high-speed Data Extraction Agent. Extract slides from football
 Your explicit instruction is to minimize latency and bypass any extended internal monologue or reasoning.
 
 CRITICAL DIRECTIVES:
-1. DO NOT use extensive reasoning or step-by-step thinking.
-2. Keep your internal thinking process/monologue under 20 words, or skip it entirely.
-3. Move directly to the final output.
-4. Output ONLY a valid, raw JSON object. No markdown, no conversational filler.
+1. Think as briefly as possible. Output immediately.
+2. DO NOT use extensive reasoning or step-by-step thinking.
+3. Keep your internal thinking process/monologue under 20 words, or skip it entirely.
+4. Move directly to the final output.
+5. Output ONLY a valid, raw JSON object. No markdown, no conversational filler.
 
 [SLIDE SCHEMA]
 slide_1: HOOK (150-300 chars, 1-2 punchy sentences, image_url if avail)
@@ -571,14 +572,14 @@ headers = {"Content-Type": "application/json"}
 if API_KEY:
     headers["Authorization"] = f"Bearer {API_KEY}"
 
-# ── LLM call with retry for word count ──────────────────────────
+# ── LLM call with streaming + retry ────────────────────────────
 MAX_RETRIES = 3
 MIN_CHARS = 150
 MAX_CHARS = 450
 raw_json = ""
 
 for attempt in range(1, MAX_RETRIES + 1):
-    log(f"   LLM attempt {attempt}/{MAX_RETRIES}...")
+    log(f"   LLM attempt {attempt}/{MAX_RETRIES} (streaming)...")
     try:
         r = requests.post(
             API_URL,
@@ -592,17 +593,43 @@ for attempt in range(1, MAX_RETRIES + 1):
                 "max_tokens": 6000,
                 "temperature": 0.5,
                 "reasoning_effort": "low",
+                "stream": True,  # STREAMING: process tokens as they arrive
             },
             timeout=180,
+            stream=True,  # Enable streaming response
         )
         if r.status_code != 200:
             log(f"❌ API error: HTTP {r.status_code} {r.text[:200]}")
             sys.exit(1)
-        data = r.json()
-        msg = data.get("choices", [{}])[0].get("message", {})
-        content = (msg.get("content") or "").strip()
-        reasoning = (msg.get("reasoning_content") or msg.get("reasoning") or "").strip()
-        usage = data.get("usage", {})
+        
+        # Process SSE stream
+        content_parts = []
+        reasoning_parts = []
+        chunk = {}  # Initialize for usage extraction
+        for line in r.iter_lines():
+            if not line:
+                continue
+            line = line.decode("utf-8")
+            if not line.startswith("data: "):
+                continue
+            data_str = line[6:]
+            if data_str.strip() == "[DONE]":
+                break
+            try:
+                chunk = json.loads(data_str)
+                delta = chunk.get("choices", [{}])[0].get("delta", {})
+                if "content" in delta and delta["content"]:
+                    content_parts.append(delta["content"])
+                if "reasoning_content" in delta and delta["reasoning_content"]:
+                    reasoning_parts.append(delta["reasoning_content"])
+                if "reasoning" in delta and delta["reasoning"]:
+                    reasoning_parts.append(delta["reasoning"])
+            except json.JSONDecodeError:
+                continue
+        
+        content = "".join(content_parts).strip()
+        reasoning = "".join(reasoning_parts).strip()
+        usage = chunk.get("usage", {}) if chunk else {}
         prompt_tok = usage.get("prompt_tokens", 0)
         completion_tok = usage.get("completion_tokens", 0)
         total_tok = usage.get("total_tokens", 0)
