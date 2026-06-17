@@ -215,9 +215,9 @@ def log_error(msg):
     except Exception:
         pass  # Don't let error logging fail the pipeline
 
-if os.path.exists(STAGING) and not DRY_RUN:
+if os.path.exists(STAGING["v2"]) and not DRY_RUN:
     try:
-        with open(STAGING) as f:
+        with open(STAGING["v2"]) as f:
             existing = json.load(f)
         # Validate schema
         if not existing.get("topic") or not existing.get("content"):
@@ -850,10 +850,10 @@ if DRY_RUN:
     log(f"🔍 DRY RUN — {best['title']} ({len(slides)} slides, no staging)")
 else:
     try:
-        tmp = STAGING + ".tmp"
+        tmp = STAGING["v2"] + ".tmp"
         with open(tmp, "w") as f:
             json.dump(staging_obj, f, indent=2)
-        os.replace(tmp, STAGING)
+        os.replace(tmp, STAGING["v2"])
         log(f"✅ {best['title']}  ({len(slides)} slides) [{'WC' if staging_obj['is_wc'] else 'Transfer' if staging_obj['is_transfer'] else 'General'}]")
     except Exception as e:
         log_error(f"Staging write failed: {e}")

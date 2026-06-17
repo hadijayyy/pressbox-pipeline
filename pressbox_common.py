@@ -18,7 +18,10 @@ from datetime import datetime, timezone, timedelta
 # ── Paths ───────────────────────────────────────────────────────────
 HOME = os.path.expanduser("~")
 SCRIPTS = f"{HOME}/.hermes/scripts"
-STAGING = f"{HOME}/.hermes/pressbox/staging.json"
+STAGING = {
+    "v2": f"{HOME}/.hermes/pressbox/staging.json",
+    "v3": f"{HOME}/.hermes/pressbox/staging-v3.json"
+}
 POSTED = f"{HOME}/.hermes/pressbox/posted_topics.json"
 WIB = timezone(timedelta(hours=7))
 
@@ -39,10 +42,18 @@ def load_env():
 
 
 # ── Logging ─────────────────────────────────────────────────────────
-def log(msg):
-    """Print a timestamped message to stderr."""
+def log(msg, component=None):
+    """Print a timestamped message to stderr.
+    
+    Args:
+        msg: The message to log
+        component: Optional component tag (e.g., 'POST', 'CHECK', 'PIPELINE')
+    """
     ts = datetime.now(WIB).strftime("%H:%M:%S")
-    print(f"[{ts}] {msg}", flush=True, file=sys.stderr)
+    if component:
+        print(f"[{ts}] [{component}] {msg}", flush=True, file=sys.stderr)
+    else:
+        print(f"[{ts}] {msg}", flush=True, file=sys.stderr)
 
 
 def send_alert(subject, body):
