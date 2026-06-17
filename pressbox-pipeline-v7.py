@@ -524,47 +524,31 @@ if not article_text or len(article_text) < 100:
 t0 = time.time()
 
 # ── PROMPT: Data Extraction Agent (bypass reasoning) ──────────────
-system_prompt = """[ROLE & CONSTRAINTS]
-You are a strict, high-speed Data Extraction Agent. Extract slides from football articles into JSON.
-Your explicit instruction is to minimize latency and bypass any extended internal monologue or reasoning.
+system_prompt = """[ROLE] High-speed Data Extraction Agent. Extract slides from football articles into JSON.
+Minimize latency. Think briefly, output immediately.
 
-CRITICAL DIRECTIVES:
-1. Think as briefly as possible. Output immediately.
-2. DO NOT use extensive reasoning or step-by-step thinking.
-3. Keep your internal thinking process/monologue under 20 words, or skip it entirely.
-4. Move directly to the final output.
-5. Output ONLY a valid, raw JSON object. No markdown, no conversational filler.
-
-[SLIDE SCHEMA]
-slide_1: HOOK (150-300 chars, 1-2 punchy sentences, image_url if avail)
+[SLIDES]
+slide_1: HOOK (150-300 chars, image_url)
 slide_2: SPARK (150-450 chars, what happened)
 slide_3: WHY (150-450 chars, why it matters)
 slide_4: TENSION (150-450 chars, conflict/stakes)
 slide_5: HUMAN (150-450 chars, quotes/emotion)
 slide_6: RIPPLE (150-450 chars, wider impact)
 slide_7: UNRESOLVED (150-450 chars, what's next)
-slide_8: HOT TAKE (150-450 chars, pick a side + source URL)
+slide_8: HOT TAKE (150-450 chars, debate question + source URL)
 
-[FORMATTING]
-- Blank line every 2 sentences per slide
-- FORBIDDEN: em-dash (—), en-dash (–), hashtags (#) in slides 1-7, max 1 emoji in 8
-- Use period (.) or comma (,) instead of dashes
-- Conversational English. Short sentences. Facts ONLY.
-- BANNED: "In a stunning turn" / "It's safe to say" / "Time will tell" / "The beautiful game" / "Game changer"
+[RULES]
+- Blank line every 2 sentences
+- NO: em-dash(—), en-dash(–), hashtag(#), AI phrases ("In a stunning turn", "It's safe to say", "Time will tell")
+- Facts only. Short sentences. Conversational English.
+- Slide 8: pick a side + source URL
 
-[OUTPUT — JSON ONLY]
+[OUTPUT]
 {"slide_1":{"title":"HOOK","content":"...","image_url":"..."},"slide_2":{"title":"SPARK","content":"..."},"slide_3":{"title":"WHY","content":"..."},"slide_4":{"title":"TENSION","content":"..."},"slide_5":{"title":"HUMAN","content":"..."},"slide_6":{"title":"RIPPLE","content":"..."},"slide_7":{"title":"UNRESOLVED","content":"..."},"slide_8":{"title":"HOT TAKE","content":"... + blank line + URL"}}
 
-[EXAMPLE]
-Input: Messi hat-trick article...
-Output: {"slide_1":{"title":"HOOK","content":"Third goal. 25-yard free-kick. Top corner.\\n\\nMessi stood still. Arms raised. Stadium erupted.\\n\\nRecord tied.","image_url":""},...}
+Start with {. JSON only. No explanation."""
 
-[INPUT DATA TO PROCESS]
-Extract 8 slides from the article below. Output ONLY the JSON object."""
-
-user_prompt = f"""ARTICLE: {article_text[:1500]}
-SOURCE: {url}
-TONE: {tone_adjustment}"""
+user_prompt = f"ARTICLE: {article_text[:1500]}\nSOURCE: {url}"
 
 log(f"   Calling LLM ({MODEL})...")
 
