@@ -197,6 +197,27 @@ def score_topic(t):
     s += t.get("_kw_boost", 0)
     return s
 
+# ── Image accessibility check ───────────────────────────────────────
+def check_image_accessible(url):
+    """Check if image URL returns HTTP 200 via HEAD request.
+    Returns (accessible, status_code). On error, returns (False, 0)."""
+    try:
+        hr = subprocess.run(
+            ["curl", "-sIL", "--max-time", "5", url],
+            capture_output=True, text=True, timeout=8)
+        # Parse LAST status code from response headers
+        last_status = 0
+        for line in hr.stdout.split("\n"):
+            line = line.strip()
+            if line.startswith("HTTP/") and " " in line:
+                try:
+                    last_status = int(line.split(" ", 2)[1])
+                except (ValueError, IndexError):
+                    pass
+        return (last_status == 200, last_status)
+    except Exception:
+        return (False, 0)
+
 # ── Image quality gate ─────────────────────────────────────────────
 def validate_image_quality(url):
     """Download first 8KB and parse image dimensions from header bytes.
@@ -468,6 +489,13 @@ article_text = re.sub(r"\s+", " ", article_text).strip()[:2000]
 image_url = ""
 image_width = 0
 image_height = 0
+
+def is_threads_compatible(url):
+    """Check if image URL is from a CDN that Threads API can access.
+    Guardian CDN (guim.co.uk) blocks Threads API — skip those."""
+    blocked = ["guim.co.uk", "guardian.co.uk"]
+    return not any(b in url.lower() for b in blocked)
+
 for pattern in [
     r'<meta\s+property="og:image"\s+content="([^"]+)"',
     r'<meta\s+name="og:image"\s+content="([^"]+)"',
@@ -477,32 +505,33 @@ for pattern in [
     m = re.search(pattern, raw_html, re.IGNORECASE)
     if m:
         candidate = m.group(1)
-        # Quick HEAD check — Guardian blocks most og:image URLs
+        if not is_threads_compatible(candidate):
+            log(f"   ⚠️ OG image from blocked CDN (guim.co.uk), skipping")
+            continue
         try:
-            hr = subprocess.run(
-                ["curl", "-sIL", "--max-time", "5", candidate],
-                capture_output=True, text=True, timeout=8)
-            if "200" in hr.stdout:
+            accessible, status = check_image_accessible(candidate)
+            if accessible:
                 is_valid, w, h = validate_image_quality(candidate)
                 if is_valid:
                     image_url = candidate
                     image_width = w
                     image_height = h
+                    log(f"   ✅ OG image found: {w}x{h} ({candidate[:60]}...)")
                     break
                 else:
-                    log(f"Image rejected: {w}x{h} (min 400px, ratio 0.5-2.5)")
+                    log(f"   ⚠️ OG image rejected: {w}x{h} (min 400px, ratio 0.5-2.5)")
+            else:
+                log(f"   ⚠️ OG image HTTP {status}: {candidate[:60]}...")
         except:
             pass
 
 # Fallback 1: Extract first <img> from article body
 if not image_url:
     body_img = extract_body_image(raw_html)
-    if body_img:
+    if body_img and is_threads_compatible(body_img):
         try:
-            hr = subprocess.run(
-                ["curl", "-sIL", "--max-time", "5", body_img],
-                capture_output=True, text=True, timeout=8)
-            if "200" in hr.stdout:
+            accessible, status = check_image_accessible(body_img)
+            if accessible:
                 is_valid, w, h = validate_image_quality(body_img)
                 if is_valid:
                     image_url = body_img
@@ -510,26 +539,29 @@ if not image_url:
                     image_height = h
                     log(f"   ✅ Body image found: {image_url[:80]}")
                 else:
-                    log(f"Image rejected: {w}x{h} (min 400px, ratio 0.5-2.5)")
+                    log(f"   ⚠️ Body image rejected: {w}x{h} (min 400px, ratio 0.5-2.5)")
+            else:
+                log(f"   ⚠️ Body image HTTP {status}")
         except:
             pass
 
 # Fallback 2: image_url from research module (RSS)
 if not image_url:
     candidate = best.get("image_url", "") or ""
-    if candidate:
+    if candidate and is_threads_compatible(candidate):
         try:
-            hr = subprocess.run(
-                ["curl", "-sIL", "--max-time", "5", candidate],
-                capture_output=True, text=True, timeout=8)
-            if "200" in hr.stdout:
+            accessible, status = check_image_accessible(candidate)
+            if accessible:
                 is_valid, w, h = validate_image_quality(candidate)
                 if is_valid:
                     image_url = candidate
                     image_width = w
                     image_height = h
+                    log(f"   ✅ RSS image found: {w}x{h}")
                 else:
-                    log(f"Image rejected: {w}x{h} (min 400px, ratio 0.5-2.5)")
+                    log(f"   ⚠️ RSS image rejected: {w}x{h} (min 400px, ratio 0.5-2.5)")
+            else:
+                log(f"   ⚠️ RSS image HTTP {status}")
         except:
             pass
 
