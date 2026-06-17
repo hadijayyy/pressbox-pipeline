@@ -327,16 +327,15 @@ START = time.time()
 t_scrape = t_llm = 0
 
 # ── 1. SCRAPE ─────────────────────────────────────────────────────
-log("Scraping Guardian + Mirror + Sky Sports + Goal.com...")
+log("Scraping Mirror + Sky Sports + Goal.com...")
 t0 = time.time()
-with ThreadPoolExecutor(max_workers=4) as ex:
-    fut_guardian = ex.submit(scrape_rss, "https://www.theguardian.com/football/rss", "guardian", 14)
+with ThreadPoolExecutor(max_workers=3) as ex:
     fut_mirror = ex.submit(scrape_mirror)
     fut_sky = ex.submit(scrape_rss, "https://www.skysports.com/rss/11095", "skysports", 12)
     fut_goal = ex.submit(scrape_goal)
 
     all_topics = []
-    for fut, name in [(fut_guardian, "guardian"), (fut_mirror, "mirror"), (fut_sky, "skysports"), (fut_goal, "goal")]:
+    for fut, name in [(fut_mirror, "mirror"), (fut_sky, "skysports"), (fut_goal, "goal")]:
         try:
             result = fut.result(timeout=15)
             for t in result:
@@ -389,7 +388,7 @@ if os.path.exists(CACHE_FILE):
     except Exception:
         pass
 
-ALLOWED_SOURCES = {"guardian", "mirror", "skysports", "goal"}
+ALLOWED_SOURCES = {"mirror", "skysports", "goal"}
 
 # ── Load analytics feedback ──────────────────────────────────────
 ANALYTICS_FEEDBACK = f"{HOME}/.hermes/pressbox/analytics_feedback.json"
