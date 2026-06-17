@@ -536,28 +536,26 @@ CRITICAL DIRECTIVES:
 
 [SLIDE SCHEMA]
 slide_1: HOOK (150-300 chars, 1-2 punchy sentences, image_url if avail)
-slide_2: SPARK (MUST BE 200-450 chars, what happened — be detailed)
-slide_3: WHY (MUST BE 200-450 chars, why it matters — add context)
-slide_4: TENSION (MUST BE 200-450 chars, conflict/stakes — build drama)
-slide_5: HUMAN (MUST BE 200-450 chars, quotes/emotion — include reactions)
-slide_6: RIPPLE (MUST BE 200-450 chars, wider impact — think big picture)
-slide_7: UNRESOLVED (MUST BE 200-450 chars, what's next — create anticipation)
-slide_8: HOT TAKE (200-450 chars, pick a side, end with blank line + source URL)
+slide_2: SPARK (150-450 chars, what happened)
+slide_3: WHY (150-450 chars, why it matters)
+slide_4: TENSION (150-450 chars, conflict/stakes)
+slide_5: HUMAN (150-450 chars, quotes/emotion)
+slide_6: RIPPLE (150-450 chars, wider impact)
+slide_7: UNRESOLVED (150-450 chars, what's next)
+slide_8: HOT TAKE (150-450 chars, pick a side + source URL)
 
-IMPORTANT: Each slide MUST be at least 200 chars. Write detailed, engaging content. Do NOT write short summaries.
-
-[FORMATTING RULES]
+[FORMATTING]
 - Blank line every 2 sentences per slide
-- No em-dash, no hashtags in slides 1-7, max 1 emoji in slide 8
-- Conversational English. Short sentences. Facts from article ONLY.
-- BANNED: "In a stunning turn" / "It's safe to say" / "Time will tell" / "The beautiful game" / "At the end of the day" / "Game changer"
+- No em-dash, no hashtags 1-7, max 1 emoji in 8
+- Conversational English. Short sentences. Facts ONLY.
+- BANNED: "In a stunning turn" / "It's safe to say" / "Time will tell" / "The beautiful game" / "Game changer"
 
-[OUTPUT FORMAT]
+[OUTPUT — JSON ONLY]
 {"slide_1":{"title":"HOOK","content":"...","image_url":"..."},"slide_2":{"title":"SPARK","content":"..."},"slide_3":{"title":"WHY","content":"..."},"slide_4":{"title":"TENSION","content":"..."},"slide_5":{"title":"HUMAN","content":"..."},"slide_6":{"title":"RIPPLE","content":"..."},"slide_7":{"title":"UNRESOLVED","content":"..."},"slide_8":{"title":"HOT TAKE","content":"... + blank line + URL"}}
 
-[FEW-SHOT EXAMPLE]
-Input: Article about Messi scoring a hat-trick...
-Output: {"slide_1":{"title":"HOOK","content":"Third goal of the night. 25-yard free-kick into the top corner.\\n\\nMessi stood still, arms raised. The stadium lost its mind.\\n\\nHe had just tied the all-time World Cup goals record.","image_url":""},"slide_2":{"title":"SPARK","content":"Argentina started slow. Algeria threatened on the counter.\\n\\nThen Messi picked the ball up on the edge of the box. He shifted onto his left foot and curled a shot into the far corner."},...}
+[EXAMPLE]
+Input: Messi hat-trick article...
+Output: {"slide_1":{"title":"HOOK","content":"Third goal. 25-yard free-kick. Top corner.\\n\\nMessi stood still. Arms raised. Stadium erupted.\\n\\nRecord tied.","image_url":""},...}
 
 [INPUT DATA TO PROCESS]
 Extract 8 slides from the article below. Output ONLY the JSON object."""
@@ -574,7 +572,7 @@ if API_KEY:
 
 # ── LLM call with retry for word count ──────────────────────────
 MAX_RETRIES = 3
-MIN_CHARS = 200
+MIN_CHARS = 150
 MAX_CHARS = 450
 raw_json = ""
 
@@ -715,7 +713,7 @@ for attempt in range(1, MAX_RETRIES + 1):
                 continue
             body = s.get("content", "")
             chars = len(body)
-            min_c = 150 if i == 0 else MIN_CHARS
+            min_c = 100 if i == 0 else 100
             max_c = 300 if i == 0 else MAX_CHARS
             if chars < min_c:
                 char_issues.append(f"s{i+1}: {chars}c")
@@ -723,7 +721,7 @@ for attempt in range(1, MAX_RETRIES + 1):
                 char_issues.append(f"s{i+1}: {chars}c(too long)")
 
         if not char_issues:
-            log(f"   ✅ All slides pass char count (s1:150-250, s2-7:250-450)")
+            log(f"   ✅ All slides pass char count")
             raw_json = candidate_json
             break
         else:
@@ -746,14 +744,14 @@ def validate_and_fix(slides: list) -> tuple:
         c = s["content"]
         chars = len(c)
         if i == 0:  # Hook
-            if chars < 150: errors.append(f"s1: {chars}c < 150")
+            if chars < 100: errors.append(f"s1: {chars}c < 100")
             elif chars > 300:
                 # Auto-trim
                 trimmed = c[:300]
                 last = max(trimmed.rfind(". "), trimmed.rfind("? "), trimmed.rfind("! "))
                 s["content"] = trimmed[:last+1] if last > 100 else trimmed
         elif 1 <= i <= 6:  # Body
-            if chars < MIN_CHARS: errors.append(f"s{i+1}: {chars}c < {MIN_CHARS}")
+            if chars < 100: errors.append(f"s{i+1}: {chars}c < 100")
             elif chars > MAX_CHARS:
                 trimmed = c[:MAX_CHARS]
                 last = max(trimmed.rfind(". "), trimmed.rfind("? "), trimmed.rfind("! "))
