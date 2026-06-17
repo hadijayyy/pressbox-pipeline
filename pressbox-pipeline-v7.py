@@ -98,6 +98,27 @@ def is_similar(new_title, posted_ws, threshold=0.35):
             return True
     return False
 
+def classify_topic_type(text):
+    """Classify topic into category (mirrors analytics-llm.py)."""
+    if not text:
+        return "other"
+    lower = text.lower()
+    if any(w in lower for w in ["transfer", "signs", "signing", "move to", "bid", "contract"]):
+        return "transfer_rumor"
+    if any(w in lower for w in ["world cup", "wc", "2026", "tournament"]):
+        if any(w in lower for w in ["guide", "preview", "squad", "team guide"]):
+            return "WC_team_guide"
+        return "tournament_news"
+    if any(w in lower for w in ["controversy", "drama", "storms", "backlash", "fans react"]):
+        return "controversy"
+    if any(w in lower for w in ["analysis", "tactical", "formation", "system"]):
+        return "tactical_analysis"
+    if any(w in lower for w in ["profile", "career", "who is", "story of"]) or len(text.split()) < 30:
+        return "player_profile"
+    if any(w in lower for w in ["injury", "out for", "sidelined", "fitness"]):
+        return "injury_update"
+    return "other"
+
 def extract_body_image(raw_html):
     """Extract first <img> from article body (fallback when og:image fails)."""
     from html.parser import HTMLParser
@@ -157,6 +178,11 @@ def score_topic(t):
         s += 25
     # Base score from research module
     s += t.get("score", 0)
+    # Analytics topic boost
+    topic_type = classify_topic_type(title)
+    if topic_type in topic_boosts:
+        multiplier = topic_boosts[topic_type]
+        s = int(s * multiplier)
     return s
 
 # ── Guard ───────────────────────────────────────────────────────────
@@ -237,6 +263,22 @@ if os.path.exists(CACHE_FILE):
 
 ALLOWED_SOURCES = {"guardian", "mirror", "skysports"}
 
+# ── Load analytics feedback ──────────────────────────────────────
+ANALYTICS_FEEDBACK = f"{HOME}/.hermes/pressbox/analytics_feedback.json"
+topic_boosts = {}
+skip_topics = []
+best_hours = []
+try:
+    with open(ANALYTICS_FEEDBACK) as f:
+        fb = json.load(f)
+    topic_boosts = fb.get("topic_boosts", {})
+    skip_topics = [s.get("pattern", "") for s in fb.get("skip_topics", [])]
+    best_hours = fb.get("best_hours", [])
+    if topic_boosts or skip_topics:
+        log(f"   📊 Analytics loaded: {len(topic_boosts)} boosts, {len(skip_topics)} skip patterns")
+except Exception:
+    pass
+
 filtered = []
 for t in all_topics:
     title = (t.get("title") or "").strip()
@@ -251,6 +293,10 @@ for t in all_topics:
     if url in cache_urls:
         continue
     if is_similar(title, posted_titles, 0.35):
+        continue
+    # Skip low-performing topics from analytics
+    topic_type = classify_topic_type(title)
+    if topic_type in skip_topics:
         continue
     filtered.append(t)
 
