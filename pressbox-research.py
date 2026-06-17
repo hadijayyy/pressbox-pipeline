@@ -21,6 +21,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
 from email.utils import parsedate_to_datetime
+from bs4 import BeautifulSoup
 
 import httpx
 
@@ -151,6 +152,18 @@ def scrape_mirror():
                 if is_fresh(dp) is False: continue
                 og_d = re.search(r'og:description[^>]*content="([^"]*)"', r2.text)
                 desc = html.unescape(og_d.group(1)) if og_d else ""
+                # Full article body from Mirror
+                soup2 = BeautifulSoup(r2.text, 'html.parser')
+                body = (
+                    soup2.find('div', class_='article-body')
+                    or soup2.find('div', attrs={'data-testid': 'article-body'})
+                    or soup2.find('article')
+                )
+                if body:
+                    paragraphs = [p.get_text(strip=True) for p in body.find_all('p') if len(p.get_text(strip=True)) > 30]
+                    full_text = '\n\n'.join(paragraphs)
+                    if len(full_text) > len(desc):
+                        desc = full_text
                 # og:image from Mirror article
                 og_img = re.search(r'og:image[^>]*content="([^"]*)"', r2.text)
                 image_url = og_img.group(1) if og_img else ""
@@ -160,83 +173,201 @@ def scrape_mirror():
                 score = 12 if has_wc else (13 if is_transfer else 8)
                 topics.append(dict(title=title, source="mirror", url=link, score=score,
                     comments=0, wc_boost=has_wc, transfer_related=is_transfer,
-                    description=desc, published_ts=dp, image_url=image_url))
+                    description=desc[:500], published_ts=dp, image_url=image_url))
             except: pass
     except: pass
     return topics
 
-# ─── Goal.com scraper (HTML card parsing) ──────────────────────────
+# ─── Sky Sports Scraper (Fixed) ──────────────────────────────────────
 
-def scrape_goal():
-    """Scrape Goal.com/en for football news. No RSS — parse HTML cards directly.
-    Adapted from goal_scraper.py: extract srcSet largest image."""
+def scrape_sky_sports():
+    """Scrape Sky Sports News HTML page for full articles + images"""
     topics = []
     try:
-        r = client.get("https://www.goal.com/en", timeout=10)
-        if r.status_code != 200: return topics
-        page_html = r.text
+        r = client.get("https://www.skysports.com/news", timeout=10, follow_redirects=True)
+        if r.status_code != 200:
+            return topics
 
-        # Extract article cards via regex (Goal uses data-testid attributes)
-        card_pattern = re.compile(
-            r'<article[^>]*>.*?</article>', re.DOTALL)
-        cards = card_pattern.findall(page_html)[:15]
+        soup = BeautifulSoup(r.text, 'html.parser')
 
-        seen = set()
-        for card in cards:
-            try:
-                # Extract headline from data-testid="article-card-title"
-                title_m = re.search(r'data-testid="article-card-title"[^>]*>([^<]+)', card)
-                if not title_m:
-                    title_m = re.search(r'<h3[^>]*>([^<]+)', card)
-                if not title_m: continue
-                headline = html.unescape(title_m.group(1).strip())
-                if len(headline) < 10: continue
+        # FIX 1: Broader item selector — class names often change, so use multiple fallbacks
+        items = (
+            soup.find_all('div', class_='news-list__item')
+            or soup.find_all('article')
+            or soup.find_all('div', class_=lambda c: c and 'news' in c and 'item' in c)
+        )
 
-                # Extract URL from data-testid="card-title-url"
-                url_m = re.search(r'href="(/en/news/[^"]+)"', card)
-                if not url_m: continue
-                article_url = "https://www.goal.com" + url_m.group(1)
-                if article_url in seen: continue
-                seen.add(article_url)
+        for item in items[:20]:
+            # FIX 2: Broader link selector fallback
+            headline_link = (
+                item.find('a', class_='news-list__headline-link')
+                or item.find('a', class_=lambda c: c and 'headline' in c)
+                or item.find('h3', recursive=True) and item.find('h3').find('a')
+            )
+            if not headline_link:
+                continue
 
-                # Extract best image from srcSet (largest width)
-                image_url = ""
-                srcset_m = re.search(r'srcset="([^"]+)"', card)
-                if srcset_m:
-                    best_w = 0
-                    for part in srcset_m.group(1).split(","):
-                        tokens = part.strip().split()
-                        if len(tokens) == 2 and tokens[1].endswith("w"):
-                            try:
-                                w = int(tokens[1][:-1])
-                                if w > best_w:
-                                    best_w = w
-                                    image_url = tokens[0]
-                            except ValueError: pass
-                # Fallback: data-src or src
-                if not image_url:
-                    dsrc_m = re.search(r'data-src="([^"]+)"', card)
-                    if dsrc_m:
-                        image_url = dsrc_m.group(1)
-                    else:
-                        src_m = re.search(r'<img[^>]+src="([^"]+)"', card)
-                        if src_m and not src_m.group(1).startswith("data:"):
-                            image_url = src_m.group(1)
-                # Fix protocol-relative
-                if image_url.startswith("//"):
-                    image_url = "https:" + image_url
+            title = headline_link.get_text(strip=True)
+            url = headline_link.get('href', '')
+            if not url:
+                continue
 
-                tl = headline.lower()
-                has_wc = any(kw in tl for kw in ["world cup", "worldcup", "wc 202", "usa 2026", "mexico 2026", "canada 2026", "qualifier"])
-                is_transfer = any(kw in tl for kw in ["transfer", "signs", "signing", "joins", "deal", "bid", "loan"])
-                score = 14 if has_wc else (13 if is_transfer else 10)
+            # FIX 3: Image — try data-src first, then src, then og:image fallback
+            image_url = ""
+            img = (
+                item.find('img', attrs={'data-src': True})
+                or item.find('img', attrs={'src': True})
+            )
+            if img:
+                raw = img.get('data-src') or img.get('src', '')
+                image_url = raw.replace('384x216', '1280x720') if raw else ''
 
-                topics.append(dict(title=headline, source="goal", url=article_url, score=score,
-                    comments=0, wc_boost=has_wc, transfer_related=is_transfer,
-                    description="", published_ts=None, image_url=image_url))
-            except: pass
-    except: pass
+            full_text = scrape_sky_article(url) or title
+
+            tl = title.lower()
+            has_wc = any(kw in tl for kw in ["world cup", "worldcup", "wc 202", "usa 2026", "qualifier"])
+            is_transfer = any(kw in tl for kw in ["transfer", "signs", "signing", "joins", "deal", "bid", "loan"])
+
+            topics.append(dict(
+                title=title,
+                source="sky-sports",
+                url=url,
+                score=14 if has_wc else (13 if is_transfer else 12),
+                comments=0,
+                wc_boost=has_wc,
+                transfer_related=is_transfer,
+                description=full_text[:500],
+                published_ts=None,
+                image_url=image_url,
+            ))
+
+    except Exception as e:
+        print(f"   ⚠️ Sky Sports error: {e}", file=sys.stderr)
+
     return topics
+
+
+def scrape_sky_article(url):
+    """Fetch full article content from Sky Sports — targeted selectors"""
+    try:
+        r = client.get(url, timeout=8)
+        if r.status_code != 200:
+            return None
+
+        soup = BeautifulSoup(r.text, 'html.parser')
+
+        # FIX: Target article body container first, then fall back to all <p>
+        # Avoids nav/footer/related-articles boilerplate
+        body = (
+            soup.find('div', class_='sdc-article-body')          # primary
+            or soup.find('div', class_=lambda c: c and 'article-body' in c)
+            or soup.find('article')
+        )
+
+        container = body if body else soup
+
+        paragraphs = [
+            p.get_text(strip=True)
+            for p in container.find_all('p')
+            if len(p.get_text(strip=True)) > 30  # raised threshold to cut noise
+        ]
+
+        return '\n\n'.join(paragraphs) if paragraphs else None
+
+    except Exception:
+        return None
+
+
+# ─── Goal.com Scraper (HTML listing + article page) ──────────────────
+
+def scrape_goal():
+    """Scrape Goal.com listing page then fetch article page for text + og:image"""
+    topics = []
+    try:
+        r = client.get("https://www.goal.com/en", timeout=10, follow_redirects=True)
+        if r.status_code != 200: return topics
+        
+        soup = BeautifulSoup(r.text, 'html.parser')
+        articles = soup.find_all('article')[:15]
+        
+        seen = set()
+        for article in articles:
+            try:
+                h3 = article.find('h3')
+                if not h3: continue
+                title = h3.get_text(strip=True)
+                if len(title) < 10: continue
+                
+                link = article.find('a', href=True)
+                if not link: continue
+                url = link['href']
+                if not url.startswith('http'):
+                    url = 'https://www.goal.com' + url
+                if url in seen: continue
+                seen.add(url)
+                
+                # Fetch article page for text + image
+                text, image_url = scrape_goal_article(url)
+                
+                tl = title.lower()
+                has_wc = any(kw in tl for kw in ["world cup", "worldcup", "wc 202", "usa 2026", "qualifier"])
+                is_transfer = any(kw in tl for kw in ["transfer", "signs", "signing", "joins", "deal", "bid", "loan"])
+                
+                topics.append(dict(
+                    title=title, source="goal", url=url,
+                    score=14 if has_wc else (13 if is_transfer else 12),
+                    comments=0, wc_boost=has_wc, transfer_related=is_transfer,
+                    description=(text or title)[:500], published_ts=None, image_url=image_url))
+            except: pass
+    except Exception as e:
+        print(f"   ⚠️ Goal.com error: {e}", file=sys.stderr)
+    return topics
+
+
+def scrape_goal_article(url):
+    """Fetch Goal.com article page → returns (text, image_url).
+    BS4 first, then __NEXT_DATA__ JSON fallback for Next.js pages."""
+    text = ""
+    image_url = ""
+    try:
+        r = client.get(url, timeout=10, follow_redirects=True)
+        if r.status_code != 200: return text, image_url
+
+        soup = BeautifulSoup(r.text, 'html.parser')
+
+        # og:image
+        og_img = soup.find('meta', property='og:image')
+        if og_img:
+            image_url = og_img.get('content', '')
+
+        # Strategy 1: BS4 article body
+        body = (
+            soup.find('div', class_='article-body')
+            or soup.find('div', attrs={'data-testid': 'article-body'})
+            or soup.find('article')
+        )
+        if body:
+            paragraphs = [p.get_text(strip=True) for p in body.find_all('p') if len(p.get_text(strip=True)) > 30]
+            text = '\n\n'.join(paragraphs)
+
+        # Strategy 2: __NEXT_DATA__ JSON fallback
+        if not text:
+            next_data_tag = soup.find('script', id='__NEXT_DATA__')
+            if next_data_tag:
+                try:
+                    import json
+                    data = json.loads(next_data_tag.string or '{}')
+                    page_props = data.get('props', {}).get('pageProps', {})
+                    article = page_props.get('article') or page_props.get('data', {}).get('article')
+                    if article:
+                        raw = article.get('body') or article.get('content') or article.get('text') or ''
+                        if raw:
+                            text = BeautifulSoup(raw, 'html.parser').get_text('\n', strip=True)
+                except (json.JSONDecodeError, AttributeError):
+                    pass
+    except Exception as e:
+        print(f"   ⚠️ Goal article error ({url}): {e}", file=sys.stderr)
+    return text, image_url
 
 # ─── Viral keyword matcher ───────────────────────────────────────
 
@@ -317,13 +448,9 @@ def main():
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as ex:
         futs = {
             "mirror": ex.submit(scrape_mirror),
+            "sky-sports": ex.submit(scrape_sky_sports),
+            "goal": ex.submit(scrape_goal),
         }
-        rss_sources = {
-            "guardian": ("https://www.theguardian.com/football/rss", 14),
-            "skysports": ("https://www.skysports.com/rss/11095", 14),
-        }
-        for name, (url, base_score) in rss_sources.items():
-            futs[name] = ex.submit(scrape_rss, url, name, base_score)
 
         all_topics = []
         for name, f in futs.items():
