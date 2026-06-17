@@ -126,7 +126,7 @@ if is_bad_hour():
 # 0b. FREQUENCY CHECK — Quality > Quantity
 if is_posting_too_frequent():
     log("⏰ Posting too frequent — skipping for quality. [SILENT]")
-    print("⏸️ Post skip — baru posting < 1 jam lalu. Quality > Quantity.")
+    print("⏸️ Post skip — baru posting < 30 menit lalu. Quality > Quantity.")
     sys.exit(0)
 
 # 1. Read staging (check v3 first, then v2)
