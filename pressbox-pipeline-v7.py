@@ -183,6 +183,8 @@ def score_topic(t):
     if topic_type in topic_boosts:
         multiplier = topic_boosts[topic_type]
         s = int(s * multiplier)
+    # Keyword boost from recommendations
+    s += t.get("_kw_boost", 0)
     return s
 
 # ── Guard ───────────────────────────────────────────────────────────
@@ -265,9 +267,15 @@ ALLOWED_SOURCES = {"guardian", "mirror", "skysports"}
 
 # ── Load analytics feedback ──────────────────────────────────────
 ANALYTICS_FEEDBACK = f"{HOME}/.hermes/pressbox/analytics_feedback.json"
+ANALYTICS_RECOMMENDATIONS = f"{HOME}/.hermes/pressbox/analytics_recommendations.json"
 topic_boosts = {}
 skip_topics = []
 best_hours = []
+research_keywords_add = []
+research_keywords_remove = []
+preferred_hooks = []
+cta_pattern = ""
+tone_adjustment = "Conversational English. Bold numbers. High-impact words."
 try:
     with open(ANALYTICS_FEEDBACK) as f:
         fb = json.load(f)
@@ -276,6 +284,23 @@ try:
     best_hours = fb.get("best_hours", [])
     if topic_boosts or skip_topics:
         log(f"   📊 Analytics loaded: {len(topic_boosts)} boosts, {len(skip_topics)} skip patterns")
+except Exception:
+    pass
+
+# Load recommendations (research + generate tweaks)
+try:
+    with open(ANALYTICS_RECOMMENDATIONS) as f:
+        recs = json.load(f)
+    analysis = recs.get("analysis", {})
+    rt = analysis.get("research_tweaks", {})
+    gt = analysis.get("generate_tweaks", {})
+    research_keywords_add = rt.get("keyword_additions", [])
+    research_keywords_remove = rt.get("keyword_removals", [])
+    preferred_hooks = gt.get("preferred_hooks", [])
+    cta_pattern = gt.get("cta_pattern", "")
+    tone_adjustment = gt.get("tone_adjustment", tone_adjustment)
+    if research_keywords_add or preferred_hooks:
+        log(f"   🧠 Recommendations loaded: {len(research_keywords_add)} keywords, {len(preferred_hooks)} hooks")
 except Exception:
     pass
 
@@ -298,6 +323,12 @@ for t in all_topics:
     topic_type = classify_topic_type(title)
     if topic_type in skip_topics:
         continue
+    # Boost topics matching recommended keywords
+    if research_keywords_add:
+        title_lower = title.lower()
+        kw_hits = sum(1 for kw in research_keywords_add if kw.lower() in title_lower)
+        if kw_hits > 0:
+            t["_kw_boost"] = kw_hits * 10
     filtered.append(t)
 
 log(f"   After filter: {len(filtered)} topics")
@@ -413,10 +444,11 @@ SOURCE: {url}
 SLIDE RULES:
 - Slide 1: HOOK — 1-2 punchy sentences. 250-450 chars. Include HD image URL from article if available.
 - Slides 2-7: STORY ARC — each continues from previous. 250-450 chars.
-- Slide 8: CTA — debate question with "?" + personal word (you/we/fans). 3 sentences + Source URL.
+- Slide 8: CTA — {cta_pattern if cta_pattern else 'debate question with "?" + personal word (you/we/fans)'}. 3 sentences + Source URL.
 
 CRITICAL: Slides 1-7 MUST be 250-450 chars each. Do NOT write shorter.
 FORMATTING: Add a blank line between every 2 sentences in each slide for readability.
+TONE: {tone_adjustment}
 
 JSON FORMAT:
 {{
