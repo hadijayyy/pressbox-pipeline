@@ -98,6 +98,33 @@ def is_similar(new_title, posted_ws, threshold=0.35):
             return True
     return False
 
+def extract_body_image(raw_html):
+    """Extract first <img> from article body (fallback when og:image fails)."""
+    from html.parser import HTMLParser
+    class ImgExtractor(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.first_img = ""
+            self.in_article = False
+        def handle_starttag(self, tag, attrs):
+            if tag in ("article", "main", "div"):
+                for name, val in attrs:
+                    if name == "class" and val and any(c in val for c in ["article", "story", "content", "post"]):
+                        self.in_article = True
+            if tag == "img" and self.in_article:
+                for name, val in attrs:
+                    if name == "src" and val and not self.first_img:
+                        # Skip tiny icons, logos, avatars
+                        skip_patterns = ["icon", "logo", "avatar", "pixel", "spacer", "1x1", "badge"]
+                        if not any(p in val.lower() for p in skip_patterns):
+                            self.first_img = val
+    try:
+        parser = ImgExtractor()
+        parser.feed(raw_html[:50000])
+        return parser.first_img or ""
+    except:
+        return ""
+
 def score_topic(t):
     title = t.get("title", "")
     s = 0
@@ -286,22 +313,32 @@ for pattern in [
         except:
             pass
 
-# Fallback to image_url from research module (RSS — but validate it works)
+# Fallback 1: Extract first <img> from article body
+if not image_url:
+    body_img = extract_body_image(raw_html)
+    if body_img:
+        try:
+            hr = subprocess.run(
+                ["curl", "-sIL", "--max-time", "5", body_img],
+                capture_output=True, text=True, timeout=8)
+            if "200" in hr.stdout:
+                image_url = body_img
+                log(f"   ✅ Body image found: {image_url[:80]}")
+        except:
+            pass
+
+# Fallback 2: image_url from research module (RSS)
 if not image_url:
     candidate = best.get("image_url", "") or ""
     if candidate:
-        # Skip Guardian images — they block hotlinking (401)
-        if "guim.co.uk" in candidate or "guardian" in candidate.lower():
-            log(f"   ⚠️ Skipping Guardian image (blocks hotlinking)")
-        else:
-            try:
-                hr = subprocess.run(
-                    ["curl", "-sIL", "--max-time", "5", candidate],
-                    capture_output=True, text=True, timeout=8)
-                if "200" in hr.stdout:
-                    image_url = candidate
-            except:
-                pass
+        try:
+            hr = subprocess.run(
+                ["curl", "-sIL", "--max-time", "5", candidate],
+                capture_output=True, text=True, timeout=8)
+            if "200" in hr.stdout:
+                image_url = candidate
+        except:
+            pass
 
 log(f"   Article: {len(article_text)} chars, image: {'yes' if image_url else 'no'}")
 
@@ -333,6 +370,7 @@ SLIDE RULES:
 - Slide 8: CTA — debate question with "?" + personal word (you/we/fans). 3 sentences + Source URL.
 
 CRITICAL: Slides 1-7 MUST be 250-450 chars each. Do NOT write shorter.
+FORMATTING: Add a blank line between every 2 sentences in each slide for readability.
 
 JSON FORMAT:
 {{
