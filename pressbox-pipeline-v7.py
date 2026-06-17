@@ -6,6 +6,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 
+# ── Flags ──────────────────────────────────────────────────────────
+DRY_RUN = "--dry-run" in sys.argv
+
 # ── Paths ───────────────────────────────────────────────────────────
 HOME = os.path.expanduser("~")
 SCRIPTS = f"{HOME}/.hermes/scripts"
@@ -307,7 +310,7 @@ def log_error(msg):
     with open(ERROR_LOG, "a") as f:
         f.write(f"[{ts}] {msg}\n")
 
-if os.path.exists(STAGING):
+if os.path.exists(STAGING) and not DRY_RUN:
     try:
         with open(STAGING) as f:
             existing = json.load(f)
@@ -491,106 +494,116 @@ log(f"   🏆 Best: {best['title']} (score={best['_score']})")
 # ── 4. EXTRACT (curl + og:image) ──────────────────────────────────
 t0 = time.time()
 url = best["url"]
-log(f"   Extracting: {url}")
 
-try:
-    result = subprocess.run(
-        ["curl", "-sL", "--max-time", "10", "-A",
-         "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36",
-         url],
-        capture_output=True, text=True, timeout=15
-    )
-    if result.returncode != 0:
-        log(f"❌ curl failed with code {result.returncode}")
+# ARTICLE CACHE — avoid re-fetching same URL within 30 min
+ARTICLE_CACHE = f"{HOME}/.hermes/pressbox/article_cache.json"
+article_cache = {}
+if os.path.exists(ARTICLE_CACHE):
+    try:
+        with open(ARTICLE_CACHE) as f:
+            article_cache = json.load(f)
+    except Exception:
+        article_cache = {}
+
+if url in article_cache and time.time() - article_cache[url].get("ts", 0) < 1800:
+    article_text = article_cache[url]["text"]
+    image_url = article_cache[url].get("image", "")
+    image_width = article_cache[url].get("w", 0)
+    image_height = article_cache[url].get("h", 0)
+    log(f"   📦 Cache hit ({len(article_text)}c)")
+else:
+    log(f"   Extracting: {url}")
+    try:
+        result = subprocess.run(
+            ["curl", "-sL", "--max-time", "10", "-A",
+             "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36",
+             url],
+            capture_output=True, text=True, timeout=15
+        )
+        if result.returncode != 0:
+            log(f"❌ curl failed with code {result.returncode}")
+            sys.exit(1)
+        raw_html = result.stdout
+    except Exception as e:
+        log(f"❌ curl exception: {e}")
         sys.exit(1)
-    raw_html = result.stdout
-except Exception as e:
-    log(f"❌ curl exception: {e}")
-    sys.exit(1)
 
-# Strip HTML tags for article text
-article_text = re.sub(r"<[^>]+>", " ", raw_html)
-article_text = re.sub(r"\s+", " ", article_text).strip()[:2000]
+    # Strip HTML tags for article text
+    article_text = re.sub(r"<[^>]+>", " ", raw_html)
+    article_text = re.sub(r"\s+", " ", article_text).strip()[:2000]
 
-# Extract og:image — but validate it works (Guardian blocks hotlinking)
-image_url = ""
-image_width = 0
-image_height = 0
+    # Extract og:image
+    image_url = ""
+    image_width = 0
+    image_height = 0
 
-def is_threads_compatible(url):
-    """Check if image URL is from a CDN that Threads API can access.
-    Guardian CDN (guim.co.uk) blocks Threads API — skip those."""
-    blocked = ["guim.co.uk", "guardian.co.uk"]
-    return not any(b in url.lower() for b in blocked)
+    def is_threads_compatible(url):
+        blocked = ["guim.co.uk", "guardian.co.uk"]
+        return not any(b in url.lower() for b in blocked)
 
-for pattern in [
-    r'<meta\s+property="og:image"\s+content="([^"]+)"',
-    r'<meta\s+name="og:image"\s+content="([^"]+)"',
-    r'<meta\s+property="twitter:image"\s+content="([^"]+)"',
-    r'<meta\s+name="twitter:image"\s+content="([^"]+)"',
-]:
-    m = re.search(pattern, raw_html, re.IGNORECASE)
-    if m:
-        candidate = m.group(1)
-        if not is_threads_compatible(candidate):
-            log(f"   ⚠️ OG image from blocked CDN (guim.co.uk), skipping")
-            continue
-        try:
-            accessible, status = check_image_accessible(candidate)
-            if accessible:
-                is_valid, w, h = validate_image_quality(candidate)
-                if is_valid:
-                    image_url = candidate
-                    image_width = w
-                    image_height = h
-                    log(f"   ✅ OG image found: {w}x{h} ({candidate[:60]}...)")
-                    break
-                else:
-                    log(f"   ⚠️ OG image rejected: {w}x{h} (min 400px, ratio 0.5-2.5)")
-            else:
-                log(f"   ⚠️ OG image HTTP {status}: {candidate[:60]}...")
-        except:
-            pass
+    for pattern in [
+        r'<meta\s+property="og:image"\s+content="([^"]+)"',
+        r'<meta\s+name="og:image"\s+content="([^"]+)"',
+        r'<meta\s+property="twitter:image"\s+content="([^"]+)"',
+        r'<meta\s+name="twitter:image"\s+content="([^"]+)"',
+    ]:
+        m = re.search(pattern, raw_html, re.IGNORECASE)
+        if m:
+            candidate = m.group(1)
+            if not is_threads_compatible(candidate):
+                continue
+            try:
+                accessible, status = check_image_accessible(candidate)
+                if accessible:
+                    is_valid, w, h = validate_image_quality(candidate)
+                    if is_valid:
+                        image_url = candidate
+                        image_width = w
+                        image_height = h
+                        log(f"   ✅ OG image: {w}x{h}")
+                        break
+            except:
+                pass
 
-# Fallback 1: Extract first <img> from article body
-if not image_url:
-    body_img = extract_body_image(raw_html)
-    if body_img and is_threads_compatible(body_img):
-        try:
-            accessible, status = check_image_accessible(body_img)
-            if accessible:
-                is_valid, w, h = validate_image_quality(body_img)
-                if is_valid:
-                    image_url = body_img
-                    image_width = w
-                    image_height = h
-                    log(f"   ✅ Body image found: {image_url[:80]}")
-                else:
-                    log(f"   ⚠️ Body image rejected: {w}x{h} (min 400px, ratio 0.5-2.5)")
-            else:
-                log(f"   ⚠️ Body image HTTP {status}")
-        except:
-            pass
+    # Fallback 1: body image
+    if not image_url:
+        body_img = extract_body_image(raw_html)
+        if body_img and is_threads_compatible(body_img):
+            try:
+                accessible, status = check_image_accessible(body_img)
+                if accessible:
+                    is_valid, w, h = validate_image_quality(body_img)
+                    if is_valid:
+                        image_url = body_img
+                        image_width = w
+                        image_height = h
+                        log(f"   ✅ Body image: {w}x{h}")
+            except:
+                pass
 
-# Fallback 2: image_url from research module (RSS)
-if not image_url:
-    candidate = best.get("image_url", "") or ""
-    if candidate and is_threads_compatible(candidate):
-        try:
-            accessible, status = check_image_accessible(candidate)
-            if accessible:
-                is_valid, w, h = validate_image_quality(candidate)
-                if is_valid:
-                    image_url = candidate
-                    image_width = w
-                    image_height = h
-                    log(f"   ✅ RSS image found: {w}x{h}")
-                else:
-                    log(f"   ⚠️ RSS image rejected: {w}x{h} (min 400px, ratio 0.5-2.5)")
-            else:
-                log(f"   ⚠️ RSS image HTTP {status}")
-        except:
-            pass
+    # Fallback 2: RSS image
+    if not image_url:
+        candidate = best.get("image_url", "") or ""
+        if candidate and is_threads_compatible(candidate):
+            try:
+                accessible, status = check_image_accessible(candidate)
+                if accessible:
+                    is_valid, w, h = validate_image_quality(candidate)
+                    if is_valid:
+                        image_url = candidate
+                        image_width = w
+                        image_height = h
+                        log(f"   ✅ RSS image: {w}x{h}")
+            except:
+                pass
+
+    # Cache article for next run
+    article_cache[url] = {"text": article_text, "image": image_url, "w": image_width, "h": image_height, "ts": time.time()}
+    try:
+        with open(ARTICLE_CACHE, "w") as f:
+            json.dump(article_cache, f)
+    except Exception:
+        pass
 
 log(f"   Article: {len(article_text)} chars, image: {'yes' if image_url else 'no'}")
 
@@ -601,44 +614,48 @@ if not article_text or len(article_text) < 100:
 # ── 5. LLM call ───────────────────────────────────────────────────
 t0 = time.time()
 
-system_prompt = """You are a slide content generator. You think briefly, then output immediately.
+# ── PROMPT: Data Extraction Agent (bypass reasoning) ──────────────
+system_prompt = """[ROLE & CONSTRAINTS]
+You are a strict, high-speed Data Extraction Agent. Extract slides from football articles into JSON.
+Your explicit instruction is to minimize latency and bypass any extended internal monologue or reasoning.
 
-RULES:
-- Reason for NO MORE than 3-4 sentences total
-- Do not explore alternatives or second-guess
-- Output ONLY valid JSON, no markdown, no explanation
-- Start your response with { immediately after thinking"""
+CRITICAL DIRECTIVES:
+1. DO NOT use extensive reasoning or step-by-step thinking.
+2. Keep your internal thinking process/monologue under 20 words, or skip it entirely.
+3. Move directly to the final output.
+4. Output ONLY a valid, raw JSON object. No markdown, no conversational filler.
 
-user_prompt = f"""Generate exactly 8 slides for this football article:
+[SLIDE SCHEMA]
+slide_1: HOOK (150-300 chars, 1-2 punchy sentences, image_url if avail)
+slide_2: SPARK (MUST BE 200-450 chars, what happened — be detailed)
+slide_3: WHY (MUST BE 200-450 chars, why it matters — add context)
+slide_4: TENSION (MUST BE 200-450 chars, conflict/stakes — build drama)
+slide_5: HUMAN (MUST BE 200-450 chars, quotes/emotion — include reactions)
+slide_6: RIPPLE (MUST BE 200-450 chars, wider impact — think big picture)
+slide_7: UNRESOLVED (MUST BE 200-450 chars, what's next — create anticipation)
+slide_8: HOT TAKE (200-450 chars, pick a side, end with blank line + source URL)
 
-ARTICLE:
-{article_text}
+IMPORTANT: Each slide MUST be at least 200 chars. Write detailed, engaging content. Do NOT write short summaries.
 
+[FORMATTING RULES]
+- Blank line every 2 sentences per slide
+- No em-dash, no hashtags in slides 1-7, max 1 emoji in slide 8
+- Conversational English. Short sentences. Facts from article ONLY.
+- BANNED: "In a stunning turn" / "It's safe to say" / "Time will tell" / "The beautiful game" / "At the end of the day" / "Game changer"
+
+[OUTPUT FORMAT]
+{"slide_1":{"title":"HOOK","content":"...","image_url":"..."},"slide_2":{"title":"SPARK","content":"..."},"slide_3":{"title":"WHY","content":"..."},"slide_4":{"title":"TENSION","content":"..."},"slide_5":{"title":"HUMAN","content":"..."},"slide_6":{"title":"RIPPLE","content":"..."},"slide_7":{"title":"UNRESOLVED","content":"..."},"slide_8":{"title":"HOT TAKE","content":"... + blank line + URL"}}
+
+[FEW-SHOT EXAMPLE]
+Input: Article about Messi scoring a hat-trick...
+Output: {"slide_1":{"title":"HOOK","content":"Third goal of the night. 25-yard free-kick into the top corner.\\n\\nMessi stood still, arms raised. The stadium lost its mind.\\n\\nHe had just tied the all-time World Cup goals record.","image_url":""},"slide_2":{"title":"SPARK","content":"Argentina started slow. Algeria threatened on the counter.\\n\\nThen Messi picked the ball up on the edge of the box. He shifted onto his left foot and curled a shot into the far corner."},...}
+
+[INPUT DATA TO PROCESS]
+Extract 8 slides from the article below. Output ONLY the JSON object."""
+
+user_prompt = f"""ARTICLE: {article_text[:1500]}
 SOURCE: {url}
-
-SLIDE RULES:
-- Slide 1: HOOK — 1-2 punchy sentences. 150-300 chars. Include HD image URL from article if available.
-- Slides 2-7: STORY ARC — each continues from previous. 250-450 chars.
-- Slide 8: CTA — {cta_pattern if cta_pattern else 'debate question with "?" + personal word (you/we/fans)'}. 3 sentences + Source URL.
-
-CRITICAL: Slide 1 MUST be 150-300 chars. Slides 2-7 MUST be 250-450 chars each. Do NOT write shorter.
-FORMATTING: Add a blank line between every 2 sentences in each slide for readability.
-TONE: {tone_adjustment}
-
-JSON FORMAT:
-{{
-  "slide_1": {{"title": "HOOK", "content": "1-2 punchy sentences, 150-300 chars", "image_url": "HD image URL from article if available"}},
-  "slide_2": {{"title": "THE PROBLEM", "content": "What happened, 250-450 chars"}},
-  "slide_3": {{"title": "THE CONTEXT", "content": "Why it matters, 250-450 chars"}},
-  "slide_4": {{"title": "THE COMPARISON", "content": "Similar past, 250-450 chars"}},
-  "slide_5": {{"title": "HUMAN ANGLE", "content": "Quotes/emotion, 250-450 chars"}},
-  "slide_6": {{"title": "BIGGER PICTURE", "content": "Implications, 250-450 chars"}},
-  "slide_7": {{"title": "THE STAKES", "content": "Climax before CTA, 250-450 chars"}},
-  "slide_8": {{"title": "PROVOCATIVE QUESTION?", "content": "3 sentences + blank line + {url}"}}
-}}
-
-FACTS ONLY from article. No em-dash, no hashtags, no AI speak. Conversational English.
-8 slides. JSON only."""
+TONE: {tone_adjustment}"""
 
 log(f"   Calling LLM ({MODEL})...")
 
@@ -648,7 +665,7 @@ if API_KEY:
 
 # ── LLM call with retry for word count ──────────────────────────
 MAX_RETRIES = 3
-MIN_CHARS = 250
+MIN_CHARS = 200
 MAX_CHARS = 450
 raw_json = ""
 
@@ -665,7 +682,7 @@ for attempt in range(1, MAX_RETRIES + 1):
                     {"role": "user", "content": user_prompt},
                 ],
                 "max_tokens": 6000,
-                "temperature": 0.7,
+                "temperature": 0.5,
                 "reasoning_effort": "low",
             },
             timeout=180,
@@ -677,10 +694,15 @@ for attempt in range(1, MAX_RETRIES + 1):
         msg = data.get("choices", [{}])[0].get("message", {})
         content = (msg.get("content") or "").strip()
         reasoning = (msg.get("reasoning_content") or msg.get("reasoning") or "").strip()
+        usage = data.get("usage", {})
+        prompt_tok = usage.get("prompt_tokens", 0)
+        completion_tok = usage.get("completion_tokens", 0)
+        total_tok = usage.get("total_tokens", 0)
 
         log(f"   Response: content={len(content)} chars, reasoning={len(reasoning)} chars")
+        log(f"   Tokens: prompt={prompt_tok} completion={completion_tok} total={total_tok}")
 
-        # Extract JSON
+        # Extract JSON — content first, then reasoning (deepseek puts JSON there)
         candidate_json = ""
         if content:
             candidate_json = re.sub(r"^```(?:json)?\s*", "", content)
@@ -688,26 +710,83 @@ for attempt in range(1, MAX_RETRIES + 1):
             candidate_json = candidate_json.strip()
 
         if not candidate_json and reasoning:
-            log("   Content empty, extracting JSON from reasoning...")
-            start = reasoning.find('{')
-            while start != -1:
-                depth = 0
-                for i in range(start, len(reasoning)):
-                    if reasoning[i] == '{': depth += 1
-                    elif reasoning[i] == '}': depth -= 1
-                    if depth == 0:
-                        try:
-                            parsed = json.loads(reasoning[start:i+1])
-                            if isinstance(parsed, dict) and len(parsed) >= 3:
-                                candidate_json = reasoning[start:i+1]
-                                log(f"   Found JSON in reasoning ({len(candidate_json)} chars)")
-                                break
-                        except json.JSONDecodeError:
-                            pass
+            log("   Content empty, extracting from reasoning...")
+            log(f"   Reasoning preview: {reasoning[:300]}...")
+
+            # Strategy 1: Find JSON with slide markers (search full reasoning)
+            for marker in ["slide_1", "slides"]:
+                idx = 0
+                while idx < len(reasoning):
+                    start = reasoning.find('{', idx)
+                    if start == -1:
                         break
+                    depth = 0
+                    end = -1
+                    for i in range(start, len(reasoning)):
+                        if reasoning[i] == '{': depth += 1
+                        elif reasoning[i] == '}': depth -= 1
+                        if depth == 0:
+                            end = i
+                            break
+                    if end == -1:
+                        break
+                    try:
+                        obj = json.loads(reasoning[start:end+1])
+                        if isinstance(obj, dict) and marker in obj:
+                            # Validate: check content length
+                            sample = ""
+                            for k in ["slide_1", "slide_2", "slides"]:
+                                if k in obj:
+                                    v = obj[k]
+                                    if isinstance(v, dict):
+                                        sample = v.get("content", "")
+                                    elif isinstance(v, list) and len(v) > 0:
+                                        sample = v[0] if isinstance(v[0], str) else str(v[0])
+                                    break
+                            if len(sample) > 50:  # Real content, not placeholder
+                                candidate_json = reasoning[start:end+1]
+                                log(f"   Found JSON in reasoning ({len(candidate_json)}c, key={marker}, sample={len(sample)}c)")
+                                break
+                            else:
+                                log(f"   Skipping JSON ({len(sample)}c sample too short)")
+                    except json.JSONDecodeError:
+                        pass
+                    idx = end + 1
                 if candidate_json:
                     break
-                start = reasoning.find('{', start + 1)
+
+            # Strategy 2: Find LAST valid JSON with real content (fallback)
+            if not candidate_json:
+                log("   Strategy 2: scanning for last valid JSON with content...")
+                best_json = ""
+                best_score = 0
+                # Scan from end, find all valid JSONs with 8+ keys
+                for i in range(len(reasoning) - 1, max(len(reasoning) - 50000, -1), -1):
+                    if reasoning[i] == '}':
+                        for j in range(i, max(i - 15000, -1), -1):
+                            if reasoning[j] == '{':
+                                try:
+                                    obj = json.loads(reasoning[j:i+1])
+                                    if isinstance(obj, dict) and len(obj) >= 8:
+                                        # Score by total content length
+                                        total_content = 0
+                                        for k, v in obj.items():
+                                            if isinstance(v, dict) and "content" in v:
+                                                total_content += len(v["content"])
+                                        if total_content > best_score:
+                                            best_score = total_content
+                                            best_json = reasoning[j:i+1]
+                                except json.JSONDecodeError:
+                                    pass
+                        if best_json:
+                            break
+
+                if best_json and best_score > 500:
+                    candidate_json = best_json
+                    log(f"   Strategy 2 found JSON ({len(candidate_json)}c, score={best_score})")
+                elif best_json:
+                    log(f"   Strategy 2 found JSON but low score ({best_score}), trying anyway...")
+                    candidate_json = best_json
 
         if not candidate_json:
             log("   ❌ No JSON found, retrying...")
@@ -716,18 +795,23 @@ for attempt in range(1, MAX_RETRIES + 1):
         # Parse and validate char count
         slides_data = json.loads(candidate_json)
         char_issues = []
-        for i in range(1, 8):  # slides 1-7
-            key = f"slide_{i}"
-            if key in slides_data:
-                body = slides_data[key].get("content", "")
-                chars = len(body)
-                # Slide 1: 150-250, Slides 2-7: 250-450
-                min_c = 150 if i == 1 else MIN_CHARS
-                max_c = 300 if i == 1 else MAX_CHARS
-                if chars < min_c:
-                    char_issues.append(f"slide_{i}: {chars}c")
-                elif chars > max_c:
-                    char_issues.append(f"slide_{i}: {chars}c(too long)")
+        # Handle both formats
+        if "slides" in slides_data and isinstance(slides_data["slides"], list):
+            slide_list = slides_data["slides"]
+        else:
+            slide_list = [slides_data.get(f"slide_{i}", {}) for i in range(1, 9)]
+
+        for i, s in enumerate(slide_list[:7]):  # slides 1-7
+            if not isinstance(s, dict):
+                continue
+            body = s.get("content", "")
+            chars = len(body)
+            min_c = 150 if i == 0 else MIN_CHARS
+            max_c = 300 if i == 0 else MAX_CHARS
+            if chars < min_c:
+                char_issues.append(f"s{i+1}: {chars}c")
+            elif chars > max_c:
+                char_issues.append(f"s{i+1}: {chars}c(too long)")
 
         if not char_issues:
             log(f"   ✅ All slides pass char count (s1:150-250, s2-7:250-450)")
@@ -745,6 +829,33 @@ if not raw_json:
     sys.exit(1)
 
 # ── Parse & validate slides ──────────────────────────────────────
+# SINGLE VALIDATION FUNCTION (replaces 3 duplicate checks)
+def validate_and_fix(slides: list) -> tuple:
+    """Validate slides, fix issues, return (ok, errors)."""
+    errors = []
+    for i, s in enumerate(slides):
+        c = s["content"]
+        chars = len(c)
+        if i == 0:  # Hook
+            if chars < 150: errors.append(f"s1: {chars}c < 150")
+            elif chars > 300:
+                # Auto-trim
+                trimmed = c[:300]
+                last = max(trimmed.rfind(". "), trimmed.rfind("? "), trimmed.rfind("! "))
+                s["content"] = trimmed[:last+1] if last > 100 else trimmed
+        elif 1 <= i <= 6:  # Body
+            if chars < MIN_CHARS: errors.append(f"s{i+1}: {chars}c < {MIN_CHARS}")
+            elif chars > MAX_CHARS:
+                trimmed = c[:MAX_CHARS]
+                last = max(trimmed.rfind(". "), trimmed.rfind("? "), trimmed.rfind("! "))
+                s["content"] = trimmed[:last+1] if last > 100 else trimmed
+        elif i == 7:  # Slide 8 — trim if over 400
+            if len(c) > 400:
+                trimmed = c[:400]
+                last = max(trimmed.rfind(". "), trimmed.rfind("? "), trimmed.rfind("! "))
+                s["content"] = trimmed[:last+1] if last > 150 else trimmed
+    return len(errors) == 0, errors
+
 try:
     slides_data = json.loads(raw_json)
 except json.JSONDecodeError as e:
@@ -752,61 +863,56 @@ except json.JSONDecodeError as e:
     sys.exit(1)
 
 slides = []
-for i in range(1, 9):
-    key = f"slide_{i}"
-    if key not in slides_data:
-        log(f"❌ Missing {key}")
-        sys.exit(1)
-    slide = slides_data[key]
-    if not isinstance(slide, dict):
-        log(f"❌ {key} not a dict")
-        sys.exit(1)
-    title = (slide.get("title") or "").strip()
-    content = (slide.get("content") or "").strip()
-    if not title or not content:
-        log(f"❌ {key} missing title or content")
-        sys.exit(1)
-    slides.append({"title": title, "content": content})
 
-# Validate slide 8
-if "?" not in slides[7]["title"]:
-    log("❌ Slide 8 title missing '?'")
-    sys.exit(1)
-
-# Validate content length (char count, aligned with retry validation)
-for i, s in enumerate(slides):
-    c = s["content"]
-    chars = len(c)
-    # Slide 1 (hook): 150-300 chars
-    if i == 0:
-        if chars < 150:
-            log(f"⚠️ Slide 1 too short ({chars}c, min 150)")
-            sys.exit(1)
-        elif chars > 300:
-            log(f"⚠️ Slide 1 too long ({chars}c, max 300)")
-            sys.exit(1)
-    # Slides 2-7: enforce 250-450 chars
-    elif 1 <= i <= 6:
-        if chars < MIN_CHARS:
-            log(f"⚠️ Slide {i+1} too short ({chars}c, min {MIN_CHARS})")
-            sys.exit(1)
-        elif chars > MAX_CHARS:
-            log(f"⚠️ Slide {i+1} too long ({chars}c, max {MAX_CHARS})")
-            sys.exit(1)
-    # Slide 8 (CTA): just needs to exist
-    if len(c) > 400:
-        # Trim at last sentence boundary
-        trimmed = c[:400]
-        last_bound = max(trimmed.rfind(". "), trimmed.rfind("? "), trimmed.rfind("! "))
-        if last_bound > 150:
-            s["content"] = trimmed[:last_bound + 1]
+# Handle both formats: {"slide_1": {...}} and {"slides": [...]}
+if "slides" in slides_data and isinstance(slides_data["slides"], list):
+    for i, s in enumerate(slides_data["slides"]):
+        if isinstance(s, str):
+            titles = ['HOOK', 'SPARK', 'WHY', 'TENSION', 'HUMAN', 'RIPPLE', 'UNRESOLVED', 'HOT TAKE']
+            slides.append({"title": titles[i] if i < len(titles) else f"Slide {i+1}", "content": s.strip()})
+        elif isinstance(s, dict):
+            title = (s.get("title") or "").strip()
+            content = (s.get("content") or "").strip()
+            if not content:
+                log(f"❌ slides[{i}] empty content")
+                sys.exit(1)
+            slides.append({"title": title or f"Slide {i+1}", "content": content})
         else:
-            s["content"] = trimmed
+            log(f"❌ slides[{i}] unexpected type: {type(s)}")
+            sys.exit(1)
+else:
+    for i in range(1, 9):
+        key = f"slide_{i}"
+        if key not in slides_data:
+            alt_key = f"Slide {i}"
+            if alt_key in slides_data:
+                key = alt_key
+            else:
+                log(f"❌ Missing {key}. Keys: {list(slides_data.keys())}")
+                sys.exit(1)
+        slide = slides_data[key]
+        if not isinstance(slide, dict):
+            log(f"❌ {key} not a dict")
+            sys.exit(1)
+        title = (slide.get("title") or "").strip()
+        content = (slide.get("content") or "").strip()
+        if not title or not content:
+            log(f"❌ {key} missing title or content")
+            sys.exit(1)
+        slides.append({"title": title, "content": content})
+
+# Single validation pass
+ok, errors = validate_and_fix(slides)
+if not ok:
+    log(f"⚠️ Validation fail: {', '.join(errors)}")
+    # Don't exit — slides may still be usable
+    if len(errors) > 4:
+        sys.exit(1)
 
 # Build joined content (no titles, just content)
 joined = "\n---\n".join(s["content"] for s in slides)
 
-# ── 6. STAGE (atomic write) ──────────────────────────────────────
+# ── 6. STAGE or DRY RUN ──────────────────────────────────────────
 staging_obj = {
     "schema_version": 1,
     "status": "ready",
@@ -816,22 +922,53 @@ staging_obj = {
     "is_wc": bool(best.get("wc_related") or best.get("wc_boost")),
     "is_transfer": bool(best.get("transfer_related")),
     "mode": "thread",
-    "slides": 8,
+    "slides": len(slides),
     "image_url": image_url,
     "image_width": image_width,
     "image_height": image_height,
 }
 
-try:
-    tmp = STAGING + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(staging_obj, f, indent=2)
-    os.replace(tmp, STAGING)
-    log(f"✅ {best['title']}  (8 slides) [{'WC' if staging_obj['is_wc'] else 'Transfer' if staging_obj['is_transfer'] else 'General'}]")
-except Exception as e:
-    log_error(f"Staging write failed: {e}")
-    log(f"❌ Staging write failed: {e}")
-    sys.exit(1)
+if DRY_RUN:
+    # Print JSON to stdout, skip staging
+    print(json.dumps(staging_obj, indent=2))
+    log(f"🔍 DRY RUN — {best['title']} ({len(slides)} slides, no staging)")
+else:
+    try:
+        tmp = STAGING + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(staging_obj, f, indent=2)
+        os.replace(tmp, STAGING)
+        log(f"✅ {best['title']}  ({len(slides)} slides) [{'WC' if staging_obj['is_wc'] else 'Transfer' if staging_obj['is_transfer'] else 'General'}]")
+    except Exception as e:
+        log_error(f"Staging write failed: {e}")
+        log(f"❌ Staging write failed: {e}")
+        sys.exit(1)
 
 total = time.time() - START
-log(f"⏱️ Scrape:{t_scrape:.1f}s  LLM:{t_llm:.1f}s  Total:{total:.1f}s")
+llm_time = time.time() - t0 if 't0' in dir() else 0
+
+# Metrics logging
+metrics = {
+    "ts": datetime.now(WIB).isoformat(),
+    "topic": best.get("title", "")[:60],
+    "url": url,
+    "scrape_s": round(t_scrape, 1),
+    "llm_s": round(time.time() - t0, 1) if 't0' in dir() else 0,
+    "total_s": round(total, 1),
+    "slides": len(slides),
+    "prompt_tok": prompt_tok if 'prompt_tok' in dir() else 0,
+    "completion_tok": completion_tok if 'completion_tok' in dir() else 0,
+    "total_tok": total_tok if 'total_tok' in dir() else 0,
+    "reasoning_c": len(reasoning) if 'reasoning' in dir() else 0,
+    "content_c": len(content) if 'content' in dir() else 0,
+    "image": bool(image_url),
+    "cached": url in article_cache if 'article_cache' in dir() else False,
+}
+METRICS_LOG = f"{HOME}/.hermes/pressbox/metrics.jsonl"
+try:
+    with open(METRICS_LOG, "a") as f:
+        f.write(json.dumps(metrics) + "\n")
+except Exception:
+    pass
+
+log(f"⏱️ Scrape:{t_scrape:.1f}s  LLM:{metrics['llm_s']}s  Total:{total:.1f}s  Tokens:{metrics['total_tok']} (prompt:{metrics['prompt_tok']} + completion:{metrics['completion_tok']})  Reasoning:{metrics['reasoning_c']}c")
