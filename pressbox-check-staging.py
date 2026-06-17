@@ -10,7 +10,7 @@ from datetime import datetime, timezone, timedelta
 HOME = os.path.expanduser("~")
 STAGING_FILE = f"{HOME}/.hermes/pressbox/staging.json"
 STAGING_V3 = f"{HOME}/.hermes/pressbox/staging-v3.json"
-PIPELINE_SCRIPT = f"{HOME}/.hermes/scripts/pressbox-pipeline-v2.py"
+PIPELINE_SCRIPT = f"{HOME}/.hermes/scripts/pressbox-pipeline-v7.py"
 WIB = timezone(timedelta(hours=7))
 MAX_RETRIES = 1  # Aggressive: 3 attempts to ensure content ready
 
