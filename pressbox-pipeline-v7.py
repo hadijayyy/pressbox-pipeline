@@ -24,6 +24,7 @@ try:
     _spec.loader.exec_module(_mod)
     scrape_rss = _mod.scrape_rss
     scrape_mirror = _mod.scrape_mirror
+    scrape_goal = _mod.scrape_goal
 except Exception as e:
     print(f"[FATAL] Cannot load pressbox-research.py: {e}", file=sys.stderr)
     sys.exit(1)
@@ -130,12 +131,14 @@ def classify_topic_type(text):
     return "other"
 
 def extract_body_image(raw_html):
-    """Extract first <img> from article body (fallback when og:image fails)."""
+    """Extract best <img> from article body (fallback when og:image fails).
+    Priority: srcSet largest > data-src > src (skip tiny icons/logos)."""
     from html.parser import HTMLParser
     class ImgExtractor(HTMLParser):
         def __init__(self):
             super().__init__()
-            self.first_img = ""
+            self.best_url = ""
+            self.best_width = 0
             self.in_article = False
         def handle_starttag(self, tag, attrs):
             if tag in ("article", "main", "div"):
@@ -143,16 +146,40 @@ def extract_body_image(raw_html):
                     if name == "class" and val and any(c in val for c in ["article", "story", "content", "post"]):
                         self.in_article = True
             if tag == "img" and self.in_article:
-                for name, val in attrs:
-                    if name == "src" and val and not self.first_img:
-                        # Skip tiny icons, logos, avatars
-                        skip_patterns = ["icon", "logo", "avatar", "pixel", "spacer", "1x1", "badge"]
-                        if not any(p in val.lower() for p in skip_patterns):
-                            self.first_img = val
+                attrs_dict = dict(attrs)
+                skip_patterns = ["icon", "logo", "avatar", "pixel", "spacer", "1x1", "badge"]
+                # Strategy 1: srcSet — pick largest width (adapted from goal_scraper.py)
+                srcset = attrs_dict.get("srcset") or attrs_dict.get("srcSet") or ""
+                if srcset:
+                    for part in srcset.split(","):
+                        tokens = part.strip().split()
+                        if len(tokens) == 2 and tokens[1].endswith("w"):
+                            try:
+                                w = int(tokens[1][:-1])
+                                url = tokens[0]
+                                if w > self.best_width and not any(p in url.lower() for p in skip_patterns):
+                                    self.best_width = w
+                                    self.best_url = url
+                            except ValueError:
+                                pass
+                # Strategy 2: data-src (lazy loading)
+                if not self.best_url:
+                    data_src = attrs_dict.get("data-src", "")
+                    if data_src and not any(p in data_src.lower() for p in skip_patterns):
+                        self.best_url = data_src
+                # Strategy 3: src (direct)
+                if not self.best_url:
+                    src = attrs_dict.get("src", "")
+                    if src and not src.startswith("data:") and not any(p in src.lower() for p in skip_patterns):
+                        self.best_url = src
     try:
         parser = ImgExtractor()
         parser.feed(raw_html[:50000])
-        return parser.first_img or ""
+        url = parser.best_url or ""
+        # Handle protocol-relative URLs (//example.com → https://example.com)
+        if url.startswith("//"):
+            url = "https:" + url
+        return url
     except:
         return ""
 
@@ -300,15 +327,16 @@ START = time.time()
 t_scrape = t_llm = 0
 
 # ── 1. SCRAPE ─────────────────────────────────────────────────────
-log("Scraping Guardian + Mirror...")
+log("Scraping Guardian + Mirror + Sky Sports + Goal.com...")
 t0 = time.time()
-with ThreadPoolExecutor(max_workers=3) as ex:
+with ThreadPoolExecutor(max_workers=4) as ex:
     fut_guardian = ex.submit(scrape_rss, "https://www.theguardian.com/football/rss", "guardian", 14)
     fut_mirror = ex.submit(scrape_mirror)
     fut_sky = ex.submit(scrape_rss, "https://www.skysports.com/rss/11095", "skysports", 12)
+    fut_goal = ex.submit(scrape_goal)
 
     all_topics = []
-    for fut, name in [(fut_guardian, "guardian"), (fut_mirror, "mirror"), (fut_sky, "skysports")]:
+    for fut, name in [(fut_guardian, "guardian"), (fut_mirror, "mirror"), (fut_sky, "skysports"), (fut_goal, "goal")]:
         try:
             result = fut.result(timeout=15)
             for t in result:
@@ -361,7 +389,7 @@ if os.path.exists(CACHE_FILE):
     except Exception:
         pass
 
-ALLOWED_SOURCES = {"guardian", "mirror", "skysports"}
+ALLOWED_SOURCES = {"guardian", "mirror", "skysports", "goal"}
 
 # ── Load analytics feedback ──────────────────────────────────────
 ANALYTICS_FEEDBACK = f"{HOME}/.hermes/pressbox/analytics_feedback.json"

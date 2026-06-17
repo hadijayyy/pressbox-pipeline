@@ -165,6 +165,79 @@ def scrape_mirror():
     except: pass
     return topics
 
+# ─── Goal.com scraper (HTML card parsing) ──────────────────────────
+
+def scrape_goal():
+    """Scrape Goal.com/en for football news. No RSS — parse HTML cards directly.
+    Adapted from goal_scraper.py: extract srcSet largest image."""
+    topics = []
+    try:
+        r = client.get("https://www.goal.com/en", timeout=10)
+        if r.status_code != 200: return topics
+        page_html = r.text
+
+        # Extract article cards via regex (Goal uses data-testid attributes)
+        card_pattern = re.compile(
+            r'<article[^>]*>.*?</article>', re.DOTALL)
+        cards = card_pattern.findall(page_html)[:15]
+
+        seen = set()
+        for card in cards:
+            try:
+                # Extract headline from data-testid="article-card-title"
+                title_m = re.search(r'data-testid="article-card-title"[^>]*>([^<]+)', card)
+                if not title_m:
+                    title_m = re.search(r'<h3[^>]*>([^<]+)', card)
+                if not title_m: continue
+                headline = html.unescape(title_m.group(1).strip())
+                if len(headline) < 10: continue
+
+                # Extract URL from data-testid="card-title-url"
+                url_m = re.search(r'href="(/en/news/[^"]+)"', card)
+                if not url_m: continue
+                article_url = "https://www.goal.com" + url_m.group(1)
+                if article_url in seen: continue
+                seen.add(article_url)
+
+                # Extract best image from srcSet (largest width)
+                image_url = ""
+                srcset_m = re.search(r'srcset="([^"]+)"', card)
+                if srcset_m:
+                    best_w = 0
+                    for part in srcset_m.group(1).split(","):
+                        tokens = part.strip().split()
+                        if len(tokens) == 2 and tokens[1].endswith("w"):
+                            try:
+                                w = int(tokens[1][:-1])
+                                if w > best_w:
+                                    best_w = w
+                                    image_url = tokens[0]
+                            except ValueError: pass
+                # Fallback: data-src or src
+                if not image_url:
+                    dsrc_m = re.search(r'data-src="([^"]+)"', card)
+                    if dsrc_m:
+                        image_url = dsrc_m.group(1)
+                    else:
+                        src_m = re.search(r'<img[^>]+src="([^"]+)"', card)
+                        if src_m and not src_m.group(1).startswith("data:"):
+                            image_url = src_m.group(1)
+                # Fix protocol-relative
+                if image_url.startswith("//"):
+                    image_url = "https:" + image_url
+
+                tl = headline.lower()
+                has_wc = any(kw in tl for kw in ["world cup", "worldcup", "wc 202", "usa 2026", "mexico 2026", "canada 2026", "qualifier"])
+                is_transfer = any(kw in tl for kw in ["transfer", "signs", "signing", "joins", "deal", "bid", "loan"])
+                score = 14 if has_wc else (13 if is_transfer else 10)
+
+                topics.append(dict(title=headline, source="goal", url=article_url, score=score,
+                    comments=0, wc_boost=has_wc, transfer_related=is_transfer,
+                    description="", published_ts=None, image_url=image_url))
+            except: pass
+    except: pass
+    return topics
+
 # ─── Viral keyword matcher ───────────────────────────────────────
 
 HIGH_VIRAL = frozenset(["goes viral", "fans react", "fans rage", "fans divided", "social media reacts",
