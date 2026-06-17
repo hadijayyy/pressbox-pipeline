@@ -157,6 +157,21 @@ if not topic or not content:
     print(f"⏸️ Post skip — staging kosong.")
     sys.exit(0)
 
+# 1b. DUPLICATE CHECK — skip if URL already posted
+topic_url = topic.get("url", "")
+if topic_url:
+    try:
+        with open(POSTED_JSON) as f:
+            posted_data = json.load(f)
+        for t in posted_data.get("topics", []):
+            if t.get("url") == topic_url:
+                log(f"🔁 Duplicate detected — already posted: {topic['title'][:50]}")
+                print(f"⏭️ Skip — sudah pernah dipost: {topic['title'][:60]}")
+                _cleanup(remove_pending=True, current_topic=topic)
+                sys.exit(0)
+    except FileNotFoundError:
+        pass
+
 log(f"Staging loaded: {topic['title']} (written at {written_at})")
 
 # 2. Write content to latest.md
