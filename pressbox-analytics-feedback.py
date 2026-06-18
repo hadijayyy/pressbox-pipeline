@@ -24,7 +24,7 @@ def get_token():
         data = json.load(f)
     return data["access_token"], data["user_id"]
 
-def fetch_recent_posts(tok, uid, limit=20):
+def fetch_recent_posts(tok, uid, limit=50):
     r = httpx.get(f"https://graph.threads.net/v1.0/{uid}/threads",
                   params={"access_token": tok, "fields": "id,text,timestamp", "limit": limit},
                   timeout=15)
@@ -39,7 +39,8 @@ def fetch_engagement(tok, post_id):
         for x in r.json().get("data", []):
             m[x["name"]] = x["values"][0]["value"]
         return m
-    except:
+    except Exception as e:
+        print(f"   ⚠️ Failed to fetch insights for {post_id}: {e}")
         return {"likes": 0, "replies": 0, "reposts": 0, "views": 0, "quotes": 0}
 
 def calc_score(m):
@@ -68,7 +69,7 @@ def to_wib_hour(ts):
 
 def main():
     tok, uid = get_token()
-    raw = fetch_recent_posts(tok, uid, limit=20)
+    raw = fetch_recent_posts(tok, uid, limit=50)
     if not raw:
         print("No posts found.")
         return 0

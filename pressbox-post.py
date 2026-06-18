@@ -59,8 +59,10 @@ def is_bad_hour():
             return False
         now_hour = datetime.now(WIB).hour
         return now_hour in worst
-    except:
+    except (OSError, IOError, json.JSONDecodeError) as e:
+        log(f"   ⚠️ Bad hour check failed: {e}")
         return False
+
 
 def is_posting_too_frequent():
     """Check if we posted too recently (Quality > Quantity)."""
@@ -81,20 +83,21 @@ def is_posting_too_frequent():
                     diff = (now - dt).total_seconds() / 60  # minutes
                     if diff < 30:  # Less than 30 min since last post
                         return True
-                except:
-                    pass
+                except (ValueError, TypeError) as e:
+                    log(f"   ⚠️ Date parsing failed: {e}")
         return False
-    except:
+    except (OSError, IOError, json.JSONDecodeError) as e:
+        log(f"   ⚠️ Post frequency check failed: {e}")
         return False
 
 # ===== MAIN =====
 log('POST', "=== PRESS BOX POST (Phase 2) ===")
 
-# 0. TIME CHECK — skip if current hour is analytics worst hour
-if is_bad_hour():
-    log('POST', "⏰ Bad hour detected — skipping post. [SILENT]")
-    print("⏸️ Post skip — jam ini termasuk worst hour. Next jam.")
-    sys.exit(0)
+# 0. TIME CHECK — DISABLED (user wants 1 post per hour regardless)
+# if is_bad_hour():
+#     log('POST', "⏰ Bad hour detected — skipping post. [SILENT]")
+#     print("⏸️ Post skip — jam ini termasuk worst hour. Next jam.")
+#     sys.exit(0)
 
 # 0b. FREQUENCY CHECK — Quality > Quantity
 if is_posting_too_frequent():
