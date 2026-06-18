@@ -159,20 +159,20 @@ def post_thread(uid, token, slides, image_url=None):
             continue
 
         if parent_pid:
-            print(f"   Slide {i+1}: creating reply to {parent_pid}...", file=sys.stderr)
+            print(f"   Slide {i+1}/8: creating reply to {parent_pid}...", file=sys.stderr)
         else:
-            print(f"   Slide {i+1}: creating root container...", file=sys.stderr)
+            print(f"   Slide {i+1}/8: creating root container...", file=sys.stderr)
 
         cid = create_container(uid, token, text, parent_pid, image_url if i == 0 else None)
-        time.sleep(0.3)
+        time.sleep(0.2)
 
-        print(f"   Slide {i+1}: publishing...", file=sys.stderr)
+        print(f"   Slide {i+1}/8: publishing...", file=sys.stderr)
         pid = publish(uid, token, cid)
         post_ids.append(pid)
-        print(f"   Slide {i+1}: → {pid}", file=sys.stderr)
+        print(f"   Slide {i+1}/8: → {pid}", file=sys.stderr)
 
         if i == 0:
-            time.sleep(0.5)
+            time.sleep(0.3)
             try:
                 r = _HTTP.get(f"{THREADS_API}/{pid}",
                     params={"fields": "permalink", "access_token": token}, timeout=10)
@@ -186,8 +186,8 @@ def post_thread(uid, token, slides, image_url=None):
 
         parent_pid = pid
         if i < len(filtered) - 1:
-            print(f"   Waiting 0.5s for indexing...", file=sys.stderr)
-            time.sleep(0.5)
+            print(f"   Waiting 0.3s for indexing...", file=sys.stderr)
+            time.sleep(0.3)
 
     return post_ids
 

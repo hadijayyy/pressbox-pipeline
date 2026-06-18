@@ -36,7 +36,7 @@ def _cleanup(remove_pending=True, current_topic=None):
         except Exception:
             pass
 
-def shell(cmd, timeout=60):
+def shell(cmd, timeout=120):
     try:
         r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
         out = r.stdout.strip()
