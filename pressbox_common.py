@@ -17,7 +17,8 @@ from datetime import datetime, timezone, timedelta
 
 # ── Paths ───────────────────────────────────────────────────────────
 HOME = os.path.expanduser("~")
-SCRIPTS = f"{HOME}/.hermes/scripts"
+REPO_DIR = os.path.dirname(os.path.abspath(__file__))
+SCRIPTS = REPO_DIR  # all scripts now live in the repo
 STAGING = {
     "v2": f"{HOME}/.hermes/pressbox/staging.json",
     "v3": f"{HOME}/.hermes/pressbox/staging-v3.json"

@@ -8,8 +8,8 @@ import shlex
 from datetime import datetime
 from pressbox_common import log, send_alert, load_env, WIB, STAGING, POSTED, HOME
 
-POST_SCRIPT = f"{HOME}/.hermes/scripts/pressbox-direct-post.py"
-VERIFY_SCRIPT = f"{HOME}/.hermes/scripts/verify-last-slide.py"
+POST_SCRIPT = f"{os.path.dirname(os.path.abspath(__file__))}/pressbox-direct-post.py"
+VERIFY_SCRIPT = f"{os.path.dirname(os.path.abspath(__file__))}/verify-last-slide.py"
 LATEST_MD = f"{HOME}/.hermes/content-pipeline/drafts/football/latest.md"
 os.makedirs(f"{HOME}/.hermes/pressbox", exist_ok=True)
 
