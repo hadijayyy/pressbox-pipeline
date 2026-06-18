@@ -17,7 +17,7 @@ from datetime import datetime, timezone, timedelta
 
 # ── Paths ───────────────────────────────────────────────────────────
 HOME = os.path.expanduser("~")
-REPO_DIR = os.path.dirname(os.path.abspath(__file__))
+REPO_DIR = "/home/ubuntu/pressbox-pipeline"  # fixed path for cron compatibility
 SCRIPTS = REPO_DIR  # all scripts now live in the repo
 STAGING = {
     "v2": f"{HOME}/.hermes/pressbox/staging.json",
