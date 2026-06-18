@@ -543,6 +543,14 @@ slide_8: HOT TAKE (150-450 chars, debate question + source URL)
 - Facts only. Short sentences. Conversational English.
 - Slide 8: pick a side + source URL
 
+[CRITICAL — TOPIC LOCK]
+- STICK TO THE EXACT SINGLE TOPIC AND ANGLE OF THE ARTICLE.
+- Do NOT mix multiple stories or angles into one thread.
+- Do NOT add information not present in the article.
+- Do NOT expand scope beyond the article's focus.
+- Example: If article is about "fans without tickets" → every slide must be about THAT incident. Do NOT add match results, goals, or other unrelated details.
+- Example: If article is about "a pundit's controversial remark" → every slide must be about THAT remark. Do NOT add team performance or standings.
+
 [OUTPUT]
 {"slide_1":{"title":"HOOK","content":"...","image_url":"..."},"slide_2":{"title":"SPARK","content":"..."},"slide_3":{"title":"WHY","content":"..."},"slide_4":{"title":"TENSION","content":"..."},"slide_5":{"title":"HUMAN","content":"..."},"slide_6":{"title":"RIPPLE","content":"..."},"slide_7":{"title":"UNRESOLVED","content":"..."},"slide_8":{"title":"HOT TAKE","content":"... + blank line + URL"}}
 
