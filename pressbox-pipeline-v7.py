@@ -542,7 +542,10 @@ slide_8: HOT TAKE (150-450 chars, state an opinion clearly supported by a fact f
 [RULES]
 - Blank line every 2 sentences
 - NO: em-dash(—), en-dash(–), hashtag(#), AI phrases ("In a stunning turn", "It's safe to say", "Time will tell")
-- Facts only. Short sentences. Conversational English.
+- Write like a friend telling you the news, NOT like a robot summarizing a webpage
+- Use emotional hooks, bold statements, conversational tone
+- NO bland summaries ("X published Y", "The article details...", "This match report...")
+- Facts only. Short sentences. Punchy.
 - Slide 8: state a clear opinion supported by a fact from the article + source URL
 
 [CRITICAL — TOPIC LOCK]
