@@ -228,8 +228,8 @@ if os.path.exists(STAGING["v2"]) and not DRY_RUN:
         elif existing.get("status") == "error":
             log("⚠️ Staging has error status — overwriting")
         else:
-            log("⏸️ Staging unposted — skip (exit 2)")
-            sys.exit(2)
+            log("⏸️ Staging unposted — skip")
+            sys.exit(0)
     except Exception as e:
         log_error(f"Guard read error: {e}")
         log("⚠️ Staging corrupt — overwriting")
@@ -535,13 +535,13 @@ slide_4: TENSION (150-450 chars, conflict/stakes)
 slide_5: HUMAN (150-450 chars, quotes/emotion)
 slide_6: RIPPLE (150-450 chars, wider impact)
 slide_7: UNRESOLVED (150-450 chars, what's next)
-slide_8: HOT TAKE (150-450 chars, debate question + source URL)
+slide_8: HOT TAKE (150-450 chars, state an opinion clearly supported by a fact from the article + source URL)
 
 [RULES]
 - Blank line every 2 sentences
 - NO: em-dash(—), en-dash(–), hashtag(#), AI phrases ("In a stunning turn", "It's safe to say", "Time will tell")
 - Facts only. Short sentences. Conversational English.
-- Slide 8: pick a side + source URL
+- Slide 8: state a clear opinion supported by a fact from the article + source URL
 
 [CRITICAL — TOPIC LOCK]
 - STICK TO THE EXACT SINGLE TOPIC AND ANGLE OF THE ARTICLE.
