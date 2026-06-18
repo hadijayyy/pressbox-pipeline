@@ -157,7 +157,7 @@ if not root_id:
     log('POST', f"❌ Failed — no root post ID (output: {post_out[:300]})")
     title = topic.get("title", "?")
     print("❌ Post error — gagal posting.")
-    send_alert(f"POST failed (no root ID)\nTopic: {title[:60]}")
+    send_alert("POST failed", f"No root ID. Topic: {title[:60]}")
     _cleanup(remove_pending=True, current_topic=topic)
     sys.exit(1)
 

@@ -14,14 +14,13 @@ Usage:
 """
 
 import json, sys, httpx, time, re
-from httpx import HTTPTransport
 import atexit
 from pathlib import Path
 
 HOME = Path.home()
 TOKEN_FILE = HOME / ".hermes" / "threads_token.json"
 THREADS_API = "https://graph.threads.net/v1.0"
-_HTTP = httpx.Client(timeout=8, transport=HTTPTransport(retries=2, http2=True))
+_HTTP = httpx.Client(timeout=8)
 atexit.register(_HTTP.close)
 
 def load_token():
