@@ -448,8 +448,10 @@ else:
         log(f"❌ curl exception: {e}")
         sys.exit(1)
 
-    # Strip HTML tags for article text
-    article_text = re.sub(r"<[^>]+>", " ", raw_html)
+    # Strip HTML tags, CSS, scripts for clean article text
+    article_text = re.sub(r"<style[^>]*>.*?</style>", " ", raw_html, flags=re.DOTALL|re.IGNORECASE)
+    article_text = re.sub(r"<script[^>]*>.*?</script>", " ", article_text, flags=re.DOTALL|re.IGNORECASE)
+    article_text = re.sub(r"<[^>]+>", " ", article_text)
     article_text = re.sub(r"\s+", " ", article_text).strip()[:2000]
 
     # Extract og:image
