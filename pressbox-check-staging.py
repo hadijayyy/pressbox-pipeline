@@ -7,7 +7,7 @@ Goal: ensure :35 always has content to post.
 import json, os, sys, subprocess, time
 from pressbox_common import log, WIB, STAGING, HOME
 
-PIPELINE_SCRIPT = f"{HOME}/.hermes/scripts/pressbox-pipeline-v7.py"
+PIPELINE_SCRIPT = f"{os.path.dirname(os.path.abspath(__file__))}/pressbox-pipeline-v7.py"
 MAX_RETRIES = 1  # Aggressive attempts to ensure content ready
 
 def is_staging_ready():
