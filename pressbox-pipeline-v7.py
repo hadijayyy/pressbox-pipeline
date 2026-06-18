@@ -665,7 +665,7 @@ for attempt in range(1, MAX_RETRIES + 1):
         payload = {
             "model": ACTIVE_MODEL,
             "messages": [
-                {"role": "system", "content": system_prompt},
+                {"role": "system", "content": system_prompt.replace("{url}", url)},
                 {"role": "user", "content": user_prompt},
             ],
             "max_tokens": ACTIVE_MAX_TOKENS,
