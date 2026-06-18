@@ -628,7 +628,13 @@ Start with {. JSON only. No preamble. No explanation.
 - Location → match exactly what the article says.
 - Vague in article → stay vague. Don't sharpen what isn't there.
 - No supporting sentence in article → no claim in slide.
-- slide_6 is exempt. It is analysis. See slide definition above."""
+- slide_6 is exempt. It is analysis. See slide definition above.
+
+[OUTPUT CONSTRAINT — CRITICAL]
+Output ONLY the JSON object. No reasoning, no explanation, no preamble.
+The JSON must appear in your content/response, NOT in any internal thinking.
+If you think about the slides, output the JSON immediately after thinking.
+Do NOT wrap JSON in markdown code blocks. Start with { and end with }."""
 
 user_prompt = f"ARTICLE: {article_text}\n[Note: article may be truncated. Use only what is provided above.]\nSOURCE: {url}"
 
