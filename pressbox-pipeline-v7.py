@@ -541,6 +541,13 @@ slide_8: OPINION + CTA (250-450 chars, opinion + question + URL)
 ❌ BAD: "In a stunning turn of events, Arsenal have made a huge signing"
 ❌ BAD: "Breaking: Arsenal sign new player"
 
+[HOOK — USE THESE TYPES, NOT GENERIC OPENINGS]
+Rotate between: Stat / Quote / Question / Scenario / Contrast
+✅ GOOD: "Cristiano Ronaldo has played 1,200 career games. He's never been targeted like this before."
+✅ GOOD: "Portugal's biggest star just became their biggest problem."
+❌ BAD: "Cristiano Ronaldo was targeted. That's the headline from a new report."
+❌ BAD: "Breaking: Ronaldo targeted at World Cup"
+
 [SPARK EXAMPLES]
 ✅ GOOD: "Turkish broadcaster Murat Ekrem Cimen mixed up Iran and New Zealand for four minutes live on air. Iran wore white. New Zealand wore black."
 ❌ BAD: "A World Cup broadcaster got the boot after a controversial incident"
@@ -550,10 +557,12 @@ slide_8: OPINION + CTA (250-450 chars, opinion + question + URL)
 ❌ BAD: "This matters because it shows the real atmosphere"
 
 [HUMAN MOMENT — EMPATHY]
-Zoom in on ONE person. Make the reader FEEL something.
+Zoom in on ONE person. Make the reader FEEL something specific.
+Must include: WHO + WHAT they're feeling + WHY it's hard for them personally.
 Empathy targets: person who made mistake, fans, players under pressure, families, young players, veterans.
-✅ GOOD: "Cimen has 30 years in the industry. Thirty years of work, reputation, and credibility. All of it questioned because of four minutes."
-❌ BAD: "Wright is known for wearing his heart on his sleeve"
+✅ GOOD: "Cimen has 30 years in the industry. Thirty years of building trust. All of it questioned in four minutes of live TV."
+❌ BAD: "Being targeted on the biggest stage still hits differently" (vague filler)
+❌ BAD: "Wright is known for wearing his heart on his sleeve" (no specific emotion)
 
 [RIPPLE EXAMPLES]
 ✅ GOOD: "Other networks are watching. Commentators everywhere know this could have been them."
@@ -581,6 +590,7 @@ State opinion backed by article fact. End with specific question for readers.
 - Do NOT sensationalize. NEVER upgrade severity beyond what article states.
 - Do NOT ask rhetorical questions that imply missing info.
 - Every claim in slides 2-7 MUST be traceable to the article. If not → delete it.
+- If article is vague (e.g. "was targeted" without saying by who/what), stay vague too. Do NOT fill gaps with assumptions. Write: "The details are still unclear" instead of inventing specifics.
 
 [CRITICAL — TOPIC LOCK]
 - STICK TO THE EXACT SINGLE TOPIC AND ANGLE OF THE ARTICLE.
