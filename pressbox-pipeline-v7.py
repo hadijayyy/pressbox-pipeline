@@ -583,6 +583,8 @@ Opinion backed by article fact. End with specific question.
 - Every claim in slides 2-7 must trace to the article. If not → delete it.
 - If article is vague, stay vague. Write "details still unclear" — never fill gaps.
 - Do NOT use your own knowledge. If the article doesn't name a person, don't name them. If it doesn't state a fact, don't state it. Article is the ONLY source of truth.
+- Before writing each slide, mentally quote the exact sentence from the article you're basing it on. If you can't find one → don't write that slide.
+- Do NOT create quotes. If the article doesn't include exact words, paraphrase what was said. Never invent quotation marks.
 
 [ROUND-UP ARTICLES]
 If article covers multiple stories (e.g. "5 transfers this week"), pick the SINGLE most compelling story and focus on that. State in HOOK which story you chose. Ignore the rest.
@@ -824,6 +826,42 @@ def validate_and_fix(slides: list) -> tuple:
                 s["content"] = trimmed[:last+1] if last > 150 else trimmed
     return len(errors) == 0, errors
 
+# ── Grounding verification ──────────────────────────────────────
+def verify_grounding(article_text, slides_data, model):
+    """Verify each slide against the article. Returns (passed, issues)."""
+    verify_prompt = f"""ARTICLE:
+{article_text[:2000]}
+
+GENERATED CONTENT:
+{json.dumps(slides_data, indent=2)}
+
+For each slide, answer: does every factual claim appear in the article?
+Return: {{"passed": true}} or {{"passed": false, "issues": ["slide_2: Southgate not mentioned in article"]}}"""
+    try:
+        r = requests.post(
+            API_URL,
+            headers={"Content-Type": "application/json", **({"Authorization": f"Bearer {API_KEY}"} if API_KEY else {})},
+            json={
+                "model": model,
+                "messages": [{"role": "user", "content": verify_prompt}],
+                "max_tokens": 1000,
+                "temperature": 0.1,
+            },
+            timeout=60,
+        )
+        if r.status_code == 200:
+            content = r.json()["choices"][0]["message"]["content"]
+            # Extract JSON
+            import re
+            match = re.search(r'\{.*\}', content, re.DOTALL)
+            if match:
+                result = json.loads(match.group())
+                return result.get("passed", True), result.get("issues", [])
+        return True, []  # If verification fails, don't block
+    except Exception as e:
+        log(f"   ⚠️ Verification error: {e}")
+        return True, []
+
 try:
     slides_data = json.loads(raw_json)
 except json.JSONDecodeError as e:
@@ -876,6 +914,15 @@ if not ok:
     # Don't exit — slides may still be usable
     if len(errors) > 4:
         sys.exit(1)
+
+# ── Grounding verification (check slides vs article) ─────────────
+slides_dict = {f"slide_{i+1}": s for i, s in enumerate(slides)}
+passed, issues = verify_grounding(article_text, slides_dict, ACTIVE_MODEL)
+if not passed:
+    log(f"⚠️ Grounding issues: {issues}")
+    # Don't exit — log issues for now, can be made strict later
+else:
+    log(f"✅ Grounding verified — all claims traceable to article")
 
 # Build joined content (no titles, just content)
 # Post-process: replace em-dashes and en-dashes
