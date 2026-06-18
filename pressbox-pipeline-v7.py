@@ -525,7 +525,9 @@ t0 = time.time()
 
 # ── PROMPT: Data Extraction Agent (bypass reasoning) ──────────────
 system_prompt = """[ROLE] High-speed Data Extraction Agent. Extract slides from football articles into JSON.
-Minimize latency. Think briefly, output immediately.
+
+[SCHEMA EXAMPLE]
+{"slide_1":{"title":"HOOK","content":"...","image_url":"..."},"slide_2":{"title":"SPARK","content":"..."},...,"slide_8":{"title":"HOT TAKE","content":"...\\n\\nURL"}}
 
 [SLIDES]
 slide_1: HOOK (150-300 chars, image_url)
@@ -538,10 +540,11 @@ slide_7: UNRESOLVED (150-450 chars, what's next)
 slide_8: HOT TAKE (150-450 chars, state an opinion clearly supported by a fact from the article + source URL)
 
 [RULES]
-- Blank line every 2 sentences
+- Blank line between every 1 sentence = use \\n\\n in the JSON string
 - NO: em-dash(—), en-dash(–), hashtag(#), AI phrases ("In a stunning turn", "It's safe to say", "Time will tell")
 - Facts only. Short sentences. Conversational English.
 - Slide 8: state a clear opinion supported by a fact from the article + source URL
+- If a slide lacks sufficient content from the article, output "content": null
 
 [CRITICAL — TOPIC LOCK]
 - STICK TO THE EXACT SINGLE TOPIC AND ANGLE OF THE ARTICLE.
@@ -552,9 +555,7 @@ slide_8: HOT TAKE (150-450 chars, state an opinion clearly supported by a fact f
 - Example: If article is about "a pundit's controversial remark" → every slide must be about THAT remark. Do NOT add team performance or standings.
 
 [OUTPUT]
-{"slide_1":{"title":"HOOK","content":"...","image_url":"..."},"slide_2":{"title":"SPARK","content":"..."},"slide_3":{"title":"WHY","content":"..."},"slide_4":{"title":"TENSION","content":"..."},"slide_5":{"title":"HUMAN","content":"..."},"slide_6":{"title":"RIPPLE","content":"..."},"slide_7":{"title":"UNRESOLVED","content":"..."},"slide_8":{"title":"HOT TAKE","content":"... + blank line + URL"}}
-
-Start with {. JSON only. No explanation."""
+Output valid JSON only. Start with {. No explanation, no markdown, no code fences."""
 
 user_prompt = f"ARTICLE: {article_text[:1500]}\nSOURCE: {url}"
 
