@@ -43,7 +43,7 @@ def get_model_config(topic_type):
     """
     if topic_type in ["WC_team_guide", "other"]:
         return {"model": "minimax-m3", "max_tokens": 4000, "reasoning_effort": None}
-    return {"model": "deepseek-v4-flash", "max_tokens": 8000, "reasoning_effort": "low"}
+    return {"model": "deepseek-v4-flash", "max_tokens": 10000, "reasoning_effort": "low"}
 
 def extract_body_image(raw_html):
     """Extract best <img> from article body (fallback when og:image fails).
@@ -616,7 +616,7 @@ if API_KEY:
 
 # ── LLM call with streaming + retry ────────────────────────────
 MAX_RETRIES = 3
-MIN_CHARS = 150
+MIN_CHARS = 80
 MAX_CHARS = 450
 raw_json = ""
 
