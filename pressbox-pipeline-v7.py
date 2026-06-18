@@ -85,8 +85,10 @@ def extract_body_image(raw_html):
         if url.startswith("//"):
             url = "https:" + url
         return url
-    except:
+    except Exception as e:
+        log(f"   ⚠️ extract_og_image failed: {e}")
         return ""
+
 
 def score_topic(t):
     title = t.get("title", "")
@@ -200,7 +202,8 @@ def validate_image_quality(url):
                 return (True, w, h)
 
         return (False, w, h)
-    except:
+    except Exception as e:
+        log(f"   ⚠️ validate_image_quality failed: {e}")
         return (False, 0, 0)
 
 # ── Guard ───────────────────────────────────────────────────────────
@@ -307,7 +310,6 @@ ANALYTICS_FEEDBACK = f"{HOME}/.hermes/pressbox/analytics_feedback.json"
 ANALYTICS_RECOMMENDATIONS = f"{HOME}/.hermes/pressbox/analytics_recommendations.json"
 topic_boosts = {}
 skip_topics = []
-best_hours = []
 research_keywords_add = []
 research_keywords_remove = []
 preferred_hooks = []
@@ -327,16 +329,14 @@ try:
             else:
                 topic_boosts = fb.get("topic_boosts", {})
                 skip_topics = [s.get("pattern", "") for s in fb.get("skip_topics", [])]
-                best_hours = fb.get("best_hours", [])
                 analytics_fresh = True
-                log(f"   📊 Analytics loaded: {len(topic_boosts)} boosts, {len(skip_topics)} skip, best_hours={best_hours}")
+                log(f"   📊 Analytics loaded: {len(topic_boosts)} boosts, {len(skip_topics)} skip")
         except (ValueError, TypeError):
             log(f"   ⚠️ Invalid generated_at — using defaults")
     else:
         # Backward compat: no generated_at, use as-is
         topic_boosts = fb.get("topic_boosts", {})
         skip_topics = [s.get("pattern", "") for s in fb.get("skip_topics", [])]
-        best_hours = fb.get("best_hours", [])
         analytics_fresh = True
         if topic_boosts or skip_topics:
             log(f"   📊 Analytics loaded (no timestamp): {len(topic_boosts)} boosts, {len(skip_topics)} skip")
@@ -471,8 +471,8 @@ else:
                         image_height = h
                         log(f"   ✅ OG image: {w}x{h}")
                         break
-            except:
-                pass
+            except Exception as e:
+                log(f"   ⚠️ Image check failed: {e}")
 
     # Fallback 1: body image
     if not image_url:
@@ -487,8 +487,8 @@ else:
                         image_width = w
                         image_height = h
                         log(f"   ✅ Body image: {w}x{h}")
-            except:
-                pass
+            except Exception as e:
+                log(f"   ⚠️ Image check failed: {e}")
 
     # Fallback 2: RSS image
     if not image_url:
@@ -503,8 +503,8 @@ else:
                         image_width = w
                         image_height = h
                         log(f"   ✅ RSS image: {w}x{h}")
-            except:
-                pass
+            except Exception as e:
+                log(f"   ⚠️ Image check failed: {e}")
 
     # Cache article for next run
     article_cache[url] = {"text": article_text, "image": image_url, "w": image_width, "h": image_height, "ts": time.time()}

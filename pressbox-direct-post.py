@@ -179,7 +179,8 @@ def post_thread(uid, token, slides, image_url=None):
                 perm = r.json().get("permalink", "")
                 print(f"Root: {pid}")
                 print(f"Post: {perm}")
-            except:
+            except Exception as e:
+                print(f"   ⚠️ Failed to get permalink for {pid}: {e}")
                 print(f"Root: {pid}")
                 print(f"Post: https://www.threads.com/@parkthebus.football/post/{pid}")
 

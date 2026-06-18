@@ -11,7 +11,6 @@ from pressbox_common import log, send_alert, load_env, WIB, STAGING, POSTED, HOM
 POST_SCRIPT = f"{HOME}/.hermes/scripts/pressbox-direct-post.py"
 VERIFY_SCRIPT = f"{HOME}/.hermes/scripts/verify-last-slide.py"
 LATEST_MD = f"{HOME}/.hermes/content-pipeline/drafts/football/latest.md"
-FEEDBACK_JSON = f"{HOME}/.hermes/pressbox/analytics_feedback.json"
 os.makedirs(f"{HOME}/.hermes/pressbox", exist_ok=True)
 
 def _cleanup(remove_pending=True, current_topic=None):
@@ -49,21 +48,6 @@ def shell(cmd, timeout=60):
     except Exception as e:
         return str(e), -1
 
-def is_bad_hour():
-    """Check if current hour is in worst_hours from analytics feedback."""
-    try:
-        with open(FEEDBACK_JSON) as f:
-            fb = json.load(f)
-        worst = fb.get("worst_hours", [])
-        if not worst:
-            return False
-        now_hour = datetime.now(WIB).hour
-        return now_hour in worst
-    except (OSError, IOError, json.JSONDecodeError) as e:
-        log(f"   ⚠️ Bad hour check failed: {e}")
-        return False
-
-
 def is_posting_too_frequent():
     """Check if we posted too recently (Quality > Quantity)."""
     try:
@@ -91,18 +75,11 @@ def is_posting_too_frequent():
         return False
 
 # ===== MAIN =====
-log('POST', "=== PRESS BOX POST (Phase 2) ===")
-
-# 0. TIME CHECK — DISABLED (user wants 1 post per hour regardless)
-# if is_bad_hour():
-#     log('POST', "⏰ Bad hour detected — skipping post. [SILENT]")
-#     print("⏸️ Post skip — jam ini termasuk worst hour. Next jam.")
-#     sys.exit(0)
+log('POST', "=== PRESS BOX POST ===")
 
 # 0b. FREQUENCY CHECK — Quality > Quantity
 if is_posting_too_frequent():
-    log('POST', "⏰ Posting too frequent — skipping for quality. [SILENT]")
-    print("⏸️ Post skip — baru posting < 30 menit lalu. Quality > Quantity.")
+    print("⏸️ Skip — baru posting < 30 menit lalu.")
     sys.exit(0)
 
 # 1. Read staging (check v3 first, then v2)
@@ -117,8 +94,7 @@ if os.path.exists(STAGING["v3"]):
 elif os.path.exists(STAGING["v2"]):
     staging_file = STAGING["v2"]
 else:
-    log('POST', "No staging file — nothing to post. [SILENT]")
-    print(f"⏸️ Post skip — belum ada konten di staging.")
+    print("⏸️ Skip — staging kosong.")
     sys.exit(0)
 
 with open(staging_file) as f:
@@ -129,8 +105,8 @@ content = staging.get("content")
 written_at = staging.get("written_at")
 
 if not topic or not content:
-    log('POST', "Staging empty — nothing to post. [SILENT]")
-    print(f"⏸️ Post skip — staging kosong.")
+    log('POST', "Staging empty — nothing to post.")
+    print("⏸️ Skip — staging kosong.")
     sys.exit(0)
 
 # 1b. DUPLICATE CHECK — skip if URL already posted
@@ -142,7 +118,7 @@ if topic_url:
         for t in posted_data.get("topics", []):
             if t.get("url") == topic_url:
                 log('POST', f"🔁 Duplicate detected — already posted: {topic['title'][:50]}")
-                print(f"⏭️ Skip — sudah pernah dipost: {topic['title'][:60]}")
+                print(f"⏭️ Skip — sudah pernah dipost.")
                 _cleanup(remove_pending=True, current_topic=topic)
                 sys.exit(0)
     except FileNotFoundError:
@@ -180,7 +156,7 @@ for line in post_out.split('\n'):
 if not root_id:
     log('POST', f"❌ Failed — no root post ID (output: {post_out[:300]})")
     title = topic.get("title", "?")
-    print(f"❌ Post error: {title[:60]}")
+    print("❌ Post error — gagal posting.")
     send_alert(f"POST failed (no root ID)\nTopic: {title[:60]}")
     _cleanup(remove_pending=True, current_topic=topic)
     sys.exit(1)
@@ -190,7 +166,7 @@ mode = staging.get("mode", "thread")
 if mode != "single_paragraph" and len(post_ids) < 4:
     log('POST', f"⚠️ Partial post ({len(post_ids)} slides), deleting...")
     shell(f"python3 {POST_SCRIPT} --delete {root_id}", timeout=15)
-    print(f"❌ Post delete — partial post ({len(post_ids)} slides), dihapus.")
+    print(f"❌ Partial post ({len(post_ids)} slides) — dihapus.")
     _cleanup(remove_pending=True, current_topic=topic)
     sys.exit(0)
 
@@ -228,8 +204,10 @@ with open(POSTED, 'w') as f:
 _cleanup(remove_pending=False, current_topic=topic)
 open(LATEST_MD, 'w').close()
 
-# 9. Done — report
-src_url = topic.get("url", "")
+# 9. Done — simple report
 threads_link = permalink if permalink else f"https://www.threads.com/@parkthebus.football/post/{root_id}"
-print(f"✅ Posted: {topic['title'][:80]} ({len(post_ids)} slides)")
+title = topic.get("title", "?")
+source = topic.get("source", "?")
+img = "🖼️" if image_url else ""
+print(f"✅ {title[:70]}")
 print(f"   {threads_link}")
