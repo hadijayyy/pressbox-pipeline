@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-"""Press Box Analytics → Feedback Loop (Fast Version).
+"""Press Box Analytics → Feedback Loop (v2 — Historical Merge).
 
-Fetches last 20 posts, analyzes engagement, outputs:
-1. analytics_feedback.json  — consumed by pipeline for topic boosts
-2. analytics_report.md      — Telegram delivery
+Fetches last 50 posts, merges with previous analytics data using
+weighted average (70% new + 30% old) for cumulative learning.
+
+Output:
+1. analytics_feedback.json — consumed by pipeline for topic boosts
+2. analytics_report.md — Telegram delivery
 
 Usage:
     python3 ~/.hermes/scripts/pressbox-analytics-feedback.py
@@ -11,13 +14,16 @@ Usage:
 
 import json, os, httpx, re
 from datetime import datetime, timezone, timedelta
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections import defaultdict
 
 TOKEN_PATH = os.path.expanduser("~/.hermes/threads_token.json")
 FEEDBACK_PATH = os.path.expanduser("~/.hermes/pressbox/analytics_feedback.json")
 REPORT_PATH = os.path.expanduser("~/.hermes/pressbox/analytics_report.md")
 WIB = timezone(timedelta(hours=7))
+
+# Merge weights: 70% new data + 30% historical
+NEW_WEIGHT = 0.7
+OLD_WEIGHT = 0.3
 
 def get_token():
     with open(TOKEN_PATH) as f:
@@ -64,8 +70,42 @@ def extract_topic(text):
                 return topic
     return "general"
 
-def to_wib_hour(ts):
-    return datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone(WIB).hour
+def load_previous_feedback():
+    """Load previous analytics feedback for historical merge."""
+    try:
+        with open(FEEDBACK_PATH) as f:
+            old = json.load(f)
+        # Check freshness: only merge if < 48h old
+        gen_dt = datetime.fromisoformat(old.get("generated_at", ""))
+        if datetime.now(WIB) - gen_dt > timedelta(hours=48):
+            print("   ⚠️ Previous data >48h old — ignoring")
+            return None
+        return old
+    except (OSError, IOError, json.JSONDecodeError, ValueError, TypeError):
+        return None
+
+def merge_topic_boosts(old_boosts, new_boosts):
+    """Merge topic boosts using weighted average."""
+    all_topics = set(list(old_boosts.keys()) + list(new_boosts.keys()))
+    merged = {}
+    for topic in all_topics:
+        old_val = old_boosts.get(topic, 1.0)  # default 1.0 if not present
+        new_val = new_boosts.get(topic, 1.0)
+        merged[topic] = round(old_val * OLD_WEIGHT + new_val * NEW_WEIGHT, 2)
+    return merged
+
+def merge_topic_stats(old_stats, new_stats):
+    """Merge topic stats (count + total) for accurate averages."""
+    all_topics = set(list(old_stats.keys()) + list(new_stats.keys()))
+    merged = {}
+    for topic in all_topics:
+        old_c = old_stats.get(topic, {"count": 0, "total": 0})
+        new_c = new_stats.get(topic, {"count": 0, "total": 0})
+        merged[topic] = {
+            "count": old_c["count"] + new_c["count"],
+            "total": old_c["total"] + new_c["total"],
+        }
+    return merged
 
 def main():
     tok, uid = get_token()
@@ -75,7 +115,17 @@ def main():
         return 0
 
     print(f"📊 Analyzing {len(raw)} posts...")
+
+    # Load historical data
+    old_data = load_previous_feedback()
+    if old_data:
+        print(f"   📈 Merging with historical data ({old_data.get('total_posts', '?')} posts)")
+    else:
+        print("   ℹ️ No historical data — fresh analysis")
+
+    # Fetch engagement for new posts
     enriched = []
+    from concurrent.futures import ThreadPoolExecutor, as_completed
     with ThreadPoolExecutor(max_workers=8) as ex:
         futs = {ex.submit(fetch_engagement, tok, p["id"]): p for p in raw}
         for f in as_completed(futs):
@@ -86,38 +136,52 @@ def main():
                 "ts": p["timestamp"],
                 "metrics": m,
                 "score": calc_score(m),
-                "wib_hour": to_wib_hour(p["timestamp"]),
+                "wib_hour": datetime.fromisoformat(p["timestamp"].replace("Z", "+00:00")).astimezone(WIB).hour,
             })
 
     enriched.sort(key=lambda x: x["score"], reverse=True)
     overall_avg = sum(p["score"] for p in enriched) / max(len(enriched), 1)
 
     # Topic analysis
-    topic_stats = defaultdict(lambda: {"count": 0, "total": 0})
+    new_topic_stats = defaultdict(lambda: {"count": 0, "total": 0})
     for p in enriched:
         for t in [extract_topic(p["text"])]:
-            topic_stats[t]["count"] += 1
-            topic_stats[t]["total"] += p["score"]
+            new_topic_stats[t]["count"] += 1
+            new_topic_stats[t]["total"] += p["score"]
 
-    # Generate boosts
-    boosts = {}
-    for topic, stats in topic_stats.items():
+    # Generate new boosts
+    new_boosts = {}
+    for topic, stats in new_topic_stats.items():
         if stats["count"] >= 2:
             ratio = stats["total"] / stats["count"] / max(overall_avg, 1)
             if ratio >= 1.5:
-                boosts[topic] = min(round(ratio, 1), 3.0)
+                new_boosts[topic] = min(round(ratio, 1), 3.0)
             elif ratio < 0.5:
-                boosts[topic] = 0.3
+                new_boosts[topic] = 0.3
 
-    # Skip patterns (topics with avg score < 40% of overall)
+    # Merge with historical
+    if old_data:
+        old_boosts = old_data.get("topic_boosts", {})
+        merged_boosts = merge_topic_boosts(old_boosts, new_boosts)
+        # Merge topic stats for skip calculation
+        old_stats_raw = {}
+        for t in old_data.get("top_topics", []):
+            old_stats_raw[t["topic"]] = {"count": t["count"], "total": t["avg_score"] * t["count"]}
+        merged_stats = merge_topic_stats(old_stats_raw, dict(new_topic_stats))
+        overall_avg = sum(s["total"] for s in merged_stats.values()) / max(sum(s["count"] for s in merged_stats.values()), 1)
+    else:
+        merged_boosts = new_boosts
+        merged_stats = dict(new_topic_stats)
+
+    # Skip patterns
     skip = []
-    for topic, stats in topic_stats.items():
+    for topic, stats in merged_stats.items():
         if stats["count"] >= 2:
             avg = stats["total"] / stats["count"]
             if avg < overall_avg * 0.4:
                 skip.append({"pattern": topic, "avg_score": round(avg, 1), "instances": stats["count"]})
 
-    # Best/worst hours
+    # Hourly analysis
     hourly = defaultdict(lambda: {"count": 0, "total": 0, "dead": 0})
     for p in enriched:
         h = p["wib_hour"]
@@ -135,16 +199,15 @@ def main():
         "generated_at": datetime.now(WIB).isoformat(),
         "total_posts": len(enriched),
         "overall_avg_score": round(overall_avg, 1),
-        "topic_boosts": boosts,
+        "topic_boosts": merged_boosts,
         "top_topics": [{"topic": t, "avg_score": round(s["total"]/s["count"], 1), "count": s["count"]}
-                       for t, s in sorted(topic_stats.items(), key=lambda x: x[1]["total"], reverse=True)[:5]],
+                       for t, s in sorted(merged_stats.items(), key=lambda x: x[1]["total"], reverse=True)[:5]],
         "skip_topics": skip,
         "best_hours": best_hours,
         "worst_hours": worst_hours,
     }
 
     os.makedirs(os.path.dirname(FEEDBACK_PATH), exist_ok=True)
-    # Atomic write — write to temp file then rename (prevents corruption)
     tmp_path = FEEDBACK_PATH + ".tmp"
     with open(tmp_path, "w") as f:
         json.dump(feedback, f, indent=2)
@@ -154,16 +217,16 @@ def main():
     # Build report
     rpt = []
     rpt.append(f"📊 **Press Box Analytics** — {datetime.now(WIB).strftime('%d %b %H:%M WIB')}")
-    rpt.append(f"_{len(enriched)} posts analyzed_")
+    rpt.append(f"_{len(enriched)} posts analyzed {'(merged with history)' if old_data else '(fresh)'}_")
     rpt.append("")
     rpt.append("## 🎯 Topic Performance")
     for t in feedback["top_topics"][:5]:
         emoji = "🔥" if t["avg_score"] > overall_avg else "📊"
         rpt.append(f"{emoji} **{t['topic']}:** {t['avg_score']:.0f} avg ({t['count']} posts)")
     rpt.append("")
-    if boosts:
+    if merged_boosts:
         rpt.append("## ⬆️ Pipeline Boosts")
-        for t, m in sorted(boosts.items(), key=lambda x: x[1], reverse=True):
+        for t, m in sorted(merged_boosts.items(), key=lambda x: x[1], reverse=True):
             rpt.append(f"• {t}: {m}x boost")
         rpt.append("")
     if skip:
