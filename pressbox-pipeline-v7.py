@@ -35,6 +35,16 @@ API_KEY = env_config.get("OPENCODE_GO_API_KEY", "")
 API_URL = "https://opencode.ai/zen/go/v1/chat/completions"
 MODEL = "deepseek-v4-flash"
 
+# ── Model routing by article type ──────────────────────────────────
+def get_model_config(topic_type):
+    """Return model + max_tokens based on article type.
+    Schedule/guide articles → non-reasoning model (fast, no wasted tokens).
+    Story articles → reasoning model (better content).
+    """
+    if topic_type in ["WC_team_guide", "other"]:
+        return {"model": "minimax-m3", "max_tokens": 4000, "reasoning_effort": None}
+    return {"model": "deepseek-v4-flash", "max_tokens": 8000, "reasoning_effort": "low"}
+
 def extract_body_image(raw_html):
     """Extract best <img> from article body (fallback when og:image fails).
     Priority: srcSet largest > data-src > src (skip tiny icons/logos)."""
@@ -395,6 +405,7 @@ if not filtered:
 # ── 3. SCORE — pick best ──────────────────────────────────────────
 for t in filtered:
     t["_score"] = score_topic(t)
+    t["_topic_type"] = classify_topic_type(t["title"])
 
 filtered.sort(key=lambda x: -x["_score"])
 best = filtered[0]
@@ -523,6 +534,14 @@ if not article_text or len(article_text) < 100:
 # ── 5. LLM call ───────────────────────────────────────────────────
 t0 = time.time()
 
+# ── Model routing by article type ────────────────────────────────
+topic_type = best.get("_topic_type", "other")
+model_cfg = get_model_config(topic_type)
+ACTIVE_MODEL = model_cfg["model"]
+ACTIVE_MAX_TOKENS = model_cfg["max_tokens"]
+ACTIVE_REASONING = model_cfg["reasoning_effort"]
+log(f"   📦 Topic type: {topic_type} → Model: {ACTIVE_MODEL} (max_tokens={ACTIVE_MAX_TOKENS})")
+
 # ── PROMPT v5.2: Compressed (3KB vs 9KB) ─────────────────────────
 system_prompt = """[ROLE] Football content strategist. Generate 8-slide Threads carousel as JSON only.
 
@@ -577,7 +596,7 @@ Start with {. JSON only. No explanation."""
 
 user_prompt = f"ARTICLE: {article_text[:1500]}\nSOURCE: {url}"
 
-log(f"   Calling LLM ({MODEL})...")
+log(f"   Calling LLM ({ACTIVE_MODEL})...")
 
 headers = {"Content-Type": "application/json"}
 if API_KEY:
@@ -592,22 +611,24 @@ raw_json = ""
 for attempt in range(1, MAX_RETRIES + 1):
     log(f"   LLM attempt {attempt}/{MAX_RETRIES} (streaming)...")
     try:
+        payload = {
+            "model": ACTIVE_MODEL,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "max_tokens": ACTIVE_MAX_TOKENS,
+            "temperature": 0.5,
+            "stream": True,
+        }
+        if ACTIVE_REASONING:
+            payload["reasoning_effort"] = ACTIVE_REASONING
         r = requests.post(
             API_URL,
             headers=headers,
-            json={
-                "model": MODEL,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                "max_tokens": 6000,
-                "temperature": 0.5,
-                "reasoning_effort": "low",
-                "stream": True,  # STREAMING: process tokens as they arrive
-            },
+            json=payload,
             timeout=180,
-            stream=True,  # Enable streaming response
+            stream=True,
         )
         if r.status_code != 200:
             log(f"❌ API error: HTTP {r.status_code} {r.text[:200]}")
