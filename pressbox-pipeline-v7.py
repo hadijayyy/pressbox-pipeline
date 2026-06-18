@@ -43,7 +43,7 @@ def get_model_config(topic_type):
     """
     if topic_type in ["WC_team_guide", "other"]:
         return {"model": "minimax-m3", "max_tokens": 4000, "reasoning_effort": None}
-    return {"model": "deepseek-v4-flash", "max_tokens": 10000, "reasoning_effort": "low"}
+    return {"model": "deepseek-v4-flash", "max_tokens": 6000, "reasoning_effort": "low"}
 
 def extract_body_image(raw_html):
     """Extract best <img> from article body (fallback when og:image fails).
@@ -379,6 +379,13 @@ for t in all_topics:
         continue
     if source not in ALLOWED_SOURCES:
         continue
+    # Skip women's football
+    title_lower = title.lower()
+    desc_lower = (t.get("description") or "").lower()
+    url_lower = url.lower()
+    women_kw = ["women", "women's", "womens", "female", "lionaesses", "shebelieves", "nwsl", "wsl"]
+    if any(kw in title_lower or kw in desc_lower or kw in url_lower for kw in women_kw):
+        continue
     if url in posted_urls:
         continue
     if url in cache_urls:
@@ -391,7 +398,6 @@ for t in all_topics:
         continue
     # Boost topics matching recommended keywords
     if research_keywords_add:
-        title_lower = title.lower()
         kw_hits = sum(1 for kw in research_keywords_add if kw.lower() in title_lower)
         if kw_hits > 0:
             t["_kw_boost"] = kw_hits * 10
@@ -544,59 +550,62 @@ ACTIVE_MAX_TOKENS = model_cfg["max_tokens"]
 ACTIVE_REASONING = model_cfg["reasoning_effort"]
 log(f"   📦 Topic type: {topic_type} → Model: {ACTIVE_MODEL} (max_tokens={ACTIVE_MAX_TOKENS})")
 
-# ── PROMPT v6.0: Consolidated grounding, writing rules top ──────────
+# ── PROMPT v7.0: Sentence counts, fact extraction step, slide_6 exempt ──
 system_prompt = """[ROLE]
-Football content strategist. Output: 8-slide Threads carousel as JSON only.
+You are a football content strategist writing for Threads. Output: 8-slide carousel as JSON only.
 
-[WRITING RULES — APPLY TO ALL SLIDES]
-- Short sentences. Punchy. Conversational English.
-- Blank line every 2 sentences.
-- Standalone-readable per slide (no "as mentioned above").
-- NO: em-dash, en-dash, hashtags, AI filler phrases ("stunning", "in a world where", "it's worth noting").
+[WARNING]
+Read the full article before writing anything. Headlines are often misleading. Use only facts from the article body. Do not skim. Do not infer from the headline alone.
 
-[GROUNDING — ARTICLE IS THE ONLY SOURCE]
-Every fact, name, location, quote, and severity level must come directly from the article.
+[TASK]
+Write 8 Slides based on the article facts.
 
-Rules:
-1. Name present in article → use it. Name absent → don't invent one.
-2. Quote present in article → paraphrase it (no quotation marks unless copied verbatim). Quote absent → don't fabricate one.
-3. Location in article → match exactly. Don't swap or infer.
-4. Tone in article → match exactly. "spoke out" ≠ "slammed".
-5. Article is vague → stay vague. Never fill gaps with training data.
-6. Before writing each slide: identify the exact sentence(s) from the article that support it. No supporting sentence = no claim.
-
-[NOTE: If the article appears cut off mid-sentence, work only with what is provided. Do not infer or complete missing information.]
-
-[HEADLINE WARNING]
-The article text below may include a headline. Headlines are often misleading or sensationalized. DO NOT base your slides on the headline. Read the ARTICLE BODY and use only facts from there.
-
-[SLIDES]
-slide_1: HOOK
-  - 150–300 chars
+slide_1 — HOOK (2 sentences max)
   - image_url: first image URL from article, or omit key if none found
-  - Hook types (rotate): Stat | Quote | Question | Scenario | Contrast
-  ✅ "Cristiano Ronaldo has played 1,200 career games. He's never been targeted like this before."
-  ❌ "In a stunning turn of events..." / "Breaking: [name] [verb]"
+One of: Stat | Quote | Question | Scenario | Contrast.
+Sentence 1: the hook. Sentence 2: the payoff. Nothing more.
+✅ "Cristiano Ronaldo has played 1,200 career games. He's never been targeted like this before."
+❌ "In a stunning turn of events..." / "Breaking: [name] [verb]"
 
-slide_2: SPARK — What happened (250–450 chars)
-slide_3: WHY — Why it matters (250–450 chars)
-slide_4: TENSION — The conflict or stakes (250–450 chars)
+slide_2 — SPARK (4-5 sentences)
+Sentence 1: What happened.
+Sentence 2: Who did it, and when.
+Sentences 3-5: Key details from the article. No filler.
 
-slide_5: HUMAN — One person's experience (250–450 chars)
-  - Formula: WHO + WHAT they feel + WHY it's hard
-  - One person only. From article only.
-  ✅ "Cimen has 30 years in the industry. All of it questioned in four minutes."
-  ❌ "Being targeted still hits differently." (vague, generic)
+slide_3 — WHY (4-5 sentences)
+Sentence 1: Why this matters right now.
+Sentence 2: Back it with a fact or number from the article.
+Sentences 3-5: The implication. Why anyone should care today.
 
-slide_6: RIPPLE — Wider impact (250–450 chars)
-slide_7: UNRESOLVED — What happens next (250–450 chars)
+slide_4 — TENSION (4-5 sentences)
+Sentence 1: The conflict or stakes.
+Sentence 2: Name the two sides.
+Sentences 3-5: What each side stands to lose or gain. The cost.
 
-slide_8: OPINION + CTA
-  - One clear opinion backed by an article fact
-  - End with a specific question (not "What do you think?")
-  - Final line: {url}
-  ✅ "TRT was right to suspend him.\\n\\nShould they give him another chance?\\n\\n{url}"
-  ❌ "What do you think? Let me know!\\n\\n{url}"
+slide_5 — HUMAN (3-4 sentences)
+Sentence 1: Name them and who they are.
+Sentence 2: What they did or said in the article.
+Sentences 3-4: Why it connects to the tension from slide_4.
+If no single person is named, use the most specific group mentioned.
+✅ "Cimen has 30 years in the industry. All of it questioned in four minutes."
+❌ "Being targeted still hits differently." (vague, generic)
+
+slide_6 — RIPPLE (3-4 sentences) [ANALYSIS — EXEMPT FROM GROUNDING RULES]
+Sentence 1: Start with "If this continues..." or similar flag.
+Sentences 2-4: Connect article facts to a wider pattern or consequence.
+This is analysis, not a reported fact. Flag it clearly.
+
+slide_7 — UNRESOLVED (3-4 sentences)
+Sentence 1: The question the article leaves unanswered.
+Sentences 2-3: What could go wrong. What the next domino is.
+Sentence 4: Leave it open. Do not resolve.
+
+slide_8 — OPINION + CTA (3-4 sentences)
+Sentence 1: One sharp opinion grounded in the facts.
+Sentence 2: End with a specific question: "What do you think — [question]?"
+Sentences 3-4: {url}
+✅ "TRT was right to suspend him.\\n\\nShould they give him another chance?\\n\\n{url}"
+❌ "What do you think? Let me know!\\n\\n{url}"
 
 [ROUND-UP ARTICLES]
 If the article covers multiple stories, pick the one with the highest emotional stakes or clearest conflict. Focus entirely on that story. Ignore the rest.
@@ -604,11 +613,24 @@ If the article covers multiple stories, pick the one with the highest emotional 
 [OUTPUT FORMAT]
 {"slide_1":{"title":"HOOK","content":"...","image_url":"..."},"slide_2":{"title":"SPARK","content":"..."},"slide_3":{"title":"WHY","content":"..."},"slide_4":{"title":"TENSION","content":"..."},"slide_5":{"title":"HUMAN","content":"..."},"slide_6":{"title":"RIPPLE","content":"..."},"slide_7":{"title":"UNRESOLVED","content":"..."},"slide_8":{"title":"OPINION + CTA","content":"..."}}
 
-Start with {. JSON only. No preamble. No explanation."""
+Start with {. JSON only. No preamble. No explanation.
 
-user_prompt = f"""ARTICLE: {article_text}
-[WARNING: Read the FULL article above. Headlines can be misleading. Use only facts from the ARTICLE BODY. Do not skim. Do not infer from headline alone.]
-SOURCE: {url}"""
+[WRITING RULES]
+- Short sentences. Punchy. Conversational English.
+- Blank line between sentences (use \\n\\n in JSON string).
+- Each slide stands alone — no "as mentioned" or "as we said."
+- NO: em-dash, en-dash, hashtags, AI filler phrases like "It's worth noting" or "In a world where."
+- Hit the sentence count. Quality over filler, but every sentence must earn its place.
+
+[GROUNDING RULES]
+- Name present in article → use it. Absent → don't invent.
+- Quote present → paraphrase only. Absent → don't fabricate.
+- Location → match exactly what the article says.
+- Vague in article → stay vague. Don't sharpen what isn't there.
+- No supporting sentence in article → no claim in slide.
+- slide_6 is exempt. It is analysis. See slide definition above."""
+
+user_prompt = f"ARTICLE: {article_text}\n[Note: article may be truncated. Use only what is provided above.]\nSOURCE: {url}"
 
 log(f"   Calling LLM ({ACTIVE_MODEL})...")
 
@@ -618,8 +640,17 @@ if API_KEY:
 
 # ── LLM call with streaming + retry ────────────────────────────
 MAX_RETRIES = 3
-MIN_CHARS = 80
-MAX_CHARS = 450
+# Sentence count targets per slide (min, max)
+SENTENCE_COUNTS = {
+    1: (1, 2),   # Hook: 2 sentences max
+    2: (4, 5),   # Spark
+    3: (4, 5),   # Why
+    4: (4, 5),   # Tension
+    5: (3, 4),   # Human
+    6: (3, 4),   # Ripple
+    7: (3, 4),   # Unresolved
+    8: (3, 4),   # CTA
+}
 raw_json = ""
 
 for attempt in range(1, MAX_RETRIES + 1):
@@ -773,33 +804,40 @@ for attempt in range(1, MAX_RETRIES + 1):
             log("   ❌ No JSON found, retrying...")
             continue
 
-        # Parse and validate char count
+        # Parse and validate sentence count
         slides_data = json.loads(candidate_json)
-        char_issues = []
+        sentence_issues = []
         # Handle both formats
         if "slides" in slides_data and isinstance(slides_data["slides"], list):
             slide_list = slides_data["slides"]
         else:
             slide_list = [slides_data.get(f"slide_{i}", {}) for i in range(1, 9)]
 
-        for i, s in enumerate(slide_list[:7]):  # slides 1-7
+        def count_sentences(text: str) -> int:
+            """Count sentences by splitting on sentence-ending punctuation."""
+            import re
+            # Split on . ? ! followed by space or end, but not on decimals or abbreviations
+            sents = re.split(r'(?<=[.!?])\s+', text.strip())
+            return len([s for s in sents if len(s.strip()) > 5])
+
+        for i, s in enumerate(slide_list[:8]):  # slides 1-8
             if not isinstance(s, dict):
+                sentence_issues.append(f"s{i+1}: not a dict")
                 continue
             body = s.get("content") or ""
-            chars = len(body)
-            min_c = 100 if i == 0 else 100
-            max_c = 300 if i == 0 else MAX_CHARS
-            if chars < min_c:
-                char_issues.append(f"s{i+1}: {chars}c")
-            elif chars > max_c:
-                char_issues.append(f"s{i+1}: {chars}c(too long)")
+            n = count_sentences(body)
+            min_s, max_s = SENTENCE_COUNTS.get(i + 1, (3, 5))
+            if n < min_s:
+                sentence_issues.append(f"s{i+1}: {n}s < {min_s}")
+            elif n > max_s + 1:  # +1 tolerance for natural variation
+                sentence_issues.append(f"s{i+1}: {n}s > {max_s}")
 
-        if not char_issues:
-            log(f"   ✅ All slides pass char count")
+        if not sentence_issues:
+            log(f"   ✅ All slides pass sentence count")
             raw_json = candidate_json
             break
         else:
-            log(f"   ⚠️ Char count fail: {', '.join(char_issues)} — retrying...")
+            log(f"   ⚠️ Sentence count fail: {', '.join(sentence_issues)} — retrying...")
 
     except Exception as e:
         log(f"❌ LLM exception: {e}")
@@ -810,31 +848,28 @@ if not raw_json:
     sys.exit(1)
 
 # ── Parse & validate slides ──────────────────────────────────────
-# SINGLE VALIDATION FUNCTION (replaces 3 duplicate checks)
+
+def _count_sentences(text: str) -> int:
+    """Count sentences by splitting on sentence-ending punctuation."""
+    sents = re.split(r'(?<=[.!?])\s+', text.strip())
+    return len([s for s in sents if len(s.strip()) > 5])
+
+# SINGLE VALIDATION FUNCTION (sentence-count based)
 def validate_and_fix(slides: list) -> tuple:
-    """Validate slides, fix issues, return (ok, errors)."""
+    """Validate slides by sentence count, return (ok, errors)."""
     errors = []
     for i, s in enumerate(slides):
         c = s["content"]
-        chars = len(c)
-        if i == 0:  # Hook
-            if chars < 100: errors.append(f"s1: {chars}c < 100")
-            elif chars > 300:
-                # Auto-trim
-                trimmed = c[:300]
-                last = max(trimmed.rfind(". "), trimmed.rfind("? "), trimmed.rfind("! "))
-                s["content"] = trimmed[:last+1] if last > 100 else trimmed
-        elif 1 <= i <= 6:  # Body
-            if chars < 100: errors.append(f"s{i+1}: {chars}c < 100")
-            elif chars > MAX_CHARS:
-                trimmed = c[:MAX_CHARS]
-                last = max(trimmed.rfind(". "), trimmed.rfind("? "), trimmed.rfind("! "))
-                s["content"] = trimmed[:last+1] if last > 100 else trimmed
-        elif i == 7:  # Slide 8 — trim if over 400
-            if len(c) > 400:
-                trimmed = c[:400]
-                last = max(trimmed.rfind(". "), trimmed.rfind("? "), trimmed.rfind("! "))
-                s["content"] = trimmed[:last+1] if last > 150 else trimmed
+        n = _count_sentences(c)
+        min_s, max_s = SENTENCE_COUNTS.get(i + 1, (3, 5))
+        if n < min_s:
+            errors.append(f"s{i+1}: {n}s < {min_s}")
+        elif n > max_s + 2:  # +2 tolerance for final validation (retry already caught +1)
+            # Auto-trim: keep first max_s sentences
+            parts = re.split(r'(?<=[.!?])\s+', c.strip())
+            trimmed_parts = [p for p in parts if len(p.strip()) > 5][:max_s]
+            s["content"] = " ".join(trimmed_parts)
+            errors.append(f"s{i+1}: trimmed from {n}s to {max_s}s")
     return len(errors) == 0, errors
 
 try:

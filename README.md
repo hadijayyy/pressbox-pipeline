@@ -4,28 +4,28 @@
 
 Press Box is a fully automated content pipeline that scrapes football news (Mirror, Sky Sports, Goal.com), generates 8-slide threads via LLM (deepseek-v4-flash), and posts them to Threads with relevant images — completely unattended.
 
-## ⚡ Performance (v7 — Data Extraction Agent)
+## ⚡ Performance
 
-| Metric | Before | After | Improvement |
-|--------|--------|-------|-------------|
-| LLM time | 90-120s | **13.2s** | **9x faster** |
-| Total time | 125s | **17.9s** | **7x faster** |
-| Tokens | 7,000-9,000 | **2,382** | **73% reduction** |
-| Reasoning | 24K-30K chars | **925 chars** | **97% reduction** |
-| Retries | 2-3x | **0** | **First attempt success** |
+| Metric | v6.0 | v7.2 | Improvement |
+|--------|------|------|-------------|
+| LLM time | 67.7s | **30.9s** | **54% faster** |
+| Total time | 73.1s | **39.9s** | **45% faster** |
+| Tokens | 8,635 | **4,400** | **49% reduction** |
+| Completion tokens | 7,025 | **2,793** | **60% reduction** |
+| Prompt tokens | 1,610 | **1,607** | — |
+| Reasoning chars | 27,558 | **9,028** | **67% reduction** |
 
-**Key insight:** "Data Extraction Agent" prompt role bypasses DeepSeek's reasoning behavior. Model outputs JSON directly in `content` field instead of burying it in `reasoning_content`.
+**Key changes:** Sentence-count validation (replaced char-count), removed Step 1 fact extraction, capped max_tokens at 6K.
 
 ## ✨ Features
 
 - **Automated research** — scrapes Mirror RSS + Sky Sports RSS + Goal.com for fresh football news
 - **Smart dedup** — URL-based, title Jaccard similarity (35% threshold), 30-min article cache
-- **LLM-generated threads** — 8 slides with hook, storytelling arc, and CTA question
-- **Data Extraction Agent prompt** — bypasses reasoning, outputs JSON directly
+- **LLM-generated threads** — 8 slides with sentence-count blueprints and grounding rules
+- **Sentence-count validation** — replaces char-count, ensures consistent slide density
 - **3-level image fallback** — og:image → article body `<img>` → RSS image
 - **Image validation** — HEAD request checks every image URL before use
-- **Whitespace formatting** — blank line every 2 sentences for readability
-- **Fallback loop** — tries up to 3 LLM retries with char count validation (200-450 chars)
+- **Content filtering** — skips women's football (title, description, URL)
 - **Strategy 2 JSON extraction** — score-based fallback for reasoning-heavy responses
 - **Analytics feedback** — daily engagement analysis tunes posting hours
 - **Atomic staging** — tmp + os.replace prevents corruption
@@ -34,10 +34,11 @@ Press Box is a fully automated content pipeline that scrapes football news (Mirr
 
 ```
 :00 Pipeline ──► scrape (Mirror + Sky Sports + Goal.com)
-                  ├── filter (dedup, similarity, freshness)
+                  ├── filter (dedup, similarity, freshness, women's football)
                   ├── score (WC boost +50, viral +25)
                   ├── extract (article text + 3-level image fallback)
-                  ├── LLM generate (deepseek-v4-flash, Data Extraction Agent)
+                  ├── LLM generate (deepseek-v4-flash, v7.0 prompt)
+                  ├── validate (sentence count per slide)
                   └── stage (staging.json)
 
 :15 Check Staging ──► verify staging has valid content
@@ -118,12 +119,12 @@ OPENCODE_GO_API_KEY=your_o..._key
 | `pressbox-analytics-feedback.py` | Daily analytics — topic boosts, best/worst hours |
 | `pressbox-analytics-llm.py` | LLM deep analysis — hooks, CTA, topic recommendations |
 
-### Pipeline Flow (v7)
+### Pipeline Flow
 
 ```
 pressbox-pipeline-v7.py:
   1. Parallel scrape Mirror RSS + Sky Sports RSS + Goal.com (5-10s)
-  2. Filter candidates (URL dedup, Jaccard similarity 35%, 30-min cache)
+  2. Filter candidates (URL dedup, Jaccard similarity 35%, 30-min cache, women's football)
   3. Score with WC boost (+50), viral keywords (+25)
   4. Pick best candidate
   5. Extract article text via curl (with 30-min cache)
@@ -131,41 +132,44 @@ pressbox-pipeline-v7.py:
      a. og:image meta tag → HEAD validate
      b. Article body <img> (first content image) → HEAD validate
      c. RSS image URL → HEAD validate
-  7. LLM generate 8-slide JSON (deepseek-v4-flash, Data Extraction Agent prompt)
-  8. Retry up to 3x if char count fails (200-450 chars per slide)
+  7. LLM generate 8-slide JSON (deepseek-v4-flash, v7.0 sentence-count prompt)
+  8. Validate sentence count per slide (retry up to 3x)
   9. Save to staging.json (atomic write)
 ```
 
-### LLM Prompt: Data Extraction Agent
+### LLM Prompt (v7.0)
 
-The prompt is designed to bypass DeepSeek's reasoning behavior:
+Sentence-count based prompt with per-slide blueprints:
 
 ```
-[ROLE & CONSTRAINTS]
-You are a strict, high-speed Data Extraction Agent.
-Your explicit instruction is to minimize latency and bypass any extended internal monologue or reasoning.
-
-CRITICAL DIRECTIVES:
-1. DO NOT use extensive reasoning or step-by-step thinking.
-2. Keep your internal thinking process/monologue under 20 words.
-3. Move directly to the final output.
-4. Output ONLY a valid, raw JSON object.
+slide_1 — HOOK (2 sentences max)
+slide_2 — SPARK (4-5 sentences)
+slide_3 — WHY (4-5 sentences)
+slide_4 — TENSION (4-5 sentences)
+slide_5 — HUMAN (3-4 sentences)
+slide_6 — RIPPLE (3-4 sentences) [ANALYSIS — exempt from grounding]
+slide_7 — UNRESOLVED (3-4 sentences)
+slide_8 — OPINION + CTA (3-4 sentences)
 ```
 
-**Result:** Model outputs JSON in `content` field (not `reasoning_content`), with minimal thinking (925 chars vs 30K before).
+Key rules:
+- Each slide has a sentence-count range (not char count)
+- slide_6 explicitly exempt from grounding rules (analysis)
+- Writing rules: punchy, conversational, no em-dash/hashtags
+- Grounding: all facts from article only, no invented names/quotes
 
-### Slide Schema
+### Sentence Count Targets
 
-| Slide | Title | Content | Chars |
-|-------|-------|---------|-------|
-| 1 | HOOK | 1-2 punchy sentences, image_url | 150-300 |
-| 2 | SPARK | What happened | 200-450 |
-| 3 | WHY | Why it matters | 200-450 |
-| 4 | TENSION | Conflict/stakes | 200-450 |
-| 5 | HUMAN | Quotes/emotion | 200-450 |
-| 6 | RIPPLE | Wider impact | 200-450 |
-| 7 | UNRESOLVED | What's next | 200-450 |
-| 8 | HOT TAKE | Pick a side + source URL | 200-450 |
+| Slide | Sentences | Role |
+|-------|-----------|------|
+| 1 (HOOK) | 1-2 | Stop scroll |
+| 2 (SPARK) | 4-5 | What happened |
+| 3 (WHY) | 4-5 | Why it matters |
+| 4 (TENSION) | 4-5 | Conflict/stakes |
+| 5 (HUMAN) | 3-4 | One person |
+| 6 (RIPPLE) | 3-4 | Analysis (exempt from grounding) |
+| 7 (UNRESOLVED) | 3-4 | Open question |
+| 8 (CTA) | 3-4 | Opinion + url |
 
 ## 🖼️ Image Support
 
@@ -236,7 +240,7 @@ Based on engagement data: **17:00, 23:00, 01:00 WIB**
 |-------|----------|
 | URL fails | Skip candidate, try next |
 | LLM timeout | Retry up to 3x |
-| LLM short response (<200 chars) | Retry with stricter prompt |
+| Sentence count fail (< min) | Retry with stricter prompt |
 | JSON parse failure | Strategy 1: slide markers → Strategy 2: score-based fallback |
 | JSON in reasoning_content | Extract via brace counting + content length scoring |
 | Image og:image fails | Fallback to body `<img>` → RSS |
@@ -246,11 +250,18 @@ Based on engagement data: **17:00, 23:00, 01:00 WIB**
 
 ## 📝 Changelog
 
+### v7.2 — Sentence Counts + Speed (2026-06-18)
+- **54% faster LLM** (67.7s → 30.9s) via prompt optimization
+- Sentence-count validation (replaced char-count 200-450)
+- Per-slide sentence blueprints (2-5 sentences each)
+- Removed Step 1 fact extraction (saves tokens + reasoning)
+- Capped max_tokens at 6K (was 10K)
+- Added women's football filter (title, description, URL)
+- slide_6 explicitly exempt from grounding rules
+
 ### v7.1 — Data Extraction Agent (2026-06-17)
-- **9x faster LLM** (120s → 13s) via prompt engineering
+- 9x faster LLM (120s → 13s) via prompt engineering
 - Rewrote prompt as "Data Extraction Agent" role
-- Added `reasoning_budget` parameter (if supported)
-- Added token usage tracking (prompt/completion/total)
 - Added Strategy 2 JSON extraction (score-based)
 - Added article cache (30-min TTL)
 - Fixed `pressbox-check-staging.py` → v7 reference
