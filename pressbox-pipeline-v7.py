@@ -565,6 +565,9 @@ Rules:
 
 [NOTE: If the article appears cut off mid-sentence, work only with what is provided. Do not infer or complete missing information.]
 
+[HEADLINE WARNING]
+The article text below may include a headline. Headlines are often misleading or sensationalized. DO NOT base your slides on the headline. Read the ARTICLE BODY and use only facts from there.
+
 [SLIDES]
 slide_1: HOOK
   - 150–300 chars
@@ -601,8 +604,8 @@ If the article covers multiple stories, pick the one with the highest emotional 
 
 Start with {. JSON only. No preamble. No explanation."""
 
-user_prompt = f"""ARTICLE: {article_text[:1500]}
-[Note: article may be truncated. Use only what is provided above.]
+user_prompt = f"""ARTICLE: {article_text}
+[WARNING: Read the FULL article above. Headlines can be misleading. Use only facts from the ARTICLE BODY. Do not skim. Do not infer from headline alone.]
 SOURCE: {url}"""
 
 log(f"   Calling LLM ({ACTIVE_MODEL})...")
