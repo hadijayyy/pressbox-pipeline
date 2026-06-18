@@ -582,6 +582,7 @@ Opinion backed by article fact. End with specific question.
 - Always include: WHO (name), WHAT (specific action), WHERE (match/context).
 - Every claim in slides 2-7 must trace to the article. If not → delete it.
 - If article is vague, stay vague. Write "details still unclear" — never fill gaps.
+- Do NOT use your own knowledge. If the article doesn't name a person, don't name them. If it doesn't state a fact, don't state it. Article is the ONLY source of truth.
 
 [ROUND-UP ARTICLES]
 If article covers multiple stories (e.g. "5 transfers this week"), pick the SINGLE most compelling story and focus on that. State in HOOK which story you chose. Ignore the rest.
