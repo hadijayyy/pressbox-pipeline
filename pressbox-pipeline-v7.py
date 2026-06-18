@@ -556,6 +556,13 @@ slide_8: HOT TAKE (150-450 chars, state an opinion clearly supported by a fact f
 - Example: If article is about "fans without tickets" → every slide must be about THAT incident. Do NOT add match results, goals, or other unrelated details.
 - Example: If article is about "a pundit's controversial remark" → every slide must be about THAT remark. Do NOT add team performance or standings.
 
+[CRITICAL — GROUNDING RULES]
+- NEVER imply facts not in the article. Article says "mistake" → do NOT write "controversy". Article says "wrong team" → do NOT write "what did they say?". Article says "suspended" → do NOT add "blowing up online" unless article says so.
+- ALWAYS include: WHO (name/network), WHAT (specific action), WHERE (match/context). GOOD: "Turkish broadcaster Murat Ekrem Cimen mixed up Iran and New Zealand". BAD: "A World Cup broadcaster got the boot"
+- Do NOT sensationalize. Match the article's tone. NEVER upgrade severity beyond what article states.
+- Do NOT ask rhetorical questions that imply missing info. BAD: "What did they say?" GOOD: State what actually happened.
+- Every claim in slides 2-7 MUST be traceable to a specific sentence in the article. If you can't point to where it came from → delete it.
+
 [OUTPUT]
 {"slide_1":{"title":"HOOK","content":"...","image_url":"..."},"slide_2":{"title":"SPARK","content":"..."},"slide_3":{"title":"WHY","content":"..."},"slide_4":{"title":"TENSION","content":"..."},"slide_5":{"title":"HUMAN","content":"..."},"slide_6":{"title":"RIPPLE","content":"..."},"slide_7":{"title":"UNRESOLVED","content":"..."},"slide_8":{"title":"HOT TAKE","content":"... + blank line + URL"}}
 

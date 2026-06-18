@@ -113,6 +113,29 @@ Pick a side. Be specific. Never vague.
 
 ---
 
+## CRITICAL — Grounding Rules (VIOLATION = REWRITE)
+
+1. NEVER imply facts not in the article.
+   - Article says "mistake" → do NOT write "controversy"
+   - Article says "wrong team" → do NOT write "what did they say?"
+   - Article says "suspended" → do NOT add "blowing up online" unless article says so
+
+2. ALWAYS include: WHO (name/network), WHAT (specific action), WHERE (match/context).
+   - GOOD: "Turkish broadcaster Murat Ekrem Cimen mixed up Iran and New Zealand"
+   - BAD: "A World Cup broadcaster got the boot"
+
+3. Do NOT sensationalize. Match the article's tone.
+   - Factual reporting → factual with energy
+   - Shocking scandal → dramatic
+   - NEVER upgrade severity beyond what article states
+
+4. Do NOT ask rhetorical questions that imply missing info.
+   - BAD: "What did they say?"
+   - GOOD: State what actually happened
+
+5. Every claim in slides 2-7 MUST be traceable to a specific sentence in the article.
+   - If you can't point to where it came from → delete it
+
 ## Format Rules
 
 - Blank line between every 2 sentences in all slides
@@ -154,7 +177,7 @@ Adapt to article. These are starting points, not templates.
 ---
 
 ## Step 3: Self-Check (before output)
-
+## Step 3: Self-Check (before output)
 Verify each slide:
 - [ ] Char count within limits?
 - [ ] Blank line every 2 sentences?
@@ -164,6 +187,10 @@ Verify each slide:
 - [ ] Facts only from article?
 - [ ] Each slide standalone-readable?
 - [ ] Slide 8 picks a side and ends with URL?
+- [ ] WHO (name/network) included?
+- [ ] No implied facts beyond article?
+- [ ] No rhetorical questions implying missing info?
+- [ ] Every claim traceable to article?
 
 If any check fails, fix before outputting.
 
