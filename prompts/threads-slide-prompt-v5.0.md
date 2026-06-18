@@ -135,9 +135,9 @@ State a clear opinion supported by a fact from the article. End with a question 
 ```
 
 ✅ GOOD:
-> "TRT was right to suspend him. Live TV is ruthless. But thirty years of experience shouldn't be erased by four minutes of confusion. The punishment fits the mistake, not the career.
+> "TRT was right to suspend him. But thirty years shouldn't be erased by four minutes.
 >
-> Menurut lo, harusnya TRT kasih kesempatan lagi atau udah cukup?
+> Should TRT give him another chance, or is this game over?
 >
 > {url}"
 

@@ -574,7 +574,7 @@ Empathy targets: person who made mistake, fans, players under pressure, families
 
 [OPINION + CTA — SLIDE 8]
 State opinion backed by article fact. End with specific question for readers.
-✅ GOOD: "TRT was right to suspend him. But thirty years shouldn't be erased by four minutes.\n\nMenurut lo, harusnya TRT kasih kesempatan lagi atau udah cukup?\n\n{url}"
+✅ GOOD: "TRT was right to suspend him. But thirty years shouldn't be erased by four minutes.\n\nShould TRT give him another chance, or is this game over?\n\n{url}"
 ❌ BAD: "What do you think about this situation? Let me know in the comments!"
 
 [RULES]
