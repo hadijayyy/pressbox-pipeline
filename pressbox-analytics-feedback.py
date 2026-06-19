@@ -21,9 +21,9 @@ FEEDBACK_PATH = os.path.expanduser("~/.hermes/pressbox/analytics_feedback.json")
 REPORT_PATH = os.path.expanduser("~/.hermes/pressbox/analytics_report.md")
 WIB = timezone(timedelta(hours=7))
 
-# Merge weights: 70% new data + 30% historical
-NEW_WEIGHT = 0.7
-OLD_WEIGHT = 0.3
+# Merge weights: 90% new data + 10% historical (new data dominates)
+NEW_WEIGHT = 0.9
+OLD_WEIGHT = 0.1
 
 def get_token():
     with open(TOKEN_PATH) as f:
@@ -69,7 +69,8 @@ def calc_score(m):
 def extract_topic(text):
     text = text.lower()
     for topic, pats in {
-        "world_cup": ["world cup", "fifa", "qualifier", "2026"],
+        "fifa_political": ["fifa", "world cup", "boycott", "qatar", "corruption", "scandal", "politic", "human rights", "migrant", "banned"],
+        "world_cup": ["world cup", "qualifier", "2026", "tournament", "wc"],
         "transfer": ["transfer", "signing", "deal", "bid", "join"],
         "controversy": ["controversy", "scandal", "banned", "fined", "racism"],
         "match_result": ["win", "lose", "defeat", "victory", "beat"],
@@ -168,7 +169,7 @@ def main():
     for topic, stats in new_topic_stats.items():
         if stats["count"] >= 2:
             ratio = stats["total"] / stats["count"] / max(overall_avg, 1)
-            if ratio >= 1.5:
+            if ratio >= 1.2:  # lowered from 1.5 — was too conservative
                 new_boosts[topic] = min(round(ratio, 1), 3.0)
             elif ratio < 0.5:
                 new_boosts[topic] = 0.3
