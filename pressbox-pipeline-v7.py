@@ -388,6 +388,11 @@ for t in all_topics:
     women_kw = ["women", "women's", "womens", "female", "lionaesses", "shebelieves", "nwsl", "wsl"]
     if any(kw in title_lower or kw in desc_lower or kw in url_lower for kw in women_kw):
         continue
+    # Skip TV guides / jadwal siaran
+    tv_guide_kw = ["tv channel", "live stream", "kick-off time", "kickoff time", "how to watch",
+                   "where to watch", "what channel", "kick off time", "start time", "stream online"]
+    if any(kw in title_lower for kw in tv_guide_kw):
+        continue
     if url in posted_urls:
         continue
     if url in cache_urls:
