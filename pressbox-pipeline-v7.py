@@ -38,13 +38,12 @@ MODEL = "deepseek-v4-flash"
 # ── Model routing by article type ──────────────────────────────────
 def get_model_config(topic_type):
     """Return model chain (fallback order) based on article type.
-    Chain: deepseek-v4-flash → mimo-v2.5 → minimax-m2.7
+    Chain: deepseek-v4-flash → mimo-v2.5
     """
     # All article types → same chain
     return [
         {"model": "deepseek-v4-flash", "max_tokens": 6000, "reasoning_effort": "low"},
         {"model": "mimo-v2.5", "max_tokens": 6000, "reasoning_effort": None},
-        {"model": "minimax-m2.7", "max_tokens": 8000, "reasoning_effort": None},
     ]
 
 def extract_body_image(raw_html):
