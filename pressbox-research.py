@@ -224,7 +224,24 @@ def scrape_sky_sports():
 
             full_text = scrape_sky_article(url) or title
 
+            # Extract timestamp
+            published_ts = None
+            time_el = item.find('span', class_='label__timestamp')
+            if time_el:
+                try:
+                    from datetime import datetime
+                    ts_text = time_el.get_text(strip=True)
+                    # Format: "19/06/26 6:00pm"
+                    dt = datetime.strptime(ts_text, "%d/%m/%y %I:%M%p")
+                    published_ts = dt.timestamp()
+                except: pass
+
             tl = title.lower()
+            
+            # Skip old articles
+            if published_ts and not is_fresh(published_ts):
+                continue
+            
             has_wc = any(kw in tl for kw in ["world cup", "worldcup", "wc 202", "usa 2026", "qualifier"])
             is_transfer = any(kw in tl for kw in ["transfer", "signs", "signing", "joins", "deal", "bid", "loan"])
 
@@ -237,7 +254,7 @@ def scrape_sky_sports():
                 wc_boost=has_wc,
                 transfer_related=is_transfer,
                 description=full_text[:500],
-                published_ts=None,
+                published_ts=published_ts,
                 image_url=image_url,
             ))
 
@@ -309,7 +326,24 @@ def scrape_goal():
                 # Fetch article page for text + image
                 text, image_url = scrape_goal_article(url)
                 
+                # Extract timestamp from article page
+                published_ts = None
+                try:
+                    r_ts = client.get(url, timeout=8)
+                    soup_ts = BeautifulSoup(r_ts.text, 'html.parser')
+                    time_el = soup_ts.find('time', attrs={'data-testid': 'publish-time'})
+                    if time_el and time_el.get('datetime'):
+                        from datetime import datetime, timezone
+                        dt = datetime.fromisoformat(time_el['datetime'].replace('Z', '+00:00'))
+                        published_ts = dt.timestamp()
+                except: pass
+                
                 tl = title.lower()
+                
+                # Skip old articles
+                if published_ts and not is_fresh(published_ts):
+                    continue
+                
                 has_wc = any(kw in tl for kw in ["world cup", "worldcup", "wc 202", "usa 2026", "qualifier"])
                 is_transfer = any(kw in tl for kw in ["transfer", "signs", "signing", "joins", "deal", "bid", "loan"])
                 
@@ -317,7 +351,7 @@ def scrape_goal():
                     title=title, source="goal", url=url,
                     score=14 if has_wc else (13 if is_transfer else 12),
                     comments=0, wc_boost=has_wc, transfer_related=is_transfer,
-                    description=(text or title)[:500], published_ts=None, image_url=image_url))
+                    description=(text or title)[:500], published_ts=published_ts, image_url=image_url))
             except: pass
     except Exception as e:
         print(f"   ⚠️ Goal.com error: {e}", file=sys.stderr)
