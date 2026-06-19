@@ -37,15 +37,16 @@ MODEL = "deepseek-v4-flash"
 
 # ── Model routing by article type ──────────────────────────────────
 def get_model_config(topic_type):
-    """Return model + max_tokens based on article type.
-    mimo-v2.5: fast (1.6x), low tokens, good quality for football content.
-    deepseek-v4-flash: fallback for complex/long articles.
+    """Return model chain (fallback order) based on article type.
+    Chain: minimax-m2.5 → mimo-v2.5 → minimax-m2.7 → deepseek-v4-flash
     """
-    # All article types → mimo-v2.5 (fast, cheap, reliable)
-    if topic_type in ["WC_team_guide", "other"]:
-        return {"model": "mimo-v2.5", "max_tokens": 6000, "reasoning_effort": None}
-    # Default: mimo-v2.5 primary, deepseek fallback
-    return {"model": "mimo-v2.5", "max_tokens": 6000, "reasoning_effort": None}
+    # All article types → same chain
+    return [
+        {"model": "minimax-m2.5", "max_tokens": 8000, "reasoning_effort": None},
+        {"model": "mimo-v2.5", "max_tokens": 6000, "reasoning_effort": None},
+        {"model": "minimax-m2.7", "max_tokens": 8000, "reasoning_effort": None},
+        {"model": "deepseek-v4-flash", "max_tokens": 6000, "reasoning_effort": "low"},
+    ]
 
 def extract_body_image(raw_html):
     """Extract best <img> from article body (fallback when og:image fails).
@@ -548,11 +549,11 @@ t0 = time.time()
 
 # ── Model routing by article type ────────────────────────────────
 topic_type = best.get("_topic_type", "other")
-model_cfg = get_model_config(topic_type)
-ACTIVE_MODEL = model_cfg["model"]
-ACTIVE_MAX_TOKENS = model_cfg["max_tokens"]
-ACTIVE_REASONING = model_cfg["reasoning_effort"]
-log(f"   📦 Topic type: {topic_type} → Model: {ACTIVE_MODEL} (max_tokens={ACTIVE_MAX_TOKENS})")
+MODEL_CHAIN = get_model_config(topic_type)
+ACTIVE_MODEL = MODEL_CHAIN[0]["model"]
+ACTIVE_MAX_TOKENS = MODEL_CHAIN[0]["max_tokens"]
+ACTIVE_REASONING = MODEL_CHAIN[0]["reasoning_effort"]
+log(f"   📦 Topic type: {topic_type} → Chain: {' → '.join(m['model'] for m in MODEL_CHAIN)}")
 
 # ── PROMPT v7.0: Sentence counts, fact extraction step, slide_6 exempt ──
 system_prompt = """[ROLE]
@@ -664,7 +665,13 @@ SENTENCE_COUNTS = {
 raw_json = ""
 
 for attempt in range(1, MAX_RETRIES + 1):
-    log(f"   LLM attempt {attempt}/{MAX_RETRIES} (streaming)...")
+    # Cycle through model chain
+    model_idx = (attempt - 1) % len(MODEL_CHAIN)
+    ACTIVE_MODEL = MODEL_CHAIN[model_idx]["model"]
+    ACTIVE_MAX_TOKENS = MODEL_CHAIN[model_idx]["max_tokens"]
+    ACTIVE_REASONING = MODEL_CHAIN[model_idx]["reasoning_effort"]
+    
+    log(f"   LLM attempt {attempt}/{MAX_RETRIES} ({ACTIVE_MODEL})...")
     try:
         payload = {
             "model": ACTIVE_MODEL,
@@ -818,12 +825,17 @@ for attempt in range(1, MAX_RETRIES + 1):
             log("   ❌ No JSON found, retrying...")
             continue
 
-        # Fix: Handle truncated JSON from minimax models (missing closing brace)
+        # Fix: Handle truncated JSON from minimax models (missing closing braces)
         if candidate_json and not candidate_json.endswith("}"):
-            if candidate_json.endswith('"'):
-                candidate_json += '}'
-                log("   🔧 Fixed truncated JSON (added closing brace)")
-            elif candidate_json.endswith('"}'):
+            # Count open vs close braces to determine how many are missing
+            open_braces = candidate_json.count('{')
+            close_braces = candidate_json.count('}')
+            missing = open_braces - close_braces
+            if missing > 0:
+                candidate_json += '}' * missing
+                log(f"   🔧 Fixed truncated JSON (added {missing} closing brace(s)")
+            # Also handle case where last char is "
+            elif candidate_json.endswith('"'):
                 candidate_json += '}'
                 log("   🔧 Fixed truncated JSON (added closing brace)")
 
