@@ -69,7 +69,16 @@ def calc_score(m):
 def extract_topic(text):
     text = text.lower()
     for topic, pats in {
-        "world_cup": ["world cup", "qualifier", "2026", "tournament", "wc", "fifa"],
+        "world_cup": ["world cup", "qualifier", "2026", "tournament", "wc", "fifa",
+                       # WC 2026 team names (auto-boost during tournament)
+                       "england", "france", "germany", "spain", "brazil", "argentina",
+                       "portugal", "netherlands", "belgium", "croatia", "japan", "korea",
+                       "mexico", "usa", "canada", "australia", "morocco", "senegal",
+                       "serbia", "switzerland", "poland", "denmark", "norway", "sweden",
+                       "austria", "czech", "ukraine", "turkey", "scotland", "wales",
+                       "iran", "saudi", "tunisia", "cameroon", "ghana", "nigeria",
+                       "ecuador", "uruguay", "colombia", "chile", "peru", "paraguay",
+                       "costa rica", "panama", "jamaica", "honduras", "el salvador"],
         "transfer": ["transfer", "signing", "deal", "bid", "join"],
         "fifa_political": ["boycott", "qatar", "corruption", "scandal", "politic", "human rights", "migrant", "banned"],
         "controversy": ["controversy", "scandal", "banned", "fined", "racism"],
