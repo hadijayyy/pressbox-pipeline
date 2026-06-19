@@ -38,12 +38,14 @@ MODEL = "deepseek-v4-flash"
 # ── Model routing by article type ──────────────────────────────────
 def get_model_config(topic_type):
     """Return model + max_tokens based on article type.
-    Schedule/guide articles → non-reasoning model (fast, no wasted tokens).
-    Story articles → reasoning model (better content).
+    mimo-v2.5: fast (1.6x), low tokens, good quality for football content.
+    deepseek-v4-flash: fallback for complex/long articles.
     """
+    # All article types → mimo-v2.5 (fast, cheap, reliable)
     if topic_type in ["WC_team_guide", "other"]:
-        return {"model": "minimax-m3", "max_tokens": 4000, "reasoning_effort": None}
-    return {"model": "deepseek-v4-flash", "max_tokens": 10000, "reasoning_effort": "low"}
+        return {"model": "mimo-v2.5", "max_tokens": 6000, "reasoning_effort": None}
+    # Default: mimo-v2.5 primary, deepseek fallback
+    return {"model": "mimo-v2.5", "max_tokens": 6000, "reasoning_effort": None}
 
 def extract_body_image(raw_html):
     """Extract best <img> from article body (fallback when og:image fails).
