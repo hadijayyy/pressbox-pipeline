@@ -148,9 +148,11 @@ for line in post_out.split('\n'):
         root_id = line.split('Root:', 1)[1].strip()
     elif line.startswith('Post:'):
         permalink = line.split('Post:', 1)[1].strip()
-    line_stripped = line.strip()
-    if line_stripped and line_stripped.isdigit() and len(line_stripped) > 15:
-        post_ids.append(line_stripped)
+    # Extract post IDs from "→ {pid}" pattern in slide output
+    if '→' in line:
+        pid_part = line.split('→', 1)[1].strip()
+        if pid_part.isdigit() and len(pid_part) > 15:
+            post_ids.append(pid_part)
 
 # Skip retry — single attempt to fit 120s cron limit
 if not root_id:
