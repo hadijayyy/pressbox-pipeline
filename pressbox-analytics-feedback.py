@@ -30,11 +30,25 @@ def get_token():
         data = json.load(f)
     return data["access_token"], data["user_id"]
 
-def fetch_recent_posts(tok, uid, limit=50):
-    r = httpx.get(f"https://graph.threads.net/v1.0/{uid}/threads",
-                  params={"access_token": tok, "fields": "id,text,timestamp", "limit": limit},
-                  timeout=15)
-    return r.json().get("data", [])
+def fetch_all_posts(tok, uid):
+    """Fetch ALL posts using pagination (not just 50)."""
+    import time as _t
+    posts = []
+    url = f"https://graph.threads.net/v1.0/{uid}/threads"
+    params = {"access_token": tok, "fields": "id,text,timestamp", "limit": 50}
+    while True:
+        r = httpx.get(url, params=params, timeout=15)
+        data = r.json()
+        batch = data.get("data", [])
+        posts.extend(batch)
+        paging = data.get("paging", {})
+        next_url = paging.get("next")
+        if not next_url or not batch:
+            break
+        url = next_url
+        params = None  # BUGFIX: {} strips query params, None keeps them
+        _t.sleep(0.3)
+    return posts
 
 def fetch_engagement(tok, post_id):
     try:
@@ -109,7 +123,7 @@ def merge_topic_stats(old_stats, new_stats):
 
 def main():
     tok, uid = get_token()
-    raw = fetch_recent_posts(tok, uid, limit=50)
+    raw = fetch_all_posts(tok, uid)
     if not raw:
         print("No posts found.")
         return 0

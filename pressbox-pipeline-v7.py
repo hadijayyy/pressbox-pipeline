@@ -393,6 +393,31 @@ for t in all_topics:
                    "where to watch", "what channel", "kick off time", "start time", "stream online"]
     if any(kw in title_lower for kw in tv_guide_kw):
         continue
+    # Skip sensitive content (legal/sexual/crime/SARA)
+    sensitive_kw = [
+        # Sexual
+        "rape", "sexual assault", "sexual abuse", "stand trial",
+        "pedo", "child abuse",
+        # Crime
+        "charged with", "convicted of", "guilty of",
+        "domestic violence", "murder charge", "stabbing", "shooting",
+        # SARA (Suku, Agama, Ras, Antargolongan)
+        "racist", "racism", "racial", "racial abuse", "racial slur",
+        "hate crime", "hate speech", "xenophobia", "xenophobic",
+        "islamophobia", "islamophobic", "antisemitic", "antisemitism",
+        "anti-semitic", "anti-islam", "anti-muslim", "anti-christian",
+        "ethnic cleansing", "genocide", "ethnic violence",
+        "sectarian", "communal violence", "religious conflict",
+        "blasphemy", "apostasy", "heresy",
+        "far-right", "neo-nazi", "white supremacist", "extremist",
+        "terrorism", "terrorist", "bombing",
+        # Discrimination
+        "discrimination", "slavery", "slave trade", "apartheid",
+        "ethnic tension", "tribal clash", "clan violence",
+    ]
+    if any(kw in title_lower or kw in desc_lower for kw in sensitive_kw):
+        log(f"   🚫 Sensitive content skipped: {title[:50]}")
+        continue
     if url in posted_urls:
         continue
     if url in cache_urls:
@@ -558,29 +583,40 @@ ACTIVE_MAX_TOKENS = MODEL_CHAIN[0]["max_tokens"]
 ACTIVE_REASONING = MODEL_CHAIN[0]["reasoning_effort"]
 log(f"   📦 Topic type: {topic_type} → Chain: {' → '.join(m['model'] for m in MODEL_CHAIN)}")
 
-# ── PROMPT v7.1: Optimized for token savings (~40% reduction) ──
-system_prompt = """[ROLE] Football content strategist. Output: 8-slide Threads carousel as JSON.
+# ── PROMPT v7.2: Dynamic — injects analytics recommendations ──
+# Build dynamic sections from analytics
+_dynamic_hooks = ""
+if preferred_hooks:
+    _dynamic_hooks = f"\n- PREFERRED HOOKS (from analytics): {', '.join(preferred_hooks[:3])}. Prioritize these."
+_dynamic_cta = ""
+if cta_pattern:
+    _dynamic_cta = f"\n- CTA PATTERN (from analytics): {cta_pattern}"
+_dynamic_tone = ""
+if tone_adjustment and tone_adjustment != "Conversational English. Bold numbers. High-impact words.":
+    _dynamic_tone = f"\n- TONE: {tone_adjustment}"
+
+system_prompt = f"""[ROLE] Football content strategist. Output: 8-slide Threads carousel as JSON.
 
 [SLIDES]
-1. HOOK (1-3 sentences): Stat|Quote|Question|Scenario. Punchy opener.
+1. HOOK (1-3 sentences): Dollar/number/stat first ($, €, %, million). If article has a number, USE IT in sentence 1. Fallback: Quote|Scenario|Contrast. Punchy opener.{_dynamic_hooks}
 2. SPARK (3-6 sentences): What happened. Who, what, when.
 3. WHY (3-6 sentences): Why it matters now. Facts/numbers.
 4. TENSION (3-6 sentences): Conflict/stakes. Two sides.
-5. HUMAN (2-5 sentences): One person. Who, what they did.
+5. HUMAN (2-5 sentences): Name ONE person. Show emotion, not just facts. "X was in tears" > "X scored". Make reader feel it.
 6. RIPPLE (2-5 sentences): Wider impact. Start with "If this continues..."
 7. UNRESOLVED (2-5 sentences): What's unclear. Leave open.
-8. OPINION+CTA (2-6 sentences): Sharp opinion + question + {url}
+8. OPINION+CTA (2-6 sentences): Sharp opinion + question + {{url}}{_dynamic_cta}
 
 [FORMAT]
-{"slide_1":{"title":"HOOK","content":"..."},...,"slide_8":{"title":"OPINION+CTA","content":"..."}}
+{{"slide_1":{{"title":"HOOK","content":"..."}},...,"slide_8":{{"title":"OPINION+CTA","content":"..."}}}}
 
 [RULES]
-- Short punchy sentences. Conversational English.
+- Short punchy sentences. Conversational English.{_dynamic_tone}
 - Blank line between sentences (\\n\\n in JSON).
 - No: em-dash, hashtags, AI filler.
 - Names/quotes from article only. No fabrication.
 - slide_6 = analysis (exempt from grounding).
-- Output JSON only. No preamble. Start with {."""
+- Output JSON only. No preamble. Start with {{."""
 
 user_prompt = f"ARTICLE: {article_text}\n[Note: article may be truncated. Use only what is provided above.]\nSOURCE: {url}"
 

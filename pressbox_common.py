@@ -120,26 +120,71 @@ def is_similar(new_title, posted_ws, threshold=0.35):
 
 
 # ── Topic classification ────────────────────────────────────────────
-def classify_topic_type(text):
-    """Classify a headline / topic string into a category.
+# v2: Added fifa_political, match_result. Removed <30-word catch-all.
 
-    Mirrors the logic used by analytics-llm.py.
+_INJURY_KW  = {"injury", "injured", "sidelined", "fitness", "out for", "ruled out"}
+_TRANSFER_KW = {"transfer", "signs", "signing", "sign", "move to", "bid", "contract",
+                "offer", "fee", "€", "£", "million", "deal"}
+_POLITICAL_KW = {"ban", "banned", "banne", "protest", "visa", "travel",
+                 "trump", "government", "policy", "staff denied", "oppressed",
+                 "u-turn", "backlash", "boo", "booed", "complaint", "fifa",
+                 "iran", "political", "diplomat", "sanction", "restrict"}
+_GUIDE_KW = {"guide", "preview", "squad", "team guide", "lineup", "predicted"}
+_CONTROVERSY_KW = {"controversy", "scandal", "racism", "racist", "abuse",
+                   "hate symbol", "var official"}
+_TACTICAL_KW = {"tactical", "formation", "system", "analysis", "pressing"}
+_MATCH_KW = {"win", "wins", "beat", "defeat", "victory", "score", "goal",
+             "result", "draw", "draws", "lost", "loses", "beat"}
+_PROFILE_KW = {"profile", "career", "who is", "story of", "rise of", "biography"}
+
+
+def classify_topic_type(text):
+    """Classify a topic string into a category.
+
+    Priority order matters — more specific matches go first.
+    Categories: injury_update, transfer_rumor, fifa_political, WC_team_guide,
+    controversy, tactical_analysis, match_result, player_profile,
+    tournament_news, other.
     """
     if not text:
         return "other"
     lower = text.lower()
-    if any(w in lower for w in ["transfer", "signs", "signing", "move to", "bid", "contract"]):
-        return "transfer_rumor"
-    if any(w in lower for w in ["world cup", "wc", "2026", "tournament"]):
-        if any(w in lower for w in ["guide", "preview", "squad", "team guide"]):
-            return "WC_team_guide"
-        return "tournament_news"
-    if any(w in lower for w in ["controversy", "drama", "storms", "backlash", "fans react"]):
-        return "controversy"
-    if any(w in lower for w in ["analysis", "tactical", "formation", "system"]):
-        return "tactical_analysis"
-    if any(w in lower for w in ["profile", "career", "who is", "story of"]) or len(text.split()) < 30:
-        return "player_profile"
-    if any(w in lower for w in ["injury", "out for", "sidelined", "fitness"]):
+    is_wc = any(w in lower for w in ["world cup", "wc", "2026", "tournament"])
+
+    # 1. Injury (rare, specific — check first)
+    if any(w in lower for w in _INJURY_KW):
         return "injury_update"
+
+    # 2. Transfer (specific keywords)
+    if any(w in lower for w in _TRANSFER_KW):
+        return "transfer_rumor"
+
+    # 3. FIFA / political controversy (World Cup + political keywords)
+    if is_wc and any(w in lower for w in _POLITICAL_KW):
+        return "fifa_political"
+
+    # 4. WC team guide / preview
+    if is_wc and any(w in lower for w in _GUIDE_KW):
+        return "WC_team_guide"
+
+    # 5. General controversy (non-WC)
+    if any(w in lower for w in _CONTROVERSY_KW):
+        return "controversy"
+
+    # 6. Tactical analysis
+    if any(w in lower for w in _TACTICAL_KW):
+        return "tactical_analysis"
+
+    # 7. Match result
+    if any(w in lower for w in _MATCH_KW):
+        return "match_result"
+
+    # 8. Player profile (explicit keywords only)
+    if any(w in lower for w in _PROFILE_KW):
+        return "player_profile"
+
+    # 9. World Cup general
+    if is_wc:
+        return "tournament_news"
+
     return "other"
