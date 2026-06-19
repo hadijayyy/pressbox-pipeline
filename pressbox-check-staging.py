@@ -25,6 +25,7 @@ def is_staging_ready():
 # Check if staging already has content
 if is_staging_ready():
     log('CHECK', "Staging ada konten — skip. [SILENT]")
+    print("✅ Staging ready — pipeline skip")
     sys.exit(0)
 
 # Staging kosong — run pipeline with retries
@@ -43,7 +44,7 @@ for attempt in range(MAX_RETRIES):
                 print(result.stdout.strip())
             sys.exit(0)
         else:
-            log('CHECK', f"❌ Attempt {attempt+1} failed (exit {result.resultcode})")
+            log('CHECK', f"❌ Attempt {attempt+1} failed (exit {result.returncode})")
             if attempt < MAX_RETRIES - 1:
                 log('CHECK', f"  Retrying in 5s...")
                 time.sleep(5)
@@ -60,4 +61,5 @@ for attempt in range(MAX_RETRIES):
 
 # All attempts failed
 log('CHECK', f"❌ All {MAX_RETRIES} attempts failed — :35 will have no content")
+print(f"❌ Check staging: all {MAX_RETRIES} pipeline attempts failed")
 sys.exit(1)
