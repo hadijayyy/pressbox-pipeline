@@ -705,14 +705,17 @@ for attempt in range(1, MAX_RETRIES + 1):
                 break
             try:
                 chunk = json.loads(data_str)
-                delta = chunk.get("choices", [{}])[0].get("delta", {})
+                choices = chunk.get("choices", [])
+                if not choices:
+                    continue
+                delta = choices[0].get("delta", {})
                 if "content" in delta and delta["content"]:
                     content_parts.append(delta["content"])
                 if "reasoning_content" in delta and delta["reasoning_content"]:
                     reasoning_parts.append(delta["reasoning_content"])
                 if "reasoning" in delta and delta["reasoning"]:
                     reasoning_parts.append(delta["reasoning"])
-            except json.JSONDecodeError:
+            except (json.JSONDecodeError, IndexError, KeyError):
                 continue
         
         content = "".join(content_parts).strip()
@@ -814,6 +817,15 @@ for attempt in range(1, MAX_RETRIES + 1):
         if not candidate_json:
             log("   ❌ No JSON found, retrying...")
             continue
+
+        # Fix: Handle truncated JSON from minimax models (missing closing brace)
+        if candidate_json and not candidate_json.endswith("}"):
+            if candidate_json.endswith('"'):
+                candidate_json += '}'
+                log("   🔧 Fixed truncated JSON (added closing brace)")
+            elif candidate_json.endswith('"}'):
+                candidate_json += '}'
+                log("   🔧 Fixed truncated JSON (added closing brace)")
 
         # Parse and validate sentence count
         slides_data = json.loads(candidate_json)
