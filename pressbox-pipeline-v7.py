@@ -651,16 +651,16 @@ if API_KEY:
 
 # ── LLM call with streaming + retry ────────────────────────────
 MAX_RETRIES = 3
-# Sentence count targets per slide (min, max)
+# Sentence count targets per slide (min, max) — relaxed for model flexibility
 SENTENCE_COUNTS = {
-    1: (1, 2),   # Hook: 2 sentences max
-    2: (4, 5),   # Spark
-    3: (4, 5),   # Why
-    4: (4, 5),   # Tension
-    5: (3, 4),   # Human
-    6: (3, 4),   # Ripple
-    7: (3, 4),   # Unresolved
-    8: (3, 4),   # CTA
+    1: (1, 3),   # Hook: 1-3 sentences
+    2: (3, 6),   # Spark
+    3: (3, 6),   # Why
+    4: (3, 6),   # Tension
+    5: (2, 5),   # Human
+    6: (2, 5),   # Ripple
+    7: (2, 5),   # Unresolved
+    8: (2, 6),   # CTA
 }
 raw_json = ""
 
