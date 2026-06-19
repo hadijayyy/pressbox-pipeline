@@ -38,14 +38,14 @@ MODEL = "deepseek-v4-flash"
 # ── Model routing by article type ──────────────────────────────────
 def get_model_config(topic_type):
     """Return model chain (fallback order) based on article type.
-    Chain: minimax-m2.5 → mimo-v2.5 → minimax-m2.7 → deepseek-v4-flash
+    Chain: mimo-v2.5 → deepseek-v4-flash → minimax-m2.5 → minimax-m2.7
     """
     # All article types → same chain
     return [
-        {"model": "minimax-m2.5", "max_tokens": 8000, "reasoning_effort": None},
         {"model": "mimo-v2.5", "max_tokens": 6000, "reasoning_effort": None},
-        {"model": "minimax-m2.7", "max_tokens": 8000, "reasoning_effort": None},
         {"model": "deepseek-v4-flash", "max_tokens": 6000, "reasoning_effort": "low"},
+        {"model": "minimax-m2.5", "max_tokens": 8000, "reasoning_effort": None},
+        {"model": "minimax-m2.7", "max_tokens": 8000, "reasoning_effort": None},
     ]
 
 def extract_body_image(raw_html):
@@ -826,18 +826,17 @@ for attempt in range(1, MAX_RETRIES + 1):
             continue
 
         # Fix: Handle truncated JSON from minimax models (missing closing braces)
-        if candidate_json and not candidate_json.endswith("}"):
-            # Count open vs close braces to determine how many are missing
-            open_braces = candidate_json.count('{')
-            close_braces = candidate_json.count('}')
-            missing = open_braces - close_braces
-            if missing > 0:
-                candidate_json += '}' * missing
-                log(f"   🔧 Fixed truncated JSON (added {missing} closing brace(s)")
-            # Also handle case where last char is "
-            elif candidate_json.endswith('"'):
-                candidate_json += '}'
-                log("   🔧 Fixed truncated JSON (added closing brace)")
+        # Always check brace count, even if ends with }
+        open_braces = candidate_json.count('{')
+        close_braces = candidate_json.count('}')
+        missing = open_braces - close_braces
+        if missing > 0:
+            candidate_json += '}' * missing
+            log(f"   🔧 Fixed truncated JSON (added {missing} closing brace(s)")
+        elif candidate_json and not candidate_json.endswith("}"):
+            # Edge case: doesn't end with } at all
+            candidate_json += '}'
+            log("   🔧 Fixed truncated JSON (added closing brace)")
 
         # Parse and validate sentence count
         slides_data = json.loads(candidate_json)
