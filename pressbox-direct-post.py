@@ -144,7 +144,7 @@ def publish(uid, token, container_id, max_retries=1):
 def get_latest_permalink(uid, token):
     """Get the actual post permalink (alphanumeric format) for the most recent post."""
     try:
-        r = _HTTP.get(f"{THREADS_API}/{uid}/media",
+        r = _HTTP.get(f"{THREADS_API}/{uid}/threads",
             params={"fields": "id,permalink,text", "limit": "3", "access_token": token},
             timeout=10)
         if r.status_code == 200:
