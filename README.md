@@ -29,6 +29,8 @@ Press Box is a fully automated content pipeline that scrapes football news (Mirr
 - **Strategy 2 JSON extraction** — score-based fallback for reasoning-heavy responses
 - **Analytics feedback** — daily engagement analysis tunes posting hours
 - **Atomic staging** — tmp + os.replace prevents corruption
+- **Auto-recovery** — `:15` check-staging runs pipeline if staging is empty
+- **Cron notifications** — all 3 cron jobs notify chat on success and failure
 
 ## 🏗 Architecture
 
@@ -39,30 +41,34 @@ Press Box is a fully automated content pipeline that scrapes football news (Mirr
                   ├── extract (article text + 3-level image fallback)
                   ├── LLM generate (deepseek-v4-flash, v7.0 prompt)
                   ├── validate (sentence count per slide)
-                  └── stage (staging.json)
+                  └── stage (~/.hermes/pressbox/staging.json)
 
-:15 Check Staging ──► verify staging has valid content
+:15 Check Staging ──► if staging empty → auto-run pipeline
+                       └── notify chat (success or failure)
 
 :30 Post ──► read staging → post to Threads (slide-by-slide)
-              └── verify all slides posted
+              ├── verify ≥ 4 slides posted (auto-delete partial)
+              ├── fetch alphanumeric permalink via /me/threads API
+              └── notify chat with link + title
 ```
 
 ### Cron Schedule
 
-| Time | Script | Purpose |
-|------|--------|---------|
-| `:00` | `pressbox-pipeline-v7.py` | Pipeline generate (silent) |
-| `:15` | `pressbox-check-staging.py` | Verify staging content |
-| `:30` | `pressbox-post.py` | Post to Threads (notifies user) |
-| `23:00` | `pressbox-analytics-feedback.py` | Daily analytics |
-| `23:00` | `pressbox-analytics-llm.py` | LLM deep analysis |
+| Time | Script | Deliver | Purpose |
+|------|--------|---------|---------|
+| `:00` | `pressbox-pipeline-v7.py` | chat | Pipeline generate |
+| `:15` | `pressbox-check-staging.py` | chat | Verify/recover staging |
+| `:30` | `pressbox-post.py` | chat | Post to Threads |
+| `23:00` | `pressbox-analytics-feedback.py` | local | Daily analytics |
+| `23:00` | `pressbox-analytics-llm.py` | local | LLM deep analysis |
 
 ### Flow per hour
 
 ```
-:00 Pipeline → staging.json created
-:15 Check → staging verified
-:30 Post → slides posted to Threads → staging cleared
+:00  Pipeline runs → staging.json written (8 slides + image)
+:15  Check staging → if empty, auto-run pipeline as recovery
+:30  Post reads staging → posts 8-slide thread → staging cleared
+     → chat receives: ✅ Title\n   https://threads.com/.../DZxxx
 ```
 
 ## 🚀 Getting Started
@@ -92,7 +98,7 @@ cp .env.example ~/.hermes/.env
 Edit with your credentials:
 
 ```env
-OPENCODE_GO_API_KEY=your_o..._key
+OPENCODE_GO_API_KEY=your_key_here
 ```
 
 ### Threads API Token Setup
@@ -100,10 +106,11 @@ OPENCODE_GO_API_KEY=your_o..._key
 1. Create a Meta App with Threads API enabled
 2. Generate a long-lived access token
 3. Save to `~/.hermes/threads_token.json`:
+
 ```json
 {
   "access_token": "***",
-  "user_id": "your_user_id"
+  "user_id": "your_numeric_user_id"
 }
 ```
 
@@ -111,7 +118,7 @@ OPENCODE_GO_API_KEY=your_o..._key
 
 | Script | Description |
 |--------|-------------|
-| `pressbox-research.py` | RSS scraper — Mirror, Sky Sports, Goal.com extraction |
+| `pressbox-research.py` | RSS scraper — Mirror, Sky Sports, Goal.com |
 | `pressbox-pipeline-v7.py` | **Main pipeline** — scrape → filter → score → extract → LLM → stage |
 | `pressbox-check-staging.py` | Recovery job — runs pipeline if staging is empty |
 | `pressbox-post.py` | Post manager — reads staging, calls direct-post, updates tracking |
@@ -133,8 +140,25 @@ pressbox-pipeline-v7.py:
      b. Article body <img> (first content image) → HEAD validate
      c. RSS image URL → HEAD validate
   7. LLM generate 8-slide JSON (deepseek-v4-flash, v7.0 sentence-count prompt)
+     - {url} injected into system prompt via .replace() before LLM call
   8. Validate sentence count per slide (retry up to 3x)
   9. Save to staging.json (atomic write)
+```
+
+### Post Flow
+
+```
+pressbox-post.py:
+  1. Read staging.json (v2 or v3)
+  2. Duplicate check via posted_topics.json
+  3. Write content to latest.md
+  4. Call pressbox-direct-post.py (timeout 100s)
+  5. Extract post IDs from output (digit lines + "→ {pid}" pattern)
+  6. Safety: if < 4 slides posted → auto-delete thread
+  7. Fetch alphanumeric permalink via GET /me/threads API
+  8. Update posted_topics.json
+  9. Clear staging
+  10. Print: ✅ Title\n   permalink
 ```
 
 ### LLM Prompt (v7.0)
@@ -142,14 +166,14 @@ pressbox-pipeline-v7.py:
 Sentence-count based prompt with per-slide blueprints:
 
 ```
-slide_1 — HOOK (2 sentences max)
+slide_1 — HOOK (1-2 sentences)
 slide_2 — SPARK (4-5 sentences)
 slide_3 — WHY (4-5 sentences)
 slide_4 — TENSION (4-5 sentences)
 slide_5 — HUMAN (3-4 sentences)
 slide_6 — RIPPLE (3-4 sentences) [ANALYSIS — exempt from grounding]
 slide_7 — UNRESOLVED (3-4 sentences)
-slide_8 — OPINION + CTA (3-4 sentences)
+slide_8 — OPINION + CTA (3-4 sentences) — ends with source URL
 ```
 
 Key rules:
@@ -157,23 +181,11 @@ Key rules:
 - slide_6 explicitly exempt from grounding rules (analysis)
 - Writing rules: punchy, conversational, no em-dash/hashtags
 - Grounding: all facts from article only, no invented names/quotes
-
-### Sentence Count Targets
-
-| Slide | Sentences | Role |
-|-------|-----------|------|
-| 1 (HOOK) | 1-2 | Stop scroll |
-| 2 (SPARK) | 4-5 | What happened |
-| 3 (WHY) | 4-5 | Why it matters |
-| 4 (TENSION) | 4-5 | Conflict/stakes |
-| 5 (HUMAN) | 3-4 | One person |
-| 6 (RIPPLE) | 3-4 | Analysis (exempt from grounding) |
-| 7 (UNRESOLVED) | 3-4 | Open question |
-| 8 (CTA) | 3-4 | Opinion + url |
+- `{url}` in slide_8 replaced before LLM call via `system_prompt.replace("{url}", url)`
 
 ## 🖼️ Image Support
 
-The pipeline automatically attaches the article's main image to the **first slide** of every thread:
+The pipeline automatically attaches the article's main image to the **first slide** of every thread.
 
 ### 3-Level Fallback Chain
 
@@ -187,10 +199,10 @@ The pipeline automatically attaches the article's main image to the **first slid
 
 | Source | og:image | Body img | RSS img | Status |
 |--------|----------|----------|---------|--------|
-| Mirror | ✅ 200 | ✅ 200 | ✅ 200 | Works |
-| Sky Sports | ✅ 200 | ✅ 200 | ✅ 200 | Works |
-| Goal.com | ✅ 200 | ✅ 200 | ✅ 200 | Works |
-| Guardian | ❌ CDN blocked | - | - | Skipped |
+| Mirror | ✅ | ✅ | ✅ | Works |
+| Sky Sports | ✅ | ✅ | ✅ | Works |
+| Goal.com | ✅ | ✅ | ✅ | Works |
+| Guardian | ❌ CDN blocked | — | — | Skipped |
 
 ## 📊 Analytics Feedback Loop
 
@@ -200,27 +212,23 @@ The pipeline automatically attaches the article's main image to the **first slid
 - Fetches last 20 posts via Threads API
 - Calculates avg engagement per topic
 - Generates topic boosts (1.5x-3x high, 0.3x low)
-- Saves to `analytics_feedback.json` → consumed by `pressbox-post.py` (worst_hours check)
+- Saves to `analytics_feedback.json`
 
 **analytics-llm.py:**
 - LLM deep analysis of hooks, CTA effectiveness, topic performance
 - Traverses nested reply chains to detect CTA (slide 8)
 - Saves recommendations to `analytics_recommendations.json`
-- Generates markdown report → Telegram delivery
+- Generates markdown report
 
 ### Analytics Data Flow
 
 ```
 analytics_feedback.json
-  └──► pressbox-post.py (is_bad_hour check)
+  └──► pressbox-pipeline-v7.py (scoring boost/skip)
 
 analytics_recommendations.json
-  └──► LLM analysis → Telegram report (human review)
+  └──► LLM analysis → report (human review)
 ```
-
-### Best Hours (from analytics)
-
-Based on engagement data: **17:00, 23:00, 01:00 WIB**
 
 ## 🔧 Data Files
 
@@ -228,9 +236,9 @@ Based on engagement data: **17:00, 23:00, 01:00 WIB**
 |------|---------|
 | `~/.hermes/pressbox/staging.json` | Pipeline output → Post input |
 | `~/.hermes/pressbox/posted_topics.json` | URL + title dedup tracking |
-| `~/.hermes/pressbox/article_cache.json` | 30-min article text cache |
 | `~/.hermes/pressbox/analytics_feedback.json` | Topic boosts from analytics |
 | `~/.hermes/pressbox/analytics_recommendations.json` | LLM analysis results |
+| `~/.hermes/pressbox/metrics.jsonl` | Per-run metrics (tokens, timing, slides) |
 | `~/.hermes/threads_token.json` | Threads API token |
 | `~/.hermes/.env` | API keys |
 
@@ -240,15 +248,27 @@ Based on engagement data: **17:00, 23:00, 01:00 WIB**
 |-------|----------|
 | URL fails | Skip candidate, try next |
 | LLM timeout | Retry up to 3x |
-| Sentence count fail (< min) | Retry with stricter prompt |
+| Sentence count fail | Retry with stricter prompt |
 | JSON parse failure | Strategy 1: slide markers → Strategy 2: score-based fallback |
-| JSON in reasoning_content | Extract via brace counting + content length scoring |
+| `{url}` in slide_8 | Injected via `system_prompt.replace()` before LLM call |
 | Image og:image fails | Fallback to body `<img>` → RSS |
 | Image HEAD check fails | Skip image, proceed text-only |
-| Staging guard | Skip if unposted content exists |
+| Staging empty at :15 | Auto-run pipeline (recovery) |
+| Partial post (< 4 slides) | Auto-delete thread, notify chat |
+| Post ID extraction | Dual method: digit lines + `→ {pid}` pattern |
+| Permalink format | Fetched via `GET /me/threads` (alphanumeric, not numeric container ID) |
 | All candidates fail | Exit code 1 → check-staging recovery |
 
 ## 📝 Changelog
+
+### v7.3 — Post Reliability (2026-06-19)
+- Fixed `{url}` not injected into slide_8 (`system_prompt.replace("{url}", url)`)
+- Fixed partial post false-positive: dual post ID extraction (digit lines + `→` pattern)
+- Fixed permalink format: use `/me/threads` API (alphanumeric `DZxxx`) not container ID
+- Fixed `pressbox-check-staging.py` typo: `result.resultcode` → `result.returncode`
+- All 3 cron jobs now deliver to chat (was: pipeline + check-staging were silent local)
+- Pipeline prints to stdout for cron capture (was: `log()` stderr-only → always "silent")
+- Auto-recovery: `:15` check-staging runs pipeline if staging empty
 
 ### v7.2 — Sentence Counts + Speed (2026-06-18)
 - **54% faster LLM** (67.7s → 30.9s) via prompt optimization
@@ -264,7 +284,6 @@ Based on engagement data: **17:00, 23:00, 01:00 WIB**
 - Rewrote prompt as "Data Extraction Agent" role
 - Added Strategy 2 JSON extraction (score-based)
 - Added article cache (30-min TTL)
-- Fixed `pressbox-check-staging.py` → v7 reference
 
 ### v7.0 — Initial Release
 - 3-source scraper (Mirror + Sky Sports + Goal.com)
