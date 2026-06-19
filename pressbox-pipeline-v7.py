@@ -275,6 +275,7 @@ log(f"   Total scraped: {len(all_topics)} topics")
 
 if not all_topics:
     log("❌ No topics scraped — exit")
+    print("❌ Pipeline failed: No topics scraped from RSS", flush=True)
     sys.exit(1)
 
 # ── 2. FILTER ─────────────────────────────────────────────────────
@@ -406,6 +407,7 @@ for t in all_topics:
 log(f"   After filter: {len(filtered)} topics")
 if not filtered:
     log("❌ No topics after filter — exit")
+    print(f"❌ Pipeline failed: All {len(all_topics)} topics filtered out", flush=True)
     sys.exit(1)
 
 # ── 3. SCORE — pick best ──────────────────────────────────────────
@@ -683,6 +685,7 @@ for attempt in range(1, MAX_RETRIES + 1):
         )
         if r.status_code != 200:
             log(f"❌ API error: HTTP {r.status_code} {r.text[:200]}")
+            print(f"❌ Pipeline failed: LLM API error HTTP {r.status_code}", flush=True)
             sys.exit(1)
         
         # Process SSE stream
@@ -972,6 +975,7 @@ else:
     except Exception as e:
         log_error(f"Staging write failed: {e}")
         log(f"❌ Staging write failed: {e}")
+        print(f"❌ Pipeline failed: Staging write error — {e}", flush=True)
         sys.exit(1)
 
 total = time.time() - START
@@ -1002,3 +1006,6 @@ except Exception:
     pass
 
 log(f"⏱️ Scrape:{t_scrape:.1f}s  LLM:{metrics['llm_s']}s  Total:{total:.1f}s  Tokens:{metrics['total_tok']} (prompt:{metrics['prompt_tok']} + completion:{metrics['completion_tok']})  Reasoning:{metrics['reasoning_c']}c")
+
+# stdout for cron capture (log() goes to stderr only)
+print(f"✅ Pipeline done: {best.get('title','?')[:60]} ({len(slides)} slides, {metrics['total_tok']} tokens, {total:.0f}s)", flush=True)
