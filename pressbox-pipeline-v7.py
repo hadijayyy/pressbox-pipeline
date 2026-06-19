@@ -713,7 +713,7 @@ for attempt in range(1, MAX_RETRIES + 1):
                 chunk = json.loads(data_str)
                 choices = chunk.get("choices", [])
                 if not choices:
-                    continue
+                    continue  # Skip chunks with no choices (minimax sends empty initial chunks)
                 delta = choices[0].get("delta", {})
                 if "content" in delta and delta["content"]:
                     content_parts.append(delta["content"])
