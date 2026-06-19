@@ -141,6 +141,20 @@ def publish(uid, token, container_id, max_retries=1):
             raise
     raise Exception(f"Publish failed after {max_retries} retries")
 
+def get_latest_permalink(uid, token):
+    """Get the actual post permalink (alphanumeric format) for the most recent post."""
+    try:
+        r = _HTTP.get(f"{THREADS_API}/{uid}/media",
+            params={"fields": "id,permalink,text", "limit": "3", "access_token": token},
+            timeout=10)
+        if r.status_code == 200:
+            data = r.json().get("data", [])
+            if data:
+                return data[0].get("permalink", "")
+    except Exception:
+        pass
+    return ""
+
 def post_thread(uid, token, slides, image_url=None):
     """
     Post slides as threaded replies.
@@ -164,7 +178,6 @@ def post_thread(uid, token, slides, image_url=None):
             print(f"   Slide {i+1}/8: creating root container...", file=sys.stderr)
 
         cid = create_container(uid, token, text, parent_pid, image_url if i == 0 else None)
-
         print(f"   Slide {i+1}/8: publishing...", file=sys.stderr)
         pid = publish(uid, token, cid)
         post_ids.append(pid)
@@ -172,7 +185,14 @@ def post_thread(uid, token, slides, image_url=None):
 
         if i == 0:
             print(f"Root: {pid}")
-            print(f"Post: https://www.threads.com/@parkthebus.football/post/{pid}")
+            # Get actual permalink (alphanumeric format like DZvnqdoE7-k)
+            import time as _t
+            _t.sleep(1)
+            permalink = get_latest_permalink(uid, token)
+            if permalink:
+                print(f"Post: {permalink}")
+            else:
+                print(f"Post: https://www.threads.com/@parkthebus.football/post/{pid}")
 
         parent_pid = pid
         if i < len(filtered) - 1:
