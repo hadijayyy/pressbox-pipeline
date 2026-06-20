@@ -955,6 +955,8 @@ for s in slides:
     s["content"] = re.sub(r"  +", " ", s["content"])
     s["content"] = re.sub(r" ,", ",", s["content"])
     s["content"] = re.sub(r" \.", ".", s["content"])
+    # Enforce blank line after every sentence (if missing)
+    s["content"] = re.sub(r'([.!?])(\s+)([A-Z"])', r'\1\n\n\3', s["content"])
 
 joined = "\n---\n".join(s["content"] for s in slides)
 
