@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Press Box Pipeline v7 — fast, clean, ~300 lines."""
-import json, os, sys, re, time, subprocess, importlib.util, struct
+import html as html_mod, json, os, sys, re, time, subprocess, importlib.util, struct
 from datetime import datetime, timezone, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
