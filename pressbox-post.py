@@ -200,7 +200,14 @@ def main():
 
     # 6. Verify (skip if script missing)
     if os.path.exists(VERIFY_SCRIPT):
-        verify_out, _ = shell(f"python3 {VERIFY_SCRIPT} {root_id}", timeout=15)
+        verify_cmd = f"python3 {VERIFY_SCRIPT} --post-id {root_id}"
+        if topic_url:
+            verify_cmd += f" --url {shlex.quote(topic_url)}"
+        verify_out, verify_code = shell(verify_cmd, timeout=15)
+        if verify_code == 0:
+            log('POST', f"✅ Last slide verified OK")
+        else:
+            log('POST', f"⚠️ Last slide verification failed (exit {verify_code})")
     else:
         log('POST', f"⚠️ Verify script not found, skipping")
 
