@@ -170,7 +170,7 @@ def scrape_mirror():
                 og_img = re.search(r'og:image[^>]*content="([^"]*)"', r2.text)
                 image_url = og_img.group(1) if og_img else ""
                 tl = title.lower()
-                has_wc = any(kw in tl for kw in ["world cup", "worldcup", "wc 202", "usa ", "host"])
+                has_wc = any(kw in tl for kw in ["world cup", "worldcup", "wc 202", "usa 2026", "team usa", "usmnt", "host nation", "host country"])
                 is_transfer = any(kw in tl for kw in ["transfer", "signs", "signing", "joins", "joined", "deal", "bid", "loan"])
                 score = 12 if has_wc else (13 if is_transfer else 8)
                 topics.append(dict(title=title, source="mirror", url=link, score=score,
@@ -347,25 +347,15 @@ def scrape_goal():
                 link = article.find('a', href=True)
                 if not link: continue
                 url = link['href']
-                if not url.startswith('http'):
+                if url.startswith('//'):
+                    url = 'https:' + url
+                elif not url.startswith('http'):
                     url = 'https://www.goal.com' + url
                 if url in seen: continue
                 seen.add(url)
                 
-                # Fetch article page for text + image
-                text, image_url = scrape_goal_article(url)
-                
-                # Extract timestamp from article page
-                published_ts = None
-                try:
-                    r_ts = client.get(url, timeout=8)
-                    soup_ts = BeautifulSoup(r_ts.text, 'html.parser')
-                    time_el = soup_ts.find('time', attrs={'data-testid': 'publish-time'})
-                    if time_el and time_el.get('datetime'):
-                        from datetime import datetime, timezone
-                        dt = datetime.fromisoformat(time_el['datetime'].replace('Z', '+00:00'))
-                        published_ts = dt.timestamp()
-                except: pass
+                # Fetch article page for text + image + timestamp
+                text, image_url, published_ts = scrape_goal_article(url)
                 
                 tl = title.lower()
                 
@@ -393,13 +383,14 @@ def scrape_goal():
 
 
 def scrape_goal_article(url):
-    """Fetch Goal.com article page → returns (text, image_url).
+    """Fetch Goal.com article page → returns (text, image_url, published_ts).
     BS4 first, then __NEXT_DATA__ JSON fallback for Next.js pages."""
     text = ""
     image_url = ""
+    published_ts = None
     try:
         r = client.get(url, timeout=10, follow_redirects=True)
-        if r.status_code != 200: return text, image_url
+        if r.status_code != 200: return text, image_url, published_ts
 
         soup = BeautifulSoup(r.text, 'html.parser')
 
@@ -407,6 +398,13 @@ def scrape_goal_article(url):
         og_img = soup.find('meta', property='og:image')
         if og_img:
             image_url = og_img.get('content', '')
+
+        # Extract timestamp
+        time_el = soup.find('time', attrs={'data-testid': 'publish-time'})
+        if time_el and time_el.get('datetime'):
+            from datetime import datetime, timezone
+            dt = datetime.fromisoformat(time_el['datetime'].replace('Z', '+00:00'))
+            published_ts = dt.timestamp()
 
         # Strategy 1: BS4 article body
         body = (
@@ -435,7 +433,7 @@ def scrape_goal_article(url):
                     pass
     except Exception as e:
         print(f"   ⚠️ Goal article error ({url}): {e}", file=sys.stderr)
-    return text, image_url
+    return text, image_url, published_ts
 
 # ─── Viral keyword matcher ───────────────────────────────────────
 

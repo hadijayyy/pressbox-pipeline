@@ -254,7 +254,7 @@ def main():
             "timestamp": datetime.now(WIB).isoformat(),
             "source": topic.get("source", ""),
             "description": (topic.get("description") or "")[:300],
-            "url": "",
+            "url": topic.get("url", ""),
             "posted_at": datetime.now(WIB).isoformat()
         })
         log('POST', f"📝 New tracking entry: {topic.get('title','?')[:50]}")

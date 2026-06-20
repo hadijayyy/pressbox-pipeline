@@ -494,6 +494,7 @@ else:
     article_text = re.sub(r"<script[^>]*>.*?</script>", " ", article_text, flags=re.DOTALL|re.IGNORECASE)
     article_text = re.sub(r"<[^>]+>", " ", article_text)
     article_text = re.sub(r"\s+", " ", article_text).strip()
+    article_text = html_mod.unescape(article_text)
 
     # Extract og:image
     image_url = ""
