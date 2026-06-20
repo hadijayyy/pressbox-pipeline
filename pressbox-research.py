@@ -55,9 +55,11 @@ def parse_rss_date(ds):
     try: return parsedate_to_datetime(ds).timestamp()
     except: return None
 
-def is_fresh(ts):
+def is_fresh(ts, cutoff=None):
     if ts is None: return None
-    return (time.time() - ts) <= FRESHNESS_CUTOFF
+    if cutoff is None:
+        cutoff = FRESHNESS_CUTOFF
+    return (time.time() - ts) <= cutoff
 
 # ─── Generic RSS scraper ─────────────────────────────────────────
 
@@ -238,8 +240,8 @@ def scrape_sky_sports():
 
             tl = title.lower()
             
-            # Skip old articles
-            if published_ts and not is_fresh(published_ts):
+            # Skip old articles (12h for Sky Sports — less frequent updates)
+            if published_ts and not is_fresh(published_ts, cutoff=12*3600):
                 continue
             
             has_wc = any(kw in tl for kw in ["world cup", "worldcup", "wc 202", "usa 2026", "qualifier"])
