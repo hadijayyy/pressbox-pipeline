@@ -203,11 +203,11 @@ def post_thread(uid, token, slides, image_url=None):
             continue
 
         if i < len(filtered) - 1:
-            # Rate limit avoidance: pauses at slide 3 and slide 4
-            if i == 2:  # After slide 3 (0-indexed)
-                time.sleep(5)
-            elif i == 3:  # After slide 4 (0-indexed)
-                time.sleep(8)
+            # Rate limit avoidance: 10s pauses to stay under API limit
+            if i == 1:  # After slide 2
+                time.sleep(10)
+            elif i == 3:  # After slide 4
+                time.sleep(10)
             else:
                 time.sleep(3)  # Wait for Threads API to index parent post
 
