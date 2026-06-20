@@ -42,7 +42,7 @@ def get_model_config(topic_type):
     """
     # All article types → same chain
     return [
-        {"model": "minimax-m2.5", "max_tokens": 5000, "reasoning_effort": None},
+        {"model": "minimax-m2.5", "max_tokens": 5000, "reasoning_effort": "low"},
         {"model": "mimo-v2.5", "max_tokens": 5000, "reasoning_effort": None},
     ]
 
