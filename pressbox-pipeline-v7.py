@@ -336,6 +336,8 @@ try:
     if generated_at:
         try:
             gen_dt = datetime.fromisoformat(generated_at)
+            if gen_dt.tzinfo is None:
+                gen_dt = gen_dt.replace(tzinfo=WIB)
             if datetime.now(WIB) - gen_dt > timedelta(hours=48):
                 log(f"   ⚠️ Analytics feedback >48h old — using defaults")
             else:
@@ -671,6 +673,10 @@ for attempt in range(1, MAX_RETRIES + 1):
         )
         if r.status_code != 200:
             log(f"❌ API error: HTTP {r.status_code} {r.text[:200]}")
+            if r.status_code >= 500 and attempt < MAX_RETRIES:
+                log(f"   Retrying ({attempt}/{MAX_RETRIES})...")
+                time.sleep(2 + attempt)
+                continue
             print(f"❌ Pipeline failed: LLM API error HTTP {r.status_code}", flush=True)
             sys.exit(1)
         

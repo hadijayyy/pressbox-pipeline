@@ -60,6 +60,7 @@ def shell(cmd, timeout=120):
 def extract_post_ids(output):
     """Extract root ID, permalink, and all post IDs from output."""
     post_ids = []
+    seen = set()
     root_id = None
     permalink = None
     for line in output.split('\n'):
@@ -71,11 +72,15 @@ def extract_post_ids(output):
         elif line_stripped.startswith('Post:') and not permalink:
             permalink = line_stripped.split('Post:', 1)[1].strip()
         elif line_stripped.isdigit() and len(line_stripped) > 15:
-            post_ids.append(line_stripped)
+            if line_stripped not in seen:
+                seen.add(line_stripped)
+                post_ids.append(line_stripped)
         elif '→' in line_stripped:
             pid_part = line_stripped.split('→', 1)[1].strip()
             if pid_part.isdigit() and len(pid_part) > 15:
-                post_ids.append(pid_part)
+                if pid_part not in seen:
+                    seen.add(pid_part)
+                    post_ids.append(pid_part)
     return root_id, permalink, post_ids
 
 def is_posting_too_frequent():
@@ -176,7 +181,7 @@ def main():
     image_url = staging.get("image_url") or ""
     image_flag = f" --image {shlex.quote(image_url)}" if image_url else ""
     post_cmd = f"python3 {POST_SCRIPT} --file {LATEST_MD}{image_flag} 2>&1"
-    post_out, code = shell(post_cmd, timeout=150)
+    post_out, code = shell(post_cmd, timeout=200)
 
     # 4. Extract root ID and permalink
     root_id, permalink, post_ids = extract_post_ids(post_out)
@@ -227,8 +232,11 @@ def main():
         log('POST', f"⚠️ Verify script not found, skipping")
 
     # 7. Update tracking
-    with open(POSTED) as f:
-        data = json.load(f)
+    try:
+        with open(POSTED) as f:
+            data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        data = {"topics": []}
     # Try to update [PENDING] entry first
     found = False
     for t in data.get("topics", []):

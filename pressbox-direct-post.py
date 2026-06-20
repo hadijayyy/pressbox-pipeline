@@ -203,7 +203,7 @@ def post_thread(uid, token, slides, image_url=None):
             continue
 
         if i < len(filtered) - 1:
-            time.sleep(0.1)
+            time.sleep(5)  # Wait for Threads API to index parent post
 
     return post_ids
 

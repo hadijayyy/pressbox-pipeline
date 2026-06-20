@@ -56,7 +56,7 @@ def parse_rss_date(ds):
     except: return None
 
 def is_fresh(ts, cutoff=None):
-    if ts is None: return None
+    if ts is None: return False
     if cutoff is None:
         cutoff = FRESHNESS_CUTOFF
     return (time.time() - ts) <= cutoff
