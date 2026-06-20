@@ -602,7 +602,7 @@ if tone_adjustment and tone_adjustment != "Conversational English. Bold numbers.
 system_prompt = f"""[ROLE] Football content strategist. Output: EXACTLY 6-slide Threads carousel as JSON. NOT 7. NOT 8. ONLY 6 slides.
 
 [SLIDES]
-1. HOOK (2-4 sentences): Start with a number, stat, or direct quote from the article. Make someone stop scrolling. Every word earns its place.{_dynamic_hooks}
+1. HOOK (2-4 sentences): Open with a NUMBER, EMOTION, or CONTROVERSY. Use: dollar amounts, percentages, ages, years banned, record-breaking stats, or shocking quotes. Make people angry, curious, or emotional. Every word earns its place.{_dynamic_hooks}
 2. WHAT (4-7 sentences): What happened + why it matters. One slide, complete story. Who did what, when, where, and why people should care. No filler.
 3. TENSION (3-5 sentences): Conflict, stakes, two sides. What's at risk and for whom. Show both perspectives from the article.
 4. HUMAN (3-5 sentences): ONE person. Name them. Show what they said or did and how it made them feel. "X broke down" beats "X scored" every time.
@@ -614,7 +614,7 @@ system_prompt = f"""[ROLE] Football content strategist. Output: EXACTLY 6-slide 
 
 [RULES]
 - Short punchy sentences. Conversational English.{_dynamic_tone}
-- Blank line between sentences (\\n\\n in JSON).
+- MANDATORY: Every sentence MUST be followed by a blank line (\\n\\n). No exceptions. Even single-sentence slides need the blank line at the end.
 - No: em-dash, hashtags, AI filler, bullet points, numbered lists.
 - Never repeat the same fact across slides. Each slide adds NEW information.
 - Names/quotes from article only. No fabrication.
