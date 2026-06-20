@@ -113,9 +113,9 @@ def is_posting_too_frequent():
 def main():
     log('POST', "=== PRESS BOX POST ===")
 
-    # 0b. FREQUENCY CHECK — Quality > Quantity
-    if is_posting_too_frequent():
-        print("⏸️ Skip — baru posting < 30 menit lalu.")
+    # 0b. FREQUENCY CHECK — Quality > Quantity (skip with --force)
+    if "--force" not in sys.argv and is_posting_too_frequent():
+        print("⏸️ Skip — baru posting < 30 menit lalu. Use --force to bypass.")
         sys.exit(0)
 
     # 1. Read staging (check v3 first, then v2)
