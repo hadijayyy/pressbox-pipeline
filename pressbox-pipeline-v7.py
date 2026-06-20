@@ -599,27 +599,26 @@ _dynamic_tone = ""
 if tone_adjustment and tone_adjustment != "Conversational English. Bold numbers. High-impact words.":
     _dynamic_tone = f"\n- TONE: {tone_adjustment}"
 
-system_prompt = f"""[ROLE] Football content strategist. Output: 8-slide Threads carousel as JSON.
+system_prompt = f"""[ROLE] Football content strategist. Output: EXACTLY 6-slide Threads carousel as JSON. NOT 7. NOT 8. ONLY 6 slides.
 
 [SLIDES]
-1. HOOK (1-3 sentences): Dollar/number/stat first ($, €, %, million). If article has a number, USE IT in sentence 1. Fallback: Quote|Scenario|Contrast. Punchy opener.{_dynamic_hooks}
-2. SPARK (3-6 sentences): What happened. Who, what, when.
-3. WHY (3-6 sentences): Why it matters now. Facts/numbers.
-4. TENSION (3-6 sentences): Conflict/stakes. Two sides.
-5. HUMAN (2-5 sentences): Name ONE person. Show emotion, not just facts. "X was in tears" > "X scored". Make reader feel it.
-6. RIPPLE (2-5 sentences): Wider impact. Start with "If this continues..."
-7. UNRESOLVED (2-5 sentences): What's unclear. Leave open.
-8. OPINION+CTA (2-6 sentences): Sharp opinion + question + {{url}}{_dynamic_cta}
+1. HOOK (2-4 sentences): Start with a number, stat, or direct quote from the article. Make someone stop scrolling. Every word earns its place.{_dynamic_hooks}
+2. WHAT (4-7 sentences): What happened + why it matters. One slide, complete story. Who did what, when, where, and why people should care. No filler.
+3. TENSION (3-5 sentences): Conflict, stakes, two sides. What's at risk and for whom. Show both perspectives from the article.
+4. HUMAN (3-5 sentences): ONE person. Name them. Show what they said or did and how it made them feel. "X broke down" beats "X scored" every time.
+5. UNRESOLVED (2-4 sentences): What's still unknown. Real questions from the article. Leave the reader wanting more.
+6. CTA (3-5 sentences): One sharp opinion grounded in facts. End with a specific question that demands a reply. Last line: {{url}}{_dynamic_cta}
 
 [FORMAT]
-{{"slide_1":{{"title":"HOOK","content":"..."}},...,"slide_8":{{"title":"OPINION+CTA","content":"..."}}}}
+{{"slide_1":{{"title":"HOOK","content":"..."}},...,"slide_6":{{"title":"CTA","content":"..."}}}}
 
 [RULES]
 - Short punchy sentences. Conversational English.{_dynamic_tone}
 - Blank line between sentences (\\n\\n in JSON).
-- No: em-dash, hashtags, AI filler.
+- No: em-dash, hashtags, AI filler, bullet points, numbered lists.
+- Never repeat the same fact across slides. Each slide adds NEW information.
 - Names/quotes from article only. No fabrication.
-- slide_6 = analysis (exempt from grounding).
+- slide_5 = analysis (exempt from grounding).
 - Output JSON only. No preamble. Start with {{."""
 
 user_prompt = f"ARTICLE: {article_text}\n[Note: article may be truncated. Use only what is provided above.]\nSOURCE: {url}"
@@ -632,16 +631,14 @@ if API_KEY:
 
 # ── LLM call with streaming + retry ────────────────────────────
 MAX_RETRIES = 3
-# Sentence count targets per slide (min, max) — relaxed for model flexibility
+# Sentence count targets per slide (min, max) — 6-slide format
 SENTENCE_COUNTS = {
-    1: (1, 3),   # Hook: 1-3 sentences
-    2: (3, 6),   # Spark
-    3: (3, 6),   # Why
-    4: (3, 6),   # Tension
-    5: (2, 5),   # Human
-    6: (2, 5),   # Ripple
-    7: (2, 5),   # Unresolved
-    8: (2, 6),   # CTA
+    1: (2, 4),   # Hook: 2-4 sentences
+    2: (4, 7),   # What: what happened + why it matters
+    3: (3, 5),   # Tension: conflict/stakes
+    4: (3, 5),   # Human: one person, emotion
+    5: (2, 4),   # Unresolved: what's unclear
+    6: (3, 5),   # CTA: opinion + question + url
 }
 raw_json = ""
 
@@ -830,7 +827,7 @@ for attempt in range(1, MAX_RETRIES + 1):
         if "slides" in slides_data and isinstance(slides_data["slides"], list):
             slide_list = slides_data["slides"]
         else:
-            slide_list = [slides_data.get(f"slide_{i}", {}) for i in range(1, 9)]
+            slide_list = [slides_data.get(f"slide_{i}", {}) for i in range(1, 7)]
 
         def count_sentences(text: str) -> int:
             """Count sentences by splitting on sentence-ending punctuation."""
@@ -839,7 +836,7 @@ for attempt in range(1, MAX_RETRIES + 1):
             sents = re.split(r'(?<=[.!?])\s+', text.strip())
             return len([s for s in sents if len(s.strip()) > 5])
 
-        for i, s in enumerate(slide_list[:8]):  # slides 1-8
+        for i, s in enumerate(slide_list[:6]):  # slides 1-6
             if not isinstance(s, dict):
                 sentence_issues.append(f"s{i+1}: not a dict")
                 continue
@@ -898,12 +895,13 @@ except json.JSONDecodeError as e:
     sys.exit(1)
 
 slides = []
+MAX_SLIDES = 6
 
 # Handle both formats: {"slide_1": {...}} and {"slides": [...]}
 if "slides" in slides_data and isinstance(slides_data["slides"], list):
     for i, s in enumerate(slides_data["slides"]):
         if isinstance(s, str):
-            titles = ['HOOK', 'SPARK', 'WHY', 'TENSION', 'HUMAN', 'RIPPLE', 'UNRESOLVED', 'HOT TAKE']
+            titles = ['HOOK', 'WHAT', 'TENSION', 'HUMAN', 'UNRESOLVED', 'CTA']
             slides.append({"title": titles[i] if i < len(titles) else f"Slide {i+1}", "content": s.strip()})
         elif isinstance(s, dict):
             title = (s.get("title") or "").strip()
@@ -916,7 +914,7 @@ if "slides" in slides_data and isinstance(slides_data["slides"], list):
             log(f"❌ slides[{i}] unexpected type: {type(s)}")
             sys.exit(1)
 else:
-    for i in range(1, 9):
+    for i in range(1, 7):
         key = f"slide_{i}"
         if key not in slides_data:
             alt_key = f"Slide {i}"
@@ -935,6 +933,11 @@ else:
             log(f"❌ {key} missing title or content")
             sys.exit(1)
         slides.append({"title": title, "content": content})
+
+# Truncate to MAX_SLIDES (model sometimes generates extra empty slides)
+if len(slides) > MAX_SLIDES:
+    log(f"   Truncating {len(slides)} slides → {MAX_SLIDES}")
+    slides = slides[:MAX_SLIDES]
 
 # Single validation pass
 ok, errors = validate_and_fix(slides)
