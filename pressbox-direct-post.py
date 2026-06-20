@@ -172,29 +172,36 @@ def post_thread(uid, token, slides, image_url=None):
         if not text:
             continue
 
-        if parent_pid:
-            print(f"   Slide {i+1}/8: creating reply to {parent_pid}...", file=sys.stderr)
-        else:
-            print(f"   Slide {i+1}/8: creating root container...", file=sys.stderr)
-
-        cid = create_container(uid, token, text, parent_pid, image_url if i == 0 else None)
-        print(f"   Slide {i+1}/8: publishing...", file=sys.stderr)
-        pid = publish(uid, token, cid)
-        post_ids.append(pid)
-        print(f"   Slide {i+1}/8: → {pid}", file=sys.stderr)
-
-        if i == 0:
-            print(f"Root: {pid}")
-            # Get actual permalink (alphanumeric format like DZvnqdoE7-k)
-            import time as _t
-            _t.sleep(1)
-            permalink = get_latest_permalink(uid, token)
-            if permalink:
-                print(f"Post: {permalink}")
+        try:
+            if parent_pid:
+                print(f"   Slide {i+1}/8: creating reply to {parent_pid}...", file=sys.stderr)
             else:
-                print(f"Post: https://www.threads.com/@parkthebus.football/post/{pid}")
+                print(f"   Slide {i+1}/8: creating root container...", file=sys.stderr)
 
-        parent_pid = pid
+            cid = create_container(uid, token, text, parent_pid, image_url if i == 0 else None)
+            print(f"   Slide {i+1}/8: publishing...", file=sys.stderr)
+            pid = publish(uid, token, cid)
+            post_ids.append(pid)
+            print(f"   Slide {i+1}/8: → {pid}", file=sys.stderr)
+
+            if i == 0:
+                print(f"Root: {pid}")
+                # Get actual permalink (alphanumeric format like DZvnqdoE7-k)
+                import time as _t
+                _t.sleep(1)
+                permalink = get_latest_permalink(uid, token)
+                if permalink:
+                    print(f"Post: {permalink}")
+                else:
+                    print(f"Post: https://www.threads.com/@parkthebus.football/post/{pid}")
+
+            parent_pid = pid
+        except Exception as e:
+            print(f"   ⚠️ Slide {i+1}/{len(filtered)} failed: {e}", file=sys.stderr)
+            print(f"   Continuing with remaining slides...", file=sys.stderr)
+            # Don't update parent_pid — next slide becomes a reply to the last successful one
+            continue
+
         if i < len(filtered) - 1:
             time.sleep(0.1)
 
@@ -255,8 +262,10 @@ def main():
             print("❌ Error: Missing POST_ID after --delete")
             sys.exit(1)
         pid = sys.argv[idx + 1]
+        is_partial = "--partial" in sys.argv
         if delete_post(uid, token, pid):
-            print(f"✅ Deleted: {pid}")
+            reason = " (partial cleanup)" if is_partial else ""
+            print(f"✅ Deleted: {pid}{reason}")
         else:
             print(f"❌ Delete failed: {pid}")
         sys.exit(0)

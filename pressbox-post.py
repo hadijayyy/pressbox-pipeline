@@ -3,7 +3,7 @@
 PRESS BOX POST — Phase 2.
 Read staging → post to Threads → verify → update tracking.
 """
-import json, os, subprocess, sys, time, requests
+import json, os, subprocess, sys, time, requests, re
 import shlex
 from datetime import datetime
 from pressbox_common import log, send_alert, load_env, WIB, STAGING, POSTED, HOME
@@ -189,12 +189,27 @@ def main():
         _cleanup(remove_pending=True, current_topic=topic)
         sys.exit(1)
 
-    # 5. SAFETY: if partial post (< 4 slides), auto-delete (unless single paragraph mode)
+    # 5. SAFETY: detect partial post (< 4 slides posted, or fewer than expected)
     mode = staging.get("mode", "thread")
-    if mode != "single_paragraph" and len(post_ids) < 4:
-        log('POST', f"⚠️ Partial post ({len(post_ids)} slides), deleting...")
-        shell(f"python3 {POST_SCRIPT} --delete {root_id}", timeout=15)
-        print(f"❌ Partial post ({len(post_ids)} slides) — dihapus.")
+    
+    # Count expected slides from content (separated by ---)
+    expected_slides = 0
+    if content:
+        raw_slides = [s for s in re.split(r'(?:\n|^)---\s*\n', content) if s.strip()]
+        expected_slides = max(1, len(raw_slides))
+    
+    is_partial = False
+    if mode != "single_paragraph" and len(post_ids) < min(4, expected_slides):
+        is_partial = True
+    elif mode != "single_paragraph" and expected_slides > 1 and len(post_ids) < expected_slides:
+        is_partial = True
+    
+    if is_partial:
+        log('POST', f"⚠️ Partial post ({len(post_ids)} of {expected_slides} slides), deleting...")
+        shell(f"python3 {POST_SCRIPT} --delete {root_id} --partial", timeout=15)
+        partial_msg = f"❌ Partial post ({len(post_ids)} of {expected_slides} slides) — dihapus."
+        print(partial_msg)
+        send_alert("PARTIAL POST", f"Only {len(post_ids)}/{expected_slides} slides posted for '{topic.get('title','?')[:50]}' — deleted.")
         _cleanup(remove_pending=True, current_topic=topic)
         sys.exit(0)
 
