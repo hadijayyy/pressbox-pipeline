@@ -26,7 +26,7 @@ from bs4 import BeautifulSoup
 import httpx
 
 NOW = datetime.now(timezone.utc)
-FRESHNESS_CUTOFF = 24 * 3600  # 24 hours — 4h too strict, many Guardian articles older but relevant
+FRESHNESS_CUTOFF = 6 * 3600  # 6 hours — sweet spot: enough fresh football articles, no noise
 
 UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 HOME = Path.home()
