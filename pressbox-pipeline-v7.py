@@ -42,8 +42,8 @@ def get_model_config(topic_type):
     """
     # All article types → same chain
     return [
-        {"model": "deepseek-v4-flash", "max_tokens": 3500, "reasoning_effort": "low"},
-        {"model": "mimo-v2.5", "max_tokens": 3500, "reasoning_effort": None},
+        {"model": "deepseek-v4-flash", "max_tokens": 5000, "reasoning_effort": "low"},
+        {"model": "mimo-v2.5", "max_tokens": 5000, "reasoning_effort": None},
     ]
 
 def extract_body_image(raw_html):
