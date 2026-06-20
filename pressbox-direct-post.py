@@ -20,7 +20,7 @@ from pathlib import Path
 HOME = Path.home()
 TOKEN_FILE = HOME / ".hermes" / "threads_token.json"
 THREADS_API = "https://graph.threads.net/v1.0"
-_HTTP = httpx.Client(timeout=8)
+_HTTP = httpx.Client(timeout=10)
 atexit.register(_HTTP.close)
 
 def load_token():
