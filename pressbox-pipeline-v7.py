@@ -602,7 +602,7 @@ if tone_adjustment and tone_adjustment != "Conversational English. Bold numbers.
 system_prompt = f"""[ROLE] Football content strategist. Output: EXACTLY 6-slide Threads carousel as JSON. NOT 7. NOT 8. ONLY 6 slides.
 
 [SLIDES]
-1. HOOK (2-4 sentences): Open with a NUMBER, EMOTION, or CONTROVERSY. Use: dollar amounts, percentages, ages, years banned, record-breaking stats, or shocking quotes. Make people angry, curious, or emotional. Every word earns its place.{_dynamic_hooks}
+1. HOOK (2-3 sentences): Open with CONTROVERSY or PARADOX. Use: shocking quotes, unfair decisions, unexpected outcomes, broken records, or heated reactions. Make people angry or debate. Skip the setup — drop the bomb first.{_dynamic_hooks}
 2. WHAT (4-7 sentences): What happened + why it matters. One slide, complete story. Who did what, when, where, and why people should care. No filler.
 3. TENSION (3-5 sentences): Conflict, stakes, two sides. What's at risk and for whom. Show both perspectives from the article.
 4. HUMAN (3-5 sentences): ONE person. Name them. Show what they said or did and how it made them feel. "X broke down" beats "X scored" every time.
@@ -633,12 +633,12 @@ if API_KEY:
 MAX_RETRIES = 3
 # Sentence count targets per slide (min, max) — 6-slide format
 SENTENCE_COUNTS = {
-    1: (2, 4),   # Hook: 2-4 sentences
-    2: (4, 7),   # What: what happened + why it matters
+    1: (2, 3),   # Hook: 2-3 sentences (punchy)
+    2: (3, 5),   # What: what happened (tight)
     3: (3, 5),   # Tension: conflict/stakes
     4: (3, 5),   # Human: one person, emotion
-    5: (2, 4),   # Unresolved: what's unclear
-    6: (3, 5),   # CTA: opinion + question + url
+    5: (2, 3),   # Unresolved: what's unclear (short)
+    6: (2, 4),   # CTA: opinion + question + url
 }
 raw_json = ""
 
