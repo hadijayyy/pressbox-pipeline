@@ -463,11 +463,11 @@ Return ONLY a JSON object with this EXACT structure:
     "keyword_removals": ["keywords not working"]
   }},
   "generate_tweaks": {{
-    "preferred_hooks": ["hook1", "hook2"],
+    "preferred_hooks": ["curiosity_gap", "contrarian", "stat_shock", "human_emotion", "behind_scenes", "controversial_take", "nostalgia"],
     "hook_assignments": "Which hook for which content type?",
     "slide_count": "optimal slides per post based on engagement data",
     "tone_adjustment": "More/less aggressive, formal/casual?",
-    "cta_pattern": "Specific CTA wording pattern to use",
+    "cta_pattern": "Ask a polarizing question (e.g. 'Is it time to move on?', 'Am I wrong?', 'Who says no?')",
     "length_adjustment": "Longer/shorter slides based on engagement"
   }},
   "experiments": [
@@ -483,6 +483,8 @@ IMPORTANT:
 - Base insights on the actual data above, not generic advice
 - Suggest INNOVATIVE changes — things we haven't tried
 - Research_tweaks and generate_tweaks will be AUTOMATICALLY applied to scripts
+- For preferred_hooks, pick 2-4 specific hooks from: curiosity_gap, contrarian, stat_shock, human_emotion, behind_scenes, controversial_take, nostalgia. NEVER return "uncategorized".
+- For cta_pattern, give a concrete question formula (e.g. "Ask a polarizing either/or question"), never "Always include CTA"
 """
     
     llm_result = call_llm(llm_prompt)
