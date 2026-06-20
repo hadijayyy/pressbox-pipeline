@@ -224,7 +224,10 @@ def scrape_sky_sports():
                 raw = img.get('data-src') or img.get('src', '')
                 image_url = raw.replace('384x216', '1280x720') if raw else ''
 
-            full_text = scrape_sky_article(url) or title
+            full_text, jsonld_image = scrape_sky_article(url) or (title, "")
+            # Upgrade image: use JSON-LD image (2048x1152) if available
+            if jsonld_image:
+                image_url = jsonld_image
 
             # Extract timestamp
             published_ts = None
@@ -239,6 +242,11 @@ def scrape_sky_sports():
                 except: pass
 
             tl = title.lower()
+            
+            # 🏏 Non-football filter — skip golf, cricket, rugby, tennis, F1, NBA, NFL
+            NON_FOOTBALL = ["golf", "cricket", "rugby", "tennis", " f1 ", "nba", "nfl"]
+            if any(kw in tl for kw in NON_FOOTBALL):
+                continue
             
             # Skip old articles (12h for Sky Sports — less frequent updates)
             if published_ts and not is_fresh(published_ts, cutoff=12*3600):
@@ -267,13 +275,31 @@ def scrape_sky_sports():
 
 
 def scrape_sky_article(url):
-    """Fetch full article content from Sky Sports — targeted selectors"""
+    """Fetch full article content from Sky Sports — targeted selectors.
+    Returns (text, image_url) where image_url is extracted from JSON-LD (2048x1152)."""
     try:
         r = client.get(url, timeout=8)
         if r.status_code != 200:
-            return None
+            return None, ""
 
         soup = BeautifulSoup(r.text, 'html.parser')
+
+        # Extract high-res image from JSON-LD (2048x1152 instead of 1600x900 og:image)
+        image_url = ""
+        ld_json = soup.find('script', type='application/ld+json')
+        if ld_json and ld_json.string:
+            try:
+                ld_data = json.loads(ld_json.string)
+                # Handle both dict and list wrapping
+                if isinstance(ld_data, list):
+                    ld_data = ld_data[0] if ld_data else {}
+                image_obj = ld_data.get('image', {})
+                if isinstance(image_obj, dict):
+                    image_url = image_obj.get('url', '')
+                elif isinstance(image_obj, str):
+                    image_url = image_obj
+            except (json.JSONDecodeError, AttributeError, IndexError):
+                pass
 
         # FIX: Target article body container first, then fall back to all <p>
         # Avoids nav/footer/related-articles boilerplate
@@ -291,10 +317,11 @@ def scrape_sky_article(url):
             if len(p.get_text(strip=True)) > 30  # raised threshold to cut noise
         ]
 
-        return '\n\n'.join(paragraphs) if paragraphs else None
+        text = '\n\n'.join(paragraphs) if paragraphs else None
+        return text, image_url
 
     except Exception:
-        return None
+        return None, ""
 
 
 # ─── Goal.com Scraper (HTML listing + article page) ──────────────────
@@ -341,6 +368,11 @@ def scrape_goal():
                 except: pass
                 
                 tl = title.lower()
+                
+                # 🏏 Non-football filter — skip golf, cricket, rugby, tennis, F1, NBA, NFL
+                NON_FOOTBALL = ["golf", "cricket", "rugby", "tennis", " f1 ", "nba", "nfl"]
+                if any(kw in tl for kw in NON_FOOTBALL):
+                    continue
                 
                 # Skip old articles
                 if published_ts and not is_fresh(published_ts):
