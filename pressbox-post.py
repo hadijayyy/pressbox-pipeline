@@ -211,10 +211,14 @@ def main():
     
     if is_partial:
         log('POST', f"⚠️ Partial post ({len(post_ids)} of {expected_slides} slides), deleting...")
-        shell(f"python3 {POST_SCRIPT} --delete {root_id} --partial", timeout=15)
-        partial_msg = f"❌ Partial post ({len(post_ids)} of {expected_slides} slides) — dihapus."
-        print(partial_msg)
-        send_alert("PARTIAL POST", f"Only {len(post_ids)}/{expected_slides} slides posted for '{topic.get('title','?')[:50]}' — deleted.")
+        del_out, del_code = shell(f"python3 {POST_SCRIPT} --delete {root_id} --partial", timeout=15)
+        if del_code != 0:
+            log('POST', f"❌ Delete failed (exit {del_code}): {del_out[:200]}")
+            send_alert("DELETE FAILED", f"Partial post delete failed for '{topic.get('title','?')[:50]}' — manual cleanup needed.")
+        else:
+            partial_msg = f"❌ Partial post ({len(post_ids)} of {expected_slides} slides) — dihapus."
+            print(partial_msg)
+            send_alert("PARTIAL POST", f"Only {len(post_ids)}/{expected_slides} slides posted for '{topic.get('title','?')[:50]}' — deleted.")
         _cleanup(remove_pending=True, current_topic=topic)
         sys.exit(0)
 

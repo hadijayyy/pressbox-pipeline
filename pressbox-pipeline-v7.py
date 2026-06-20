@@ -466,7 +466,8 @@ if os.path.exists(ARTICLE_CACHE):
     except Exception:
         article_cache = {}
 
-if url in article_cache and time.time() - article_cache[url].get("ts", 0) < 1800:
+_was_cached = url in article_cache and time.time() - article_cache[url].get("ts", 0) < 1800
+if _was_cached:
     article_text = article_cache[url]["text"]
     image_url = article_cache[url].get("image", "")
     image_width = article_cache[url].get("w", 0)
@@ -946,7 +947,7 @@ if not ok:
 # Build joined content (no titles, just content)
 # Post-process: replace em-dashes and en-dashes
 for s in slides:
-    s["content"] = s["content"].replace("—", " — ").replace("–", " - ")
+    s["content"] = s["content"].replace("—", " - ").replace("–", " - ")
     # Clean up double spaces around replaced dashes
     s["content"] = re.sub(r"  +", " ", s["content"])
     s["content"] = re.sub(r" ,", ",", s["content"])
@@ -1005,7 +1006,7 @@ metrics = {
     "reasoning_c": len(reasoning),
     "content_c": len(content),
     "image": bool(image_url),
-    "cached": url in article_cache,
+    "cached": _was_cached,
 }
 METRICS_LOG = f"{HOME}/.hermes/pressbox/metrics.jsonl"
 try:

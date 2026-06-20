@@ -35,12 +35,21 @@ CACHE_TTL = 30 * 60
 
 STARTED = time.time()
 
-client = httpx.Client(
-    headers={"User-Agent": UA},
-    timeout=8,
-    follow_redirects=True,
-    verify=False
-)
+import threading as _threading
+_thread_local = _threading.local()
+
+def _get_client():
+    if not hasattr(_thread_local, 'client'):
+        _thread_local.client = httpx.Client(
+            headers={"User-Agent": UA},
+            timeout=8,
+            follow_redirects=True,
+            verify=False,
+        )
+    return _thread_local.client
+
+# Keep module-level name for backward compat (single-threaded callers)
+client = _get_client()
 
 # ─── Date helpers ─────────────────────────────────────────────────
 
@@ -67,7 +76,7 @@ def scrape_rss(url, source, base_score=9, wc_boost_score=12, transfer_boost_scor
     """Single generic RSS scraper."""
     topics = []
     try:
-        r = client.get(url, timeout=8)
+        r = _get_client().get(url, timeout=8)
         if r.status_code != 200:
             import sys; print(f"   ⚠️ {source} RSS: HTTP {r.status_code}", file=sys.stderr)
             return topics
@@ -88,7 +97,7 @@ def scrape_rss(url, source, base_score=9, wc_boost_score=12, transfer_boost_scor
             desc_el = item.find('description')
             desc = re.sub(r'<[^>]+>', ' ', (desc_el.text or "")).strip()[:500] if desc_el is not None else ""
             desc = html.unescape(desc)
-            pubdate_el = item.find('pubDate') or item.find('dc:date')
+            pubdate_el = item.find('pubDate') or item.find('{http://purl.org/dc/elements/1.1/}date')
             pubdate_text = (pubdate_el.text or "").strip() if pubdate_el is not None else ""
             ts = parse_rss_date(pubdate_text)
             if is_fresh(ts) is False: continue
@@ -137,7 +146,7 @@ def scrape_rss(url, source, base_score=9, wc_boost_score=12, transfer_boost_scor
 def scrape_mirror():
     topics = []
     try:
-        r = client.get("https://www.mirror.co.uk/sport/football/news/", timeout=8)
+        r = _get_client().get("https://www.mirror.co.uk/sport/football/news/", timeout=8)
         if r.status_code != 200: return topics
         seen = set()
         for link in re.findall(r'href="(https?://www\.mirror\.co\.uk/sport/football/[^"]*-?\d+)"', r.text)[:12]:
@@ -145,7 +154,7 @@ def scrape_mirror():
             seen.add(link)
             if 'pageNumber' in link or link.rstrip('/').endswith(('/transfer-news', '/news')): continue
             try:
-                r2 = client.get(link, timeout=6)
+                r2 = _get_client().get(link, timeout=6)
                 og_t = re.search(r'og:title[^>]*content="([^"]*)"', r2.text)
                 if not og_t: continue
                 title = html.unescape(og_t.group(1))
@@ -186,7 +195,7 @@ def scrape_sky_sports():
     """Scrape Sky Sports News HTML page for full articles + images"""
     topics = []
     try:
-        r = client.get("https://www.skysports.com/news", timeout=10, follow_redirects=True)
+        r = _get_client().get("https://www.skysports.com/news", timeout=10, follow_redirects=True)
         if r.status_code != 200:
             return topics
 
@@ -236,7 +245,9 @@ def scrape_sky_sports():
                 try:
                     from datetime import datetime
                     ts_text = time_el.get_text(strip=True)
-                    # Format: "19/06/26 6:00pm"
+                    # Format: "19/06/26 6:00pm" — pad single-digit hour for %I
+                    import re as _re
+                    ts_text = _re.sub(r'(\d{2}/\d{2}/\d{2} )(\d)(?=:\d{2}[ap]m)', r'\g<1>0\2', ts_text)
                     dt = datetime.strptime(ts_text, "%d/%m/%y %I:%M%p")
                     published_ts = dt.timestamp()
                 except: pass
@@ -278,7 +289,7 @@ def scrape_sky_article(url):
     """Fetch full article content from Sky Sports — targeted selectors.
     Returns (text, image_url) where image_url is extracted from JSON-LD (2048x1152)."""
     try:
-        r = client.get(url, timeout=8)
+        r = _get_client().get(url, timeout=8)
         if r.status_code != 200:
             return None, ""
 
@@ -294,6 +305,8 @@ def scrape_sky_article(url):
                 if isinstance(ld_data, list):
                     ld_data = ld_data[0] if ld_data else {}
                 image_obj = ld_data.get('image', {})
+                if isinstance(image_obj, list):
+                    image_obj = image_obj[0] if image_obj else {}
                 if isinstance(image_obj, dict):
                     image_url = image_obj.get('url', '')
                 elif isinstance(image_obj, str):
@@ -330,7 +343,7 @@ def scrape_goal():
     """Scrape Goal.com listing page then fetch article page for text + og:image"""
     topics = []
     try:
-        r = client.get("https://www.goal.com/en", timeout=10, follow_redirects=True)
+        r = _get_client().get("https://www.goal.com/en", timeout=10, follow_redirects=True)
         if r.status_code != 200: return topics
         
         soup = BeautifulSoup(r.text, 'html.parser')
@@ -389,7 +402,7 @@ def scrape_goal_article(url):
     image_url = ""
     published_ts = None
     try:
-        r = client.get(url, timeout=10, follow_redirects=True)
+        r = _get_client().get(url, timeout=10, follow_redirects=True)
         if r.status_code != 200: return text, image_url, published_ts
 
         soup = BeautifulSoup(r.text, 'html.parser')
