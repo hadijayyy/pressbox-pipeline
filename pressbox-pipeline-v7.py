@@ -42,8 +42,8 @@ def get_model_config(topic_type):
     """
     # All article types → same chain
     return [
-        {"model": "deepseek-v4-flash", "max_tokens": 6000, "reasoning_effort": "low"},
-        {"model": "mimo-v2.5", "max_tokens": 6000, "reasoning_effort": None},
+        {"model": "deepseek-v4-flash", "max_tokens": 3500, "reasoning_effort": "low"},
+        {"model": "mimo-v2.5", "max_tokens": 3500, "reasoning_effort": None},
     ]
 
 def extract_body_image(raw_html):
@@ -491,7 +491,7 @@ else:
     article_text = re.sub(r"<style[^>]*>.*?</style>", " ", raw_html, flags=re.DOTALL|re.IGNORECASE)
     article_text = re.sub(r"<script[^>]*>.*?</script>", " ", article_text, flags=re.DOTALL|re.IGNORECASE)
     article_text = re.sub(r"<[^>]+>", " ", article_text)
-    article_text = re.sub(r"\s+", " ", article_text).strip()[:2000]
+    article_text = re.sub(r"\s+", " ", article_text).strip()[:1500]
 
     # Extract og:image
     image_url = ""
