@@ -31,20 +31,45 @@ except Exception as e:
 
 # ── Load env ────────────────────────────────────────────────────────
 env_config = load_env()
-API_KEY = env_config.get("OPENCODE_GO_API_KEY", "")
-API_URL = "https://opencode.ai/zen/go/v1/chat/completions"
-MODEL = "deepseek-v4-flash"
+# Mistral (primary, mistral-large-latest) — custom:Mistral
+MISTRAL_API_KEY = env_config.get("MISTRAL_API_KEY", "")
+# Tokenrouter (fallback, MiniMax-M3) — custom:tokenrouter; opencode-go kept as final fallback
+MINIMAX_API_KEY = env_config.get("MINIMAX_API_KEY") or env_config.get("OPENCODE_GO_API_KEY", "")
+# Legacy globals (some legacy callers may still reference these)
+API_KEY = MINIMAX_API_KEY
+API_URL = "https://api.tokenrouter.com/v1/chat/completions"
+MODEL = "mistral-large-latest"
+
+# ── Provider registry (per-model URL + key) ──────────────────────────────
+PROVIDERS = {
+    "mistral-large-latest": {
+        "base_url": "https://api.mistral.ai/v1/chat/completions",
+        "api_key":  MISTRAL_API_KEY,
+    },
+    "MiniMax-M3": {
+        "base_url": "https://api.tokenrouter.com/v1/chat/completions",
+        "api_key":  MINIMAX_API_KEY,
+    },
+}
+
+def get_provider_for_model(model_name):
+    """Look up provider config for a model. Falls back to tokenrouter globals."""
+    p = PROVIDERS.get(model_name)
+    if p and p["api_key"]:
+        return p
+    return {"base_url": API_URL, "api_key": API_KEY}
 
 # ── Model routing by article type ──────────────────────────────────
 def get_model_config(topic_type):
-    """Return model chain (fallback order) based on article type.
-    Chain: minimax-m2.5 → mimo-v2.5
+    """Model chain with fallback order.
+    Primary: mistral-large-latest (Mistral API)
+    Fallback: MiniMax-M3 (tokenrouter)
     """
-    # All article types → same chain
     return [
-        {"model": "mimo-v2.5", "max_tokens": 5000, "reasoning_effort": None},
-        {"model": "minimax-m2.5", "max_tokens": 5000, "reasoning_effort": "low"},
+        {"model": "mistral-large-latest", "max_tokens": 5000, "reasoning_effort": None},
+        {"model": "MiniMax-M3",           "max_tokens": 5000, "reasoning_effort": None},
     ]
+
 
 def extract_body_image(raw_html):
     """Extract best <img> from article body (fallback when og:image fails).
@@ -605,36 +630,39 @@ _dynamic_tone = ""
 if tone_adjustment and tone_adjustment != "Conversational English. Bold numbers. High-impact words.":
     _dynamic_tone = f"\n- TONE: {tone_adjustment}"
 
-system_prompt = f"""[ROLE] Football content strategist. Output: EXACTLY 6-slide Threads carousel as JSON. NOT 7. NOT 8. ONLY 6 slides.
+system_prompt = f"""Football content strategist. Output EXACTLY 6-slide JSON carousel.
 
 [SLIDES]
-1. HOOK (2-3 sentences): Open with CONTROVERSY or PARADOX. Use: shocking quotes, unfair decisions, unexpected outcomes, broken records, or heated reactions. Make people angry or debate. Skip the setup — drop the bomb first.{_dynamic_hooks}
-2. WHAT (4-7 sentences): What happened + why it matters. One slide, complete story. Who did what, when, where, and why people should care. No filler.
-3. TENSION (3-5 sentences): Conflict, stakes, two sides. What's at risk and for whom. Show both perspectives from the article.
-4. HUMAN (3-5 sentences): ONE person. Name them. Show what they said or did and how it made them feel. "X broke down" beats "X scored" every time.
-5. UNRESOLVED (2-4 sentences): What's still unknown. Real questions from the article. Leave the reader wanting more.
-6. CTA (3-5 sentences): One sharp opinion grounded in facts. End with a specific question that demands a reply. Last line: {{url}}{_dynamic_cta}
+1. HOOK (2-3 sentences, MIN 2): Controversy or paradox from article. If none, use most surprising fact/quote. Never invent.
+2. WHAT (4-7 sentences, MIN 4): What happened + why it matters. No filler.
+3. TENSION (3-5 sentences, MIN 3): Both perspectives. If article is one-sided, say "Article only covers [X]'s perspective." Don't fabricate other side.
+4. HUMAN (3-5 sentences, MIN 3): One person, their words/feelings. If no quote, say "No direct quote from [Name]." Don't guess feelings.
+5. UNRESOLVED (2-4 sentences, MIN 2): What's still unknown.
+6. CTA (3-5 sentences, MIN 3): Sharp opinion + debatable question with clear polarity ("Was this fair?" not "What do you think?"). Last line: {{url}}
 
 [FORMAT]
 {{"slide_1":{{"title":"HOOK","content":"..."}},...,"slide_6":{{"title":"CTA","content":"..."}}}}
 
+[GROUNDING — STRICT]
+- Facts, names, quotes, scores, dates: VERBATIM from the article. NO outside knowledge.
+- Missing detail? OMIT. Never invent, assume, or paraphrase. Brevity beats fabrication.
+- Slides 5-6: opinion allowed, but derived from article facts — not general football wisdom.
+- If article cannot fill 6 slides honestly: {{"error":"insufficient_source","slides_produced":N,"reason":"..."}}
+
 [RULES]
-- Short punchy sentences. Conversational English.{_dynamic_tone}
-- MANDATORY: Every sentence MUST be followed by a blank line (\\n\\n). No exceptions. Even single-sentence slides need the blank line at the end.
-- No: em-dash, hashtags, AI filler, bullet points, numbered lists.
-- Never repeat the same fact across slides. Each slide adds NEW information.
-- Names/quotes from article only. No fabrication.
-- slide_5 = analysis (exempt from grounding).
-- Output JSON only. No preamble. Start with {{."""
+- Conversational English. Every sentence followed by \\n\\n. New fact per slide. No repetition.
+- BANNED phrases: "fans were left in shock", "the beautiful game", "at the end of the day", "only time will tell", "stunning", "incredible journey", "in a stunning turn of events".
+- No: em-dash (—), hashtags, bullet points, ALL CAPS, AI filler ("In conclusion", "It's worth noting").
+- Indonesian articles: keep player/club/venue names original, prose in English.
+- JSON only. No preamble."""
 
 user_prompt = f"ARTICLE: {article_text}\n[Note: article may be truncated. Use only what is provided above.]\nSOURCE: {url}"
 
 log(f"   Calling LLM ({ACTIVE_MODEL})...")
 llm_t0 = time.time()
 
-headers = {"Content-Type": "application/json"}
-if API_KEY:
-    headers["Authorization"] = f"Bearer {API_KEY}"
+# Note: per-model headers + URL are set INSIDE the loop (see below)
+# so each chain entry uses its own provider's credentials.
 
 # ── LLM call with streaming + retry ────────────────────────────
 MAX_RETRIES = 3
@@ -657,11 +685,19 @@ raw_json = ""
 for attempt in range(1, MAX_RETRIES + 1):
     # Cycle through model chain
     model_idx = (attempt - 1) % len(MODEL_CHAIN)
-    ACTIVE_MODEL = MODEL_CHAIN[model_idx]["model"]
-    ACTIVE_MAX_TOKENS = MODEL_CHAIN[model_idx]["max_tokens"]
-    ACTIVE_REASONING = MODEL_CHAIN[model_idx]["reasoning_effort"]
-    
-    log(f"   LLM attempt {attempt}/{MAX_RETRIES} ({ACTIVE_MODEL})...")
+    chain_entry = MODEL_CHAIN[model_idx]
+    ACTIVE_MODEL = chain_entry["model"]
+    ACTIVE_MAX_TOKENS=chain_entry["max_tokens"]
+    ACTIVE_REASONING = chain_entry["reasoning_effort"]
+    _provider = get_provider_for_model(ACTIVE_MODEL)
+    ACTIVE_URL = _provider["base_url"]
+    ACTIVE_KEY = _provider["api_key"]
+
+    if not ACTIVE_KEY:
+        log(f"   ⚠️ No API key for {ACTIVE_MODEL} — skipping to next chain entry")
+        continue
+
+    log(f"   LLM attempt {attempt}/{MAX_RETRIES} ({ACTIVE_MODEL} via {ACTIVE_URL.split('/')[2]})...")
     try:
         payload = {
             "model": ACTIVE_MODEL,
@@ -675,8 +711,11 @@ for attempt in range(1, MAX_RETRIES + 1):
         }
         if ACTIVE_REASONING:
             payload["reasoning_effort"] = ACTIVE_REASONING
+        headers = {"Content-Type": "application/json"}
+        if ACTIVE_KEY:
+            headers["Authorization"] = f"Bearer {ACTIVE_KEY}"
         r = requests.post(
-            API_URL,
+            ACTIVE_URL,
             headers=headers,
             json=payload,
             timeout=180,
@@ -732,6 +771,8 @@ for attempt in range(1, MAX_RETRIES + 1):
         # Extract JSON — content first, then reasoning (deepseek puts JSON there)
         candidate_json = ""
         if content:
+            # Strip <think>...</think> block (MiniMax-M3 / reasoning models wrap output)
+            content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
             candidate_json = re.sub(r"^```(?:json)?\s*", "", content)
             candidate_json = re.sub(r"\s*```$", "", candidate_json)
             candidate_json = candidate_json.strip()
@@ -830,9 +871,10 @@ for attempt in range(1, MAX_RETRIES + 1):
             candidate_json += '}'
             log("   🔧 Fixed truncated JSON (added closing brace)")
 
-        # Parse and validate sentence count
+        # Parse and validate sentence count (with auto-trim for over-max slides)
         slides_data = json.loads(candidate_json)
         sentence_issues = []
+        trimmed_count = 0
         # Handle both formats
         if "slides" in slides_data and isinstance(slides_data["slides"], list):
             slide_list = slides_data["slides"]
@@ -846,14 +888,22 @@ for attempt in range(1, MAX_RETRIES + 1):
             body = s.get("content") or ""
             n = _count_sentences(body)
             min_s, max_s = SENTENCE_COUNTS.get(i + 1, (3, 5))
-            if n < min_s:
+            if n > max_s:
+                # Auto-trim: keep first max_s sentences (don't reject — just clip)
+                parts = re.split(r'(?<=[.!?])\s+', body.strip())
+                trimmed_parts = [p for p in parts if len(p.strip()) > 5][:max_s]
+                if trimmed_parts:
+                    s["content"] = " ".join(trimmed_parts)
+                    trimmed_count += 1
+            elif n < min_s:
                 sentence_issues.append(f"s{i+1}: {n}s < {min_s}")
-            elif n > max_s + 1:  # +1 tolerance for natural variation
-                sentence_issues.append(f"s{i+1}: {n}s > {max_s}")
 
         if not sentence_issues:
+            if trimmed_count:
+                log(f"   ✂️ Auto-trimmed {trimmed_count} slide(s) to SENTENCE_COUNTS max")
             log(f"   ✅ All slides pass sentence count")
-            raw_json = candidate_json
+            # Re-serialize the (possibly trimmed) dict back to JSON
+            raw_json = json.dumps(slides_data, ensure_ascii=False)
             break
         else:
             log(f"   ⚠️ Sentence count fail: {', '.join(sentence_issues)} — retrying...")
@@ -955,6 +1005,13 @@ for s in slides:
     s["content"] = re.sub(r" \.", ".", s["content"])
     # Enforce blank line after every sentence (if missing)
     s["content"] = re.sub(r'([.!?])(\s+)([A-Z"])', r'\1\n\n\3', s["content"])
+
+# Guarantee source URL on last slide (CTA) — bulletproof, doesn't rely on model
+if slides and url:
+    last = slides[-1]
+    if url not in last["content"]:
+        # Strip trailing whitespace/newlines, then append URL as final line
+        last["content"] = last["content"].rstrip() + "\n\n" + url
 
 joined = "\n===\n".join(s["content"] for s in slides)
 

@@ -25,6 +25,13 @@ if os.path.exists(ENV_PATH):
     with open(ENV_PATH) as _env:
         for line in _env:
             line = line.strip()
+            # Tokenrouter (custom:tokenrouter) primary
+            if line.startswith("MINIMAX_API_KEY=") and not line.startswith("#"):
+                API_KEY = line.split("=", 1)[1].strip()
+                break
+if not API_KEY and os.path.exists(ENV_PATH):
+    with open(ENV_PATH) as _env:
+        for line in _env:
             if line.startswith("OPENCODE_GO_API_KEY=") and not line.startswith("#"):
                 API_KEY = line.split("=", 1)[1].strip()
                 break
@@ -34,9 +41,9 @@ if not API_KEY and os.path.exists(ENV_PATH):
             if line.startswith("OPENROUTER_API_KEY=") and not line.startswith("#"):
                 API_KEY = line.split("=", 1)[1].strip()
                 break
-API_BASE = "https://opencode.ai/zen/go/v1"
+API_BASE = "https://api.tokenrouter.com/v1"
 API_URL = f"{API_BASE}/chat/completions"
-MODEL = "deepseek-v4-flash"
+MODEL = "MiniMax-M3"
 LLM_TIMEOUT = 120
 
 # ── HOOK FORMULAS (for LLM classification) ──
