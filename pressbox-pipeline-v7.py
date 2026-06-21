@@ -423,6 +423,11 @@ for t in all_topics:
         continue
     # Skip sensitive content (legal/sexual/crime/SARA)
     sensitive_kw = [
+        # Sexual / body-part sexualization (tabloid clickbait)
+        "breasts", "boobs", "nipple", "topless", "nude", "naked",
+        "strip", "stripped", "stripped naked",
+        "wardrobe malfunction", "see-through", "see through",
+        "underwear", "lingerie", "bikini", "thong",
         # Sexual
         "rape", "sexual assault", "sexual abuse", "stand trial",
         "pedo", "child abuse",
