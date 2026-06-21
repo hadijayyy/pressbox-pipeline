@@ -888,6 +888,17 @@ for attempt in range(1, MAX_RETRIES + 1):
             log("   ❌ No JSON found, retrying...")
             continue
 
+        # Fix: Mistral often wraps JSON in prose like "Here's the JSON:\n```json\n{...}\n```\n".
+        # The fence-strip regex above only catches fences at line start, but Mistral
+        # adds prose BEFORE the fence. Find first { and last } to extract just the JSON.
+        first_brace = candidate_json.find('{')
+        last_brace = candidate_json.rfind('}')
+        if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+            stripped = candidate_json[first_brace:last_brace + 1]
+            if stripped != candidate_json:
+                log(f"   ✂️  Extracted JSON from prose wrapper ({len(candidate_json)}c → {len(stripped)}c)")
+                candidate_json = stripped
+
         # Fix: Handle truncated JSON from minimax models (missing closing braces)
         # Always check brace count, even if ends with }
         open_braces = candidate_json.count('{')
