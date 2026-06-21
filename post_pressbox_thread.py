@@ -12,6 +12,7 @@ Usage:
 import argparse
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -40,6 +41,37 @@ def get_slide_keys(slides_obj):
     return sorted(keys, key=lambda k: int(k.split("_")[1]))
 
 
+def load_staging(staging_path):
+    """Load staging JSON in either v3 (slides dict) or v2 (content with ===) format.
+
+    Returns the staging dict with a guaranteed 'slides' key.
+    """
+    with open(staging_path) as f:
+        staging = json.load(f)
+
+    slides = staging.get("slides")
+    if slides:
+        return staging  # v3 format already has slides
+
+    # Fallback: parse v2 format — content is slides joined with \n===\n
+    content = staging.get("content", "")
+    if not content:
+        print(f"❌ No slides in staging (no 'slides' key, no 'content' field)")
+        sys.exit(1)
+
+    parts = [p.strip() for p in re.split(r'(?:\n|^)===\s*\n', content) if p.strip()]
+    if len(parts) < 2:
+        print(f"❌ Need at least 2 slides in content, got {len(parts)}")
+        sys.exit(1)
+
+    # Synthesize slide_N keys (chain driver only reads .content)
+    staging["slides"] = {
+        f"slide_{i+1}": {"title": f"SLIDE {i+1}", "content": p}
+        for i, p in enumerate(parts)
+    }
+    return staging
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--staging", default="/home/ubuntu/.hermes/pressbox/staging-v3.json")
@@ -50,6 +82,18 @@ def main():
         staging = json.load(f)
 
     slides = staging.get("slides")
+    if not slides:
+        # Try v2 fallback: parse content field with === separators
+        content = staging.get("content", "")
+        if content:
+            parts = [p.strip() for p in re.split(r'(?:\n|^)===\s*\n', content) if p.strip()]
+            if parts:
+                staging["slides"] = {
+                    f"slide_{i+1}": {"title": f"SLIDE {i+1}", "content": p}
+                    for i, p in enumerate(parts)
+                }
+                slides = staging["slides"]
+
     if not slides:
         print(f"❌ No slides in staging")
         sys.exit(1)

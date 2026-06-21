@@ -8,7 +8,7 @@ import shlex
 from datetime import datetime
 from pressbox_common import log, send_alert, load_env, WIB, STAGING, POSTED, HOME
 
-POST_SCRIPT = f"{os.path.dirname(os.path.abspath(__file__))}/pressbox-direct-post.py"
+POST_SCRIPT = f"{os.path.dirname(os.path.abspath(__file__))}/post_pressbox_thread.py"
 VERIFY_SCRIPT = f"{os.path.dirname(os.path.abspath(__file__))}/verify-last-slide.py"
 LATEST_MD = f"{HOME}/.hermes/content-pipeline/drafts/football/latest.md"
 os.makedirs(f"{HOME}/.hermes/pressbox", exist_ok=True)
@@ -58,23 +58,54 @@ def shell(cmd, timeout=120):
         return str(e), -1
 
 def extract_post_ids(output):
-    """Extract root ID, permalink, and all post IDs from output."""
+    """Extract root ID, permalink, and all chain post IDs from output.
+
+    Chain driver output format:
+      [1] {post_id}: {text}...
+      Root permalink: https://www.threads.com/.../post/{root_id}
+    """
+    import re as _re
     post_ids = []
     seen = set()
     root_id = None
     permalink = None
     for line in output.split('\n'):
         line_stripped = line.strip()
-        if line_stripped.startswith('Root:') and not root_id:
+        # Root permalink line — preferred (most reliable)
+        if 'Root permalink:' in line_stripped and not permalink:
+            m = _re.search(r'/post/([A-Za-z0-9_-]+)', line_stripped)
+            if m:
+                permalink = line_stripped.split('Root permalink:', 1)[1].strip()
+                # Extract numeric ID — chain driver prints shortcode in URL, but
+                # numeric IDs are in the [N] lines above. If we already saw it, use it.
+                sc = m.group(1)
+                if sc.isdigit() and len(sc) > 15 and not root_id:
+                    root_id = sc
+        # [1] {post_id}: ... chain indexing lines (most reliable for numeric IDs)
+        elif line_stripped.startswith('[') and ']' in line_stripped and not root_id:
+            m = _re.match(r'\[(\d+)\]\s+(\d{15,20})', line_stripped)
+            if m:
+                idx = int(m.group(1))
+                pid = m.group(2)
+                if pid not in seen:
+                    seen.add(pid)
+                    post_ids.append(pid)
+                    if idx == 1:
+                        root_id = pid
+        # Legacy "Root:" line (defensive — in case chain driver output changes)
+        elif line_stripped.startswith('Root:') and not root_id:
             rid = line_stripped.split('Root:', 1)[1].strip()
             if rid.isdigit() and len(rid) > 15:
                 root_id = rid
+        # Legacy "Post:" line (defensive)
         elif line_stripped.startswith('Post:') and not permalink:
             permalink = line_stripped.split('Post:', 1)[1].strip()
+        # Bare numeric IDs (legacy)
         elif line_stripped.isdigit() and len(line_stripped) > 15:
             if line_stripped not in seen:
                 seen.add(line_stripped)
                 post_ids.append(line_stripped)
+        # Arrow notation (legacy)
         elif '→' in line_stripped:
             pid_part = line_stripped.split('→', 1)[1].strip()
             if pid_part.isdigit() and len(pid_part) > 15:
@@ -83,27 +114,27 @@ def extract_post_ids(output):
                     post_ids.append(pid_part)
     return root_id, permalink, post_ids
 
-def verify_carousel_structure(root_id, expected_slides, access_token, max_attempts=3):
-    """Query Threads API to verify slides posted as fan-out (siblings), not chain (nested).
+def verify_chain_structure(root_id, expected_slides, access_token, max_attempts=3):
+    """Query Threads API to verify slides posted as CHAIN (reply_to_id), not fan-out (siblings).
 
-    Also verifies that the reply ORDER is correct for carousel display:
-    - Expected posting order: S1 (root, oldest) → S6 → S5 → S4 → S3 → S2 (newest reply)
-    - Threads UI shows newest-first, so S2 should be the FIRST reply in the API response
-      (immediately below root in the carousel).
-    - API returns replies in newest-first order. If replies are in oldest-first order,
-    the carousel will be reversed in the UI.
+    For a chain: root has exactly 1 top-level reply (slide 2). All other slides
+    are nested under that reply, not visible at the root level.
+
+    Catches two failure modes:
+    - Fan-out regression (siblings instead of chain): root has N-1 top-level replies
+    - Chain broken (slide 2 failed to reply to root): root has 0 replies
 
     Returns:
         (ok, actual_replies, expected_replies)
-        ok: True if fan-out + order correct, False if broken, None if API check failed
-        actual_replies: count of top-level replies from API
-        expected_replies: N-1 (root + N-1 siblings for an N-slide carousel)
+        ok: True if chain structure correct, False if broken, None if API check failed
+        actual_replies: count of top-level replies from API (should be exactly 1)
+        expected_replies: 1 (chain head)
     """
     if expected_slides <= 1:
-        # Single post, no replies expected
+        # Single post, no chain expected
         return True, 0, 0
 
-    expected_replies = expected_slides - 1  # Root + N-1 siblings
+    expected_replies = 1  # chain: root should have exactly 1 reply (slide 2)
 
     for attempt in range(1, max_attempts + 1):
         try:
@@ -125,29 +156,17 @@ def verify_carousel_structure(root_id, expected_slides, access_token, max_attemp
             replies = data.get("replies", {}).get("data", [])
             actual = len(replies)
 
-            if actual < expected_replies:
-                # API might still be indexing — retry
+            if actual != expected_replies:
+                # Either 0 (chain broken — slide 2 didn't reply) or >1 (fan-out regression)
                 if attempt < max_attempts:
                     time.sleep(5)
                     continue
-                return False, actual, expected_replies
-
-            # Order check: Threads API returns replies newest-first. The newest reply
-            # should be the FIRST one in the array (immediately below root in UI).
-            # Verify by comparing timestamps — first reply must be newer than last.
-            timestamps = [rep.get("timestamp", "") for rep in replies]
-            if len(timestamps) >= 2:
-                # Parse and compare; first should be > last (newest first)
-                from datetime import datetime
-                try:
-                    parsed = [datetime.fromisoformat(ts.replace("Z", "+00:00")) for ts in timestamps]
-                    if parsed[0] < parsed[-1]:
-                        # Replies are in oldest-first order → carousel will be reversed in UI
-                        log('POST', f"🚨 REVERSED ORDER: first reply ({parsed[0]}) is OLDER than last ({parsed[-1]}). Carousel will appear reversed in UI.")
-                        return False, actual, expected_replies
-                except Exception as e:
-                    # Timestamp parse failed — don't block on this, just warn
-                    log('POST', f"⚠️ Could not parse timestamps for order check: {e}")
+                if actual == 0:
+                    return False, 0, expected_replies
+                else:
+                    # Fan-out regression — root has multiple siblings
+                    log('POST', f"🚨 CHAIN BROKEN — FAN-OUT REGRESSION: {actual} top-level replies (expected {expected_replies})")
+                    return False, actual, expected_replies
 
             return True, actual, expected_replies
         except Exception as e:
@@ -259,16 +278,10 @@ def main():
 
     log('POST', f"Staging loaded: {topic['title']} (written at {written_at})")
 
-    # 2. Write content to latest.md
-    os.makedirs(os.path.dirname(LATEST_MD), exist_ok=True)
-    with open(LATEST_MD, 'w') as f:
-        f.write(content)
-
     # 3. Post to Threads (with timeout partial output handling)
-    log('POST', "Posting to Threads...")
-    image_url = staging.get("image_url") or ""
-    image_flag = f" --image {shlex.quote(image_url)}" if image_url else ""
-    post_cmd = f"python3 {POST_SCRIPT} --file {LATEST_MD}{image_flag} 2>&1"
+    log('POST', "Posting to Threads as chain via reply_to_id...")
+    # Chain driver reads from staging file directly — no need to write latest.md
+    post_cmd = f"python3 {POST_SCRIPT} --staging {shlex.quote(staging_file)} 2>&1"
     post_out, code = shell(post_cmd, timeout=200)
 
     # 4. Extract root ID and permalink
@@ -291,29 +304,35 @@ def main():
         raw_slides = [s for s in re.split(r'(?:\n|^)===\s*\n', content) if s.strip()]
         expected_slides = max(1, len(raw_slides))
 
-    # 5a. CAROUSEL STRUCTURE VERIFICATION — query Threads API to confirm fan-out (siblings, not chain).
-    # Catches the parent_pid=pid bug where slides 3-N get nested under slide 2.
+    # 5a. CHAIN STRUCTURE VERIFICATION — query Threads API to confirm chain (reply_to_id),
+    # not fan-out siblings. Catches the regression where slides 3-N get posted as siblings.
     if mode != "single_paragraph" and expected_slides > 1 and root_id:
-        log('POST', f"🔍 Verifying carousel structure via API (expecting {expected_slides-1} top-level replies)...")
+        log('POST', f"🔍 Verifying chain structure via API (expecting exactly 1 top-level reply — the chain head)...")
         access_token, _ = _load_threads_token()
         if access_token:
-            ok, actual, expected_replies = verify_carousel_structure(root_id, expected_slides, access_token)
+            ok, actual, expected_replies = verify_chain_structure(root_id, expected_slides, access_token)
             if ok is False:
-                # FAN-OUT BUG: slides are nested (chain), not siblings
-                log('POST', f"🚨 Carousel structure BROKEN: {actual} top-level replies, expected {expected_replies}")
-                log('POST', f"🚨 Slides 3-N likely hidden under slide 2 (chain, not fan-out). Auto-deleting...")
-                del_out, del_code = shell(f"python3 {POST_SCRIPT} --delete {root_id} --partial", timeout=15)
+                if actual == 0:
+                    log('POST', f"🚨 CHAIN BROKEN: 0 replies on root — slide 2 failed to reply. Auto-deleting...")
+                    msg = "Chain broken (slide 2 didn't reply to root)"
+                else:
+                    log('POST', f"🚨 CHAIN BROKEN — FAN-OUT REGRESSION: {actual} top-level replies (expected {expected_replies}). Auto-deleting...")
+                    msg = f"Fan-out regression: {actual} top-level replies instead of 1 (chain head)"
+                # Delete chain — use post_pressbox_thread's delete or fall back to direct-post's delete
+                # The chain driver doesn't have --delete; fall back to direct-post for safety
+                del_cmd = f"python3 {os.path.dirname(POST_SCRIPT)}/pressbox-direct-post.py --delete {root_id} --partial"
+                del_out, del_code = shell(del_cmd, timeout=15)
                 if del_code != 0:
                     log('POST', f"❌ Delete failed (exit {del_code}): {del_out[:200]}")
-                    send_alert("CAROUSEL BROKEN + DELETE FAILED", f"Fan-out: {actual} replies, expected {expected_replies}. Manual delete needed for root {root_id}.")
+                    send_alert("CHAIN BROKEN + DELETE FAILED", f"{msg}. Manual delete needed for root {root_id}.")
                 else:
-                    send_alert("CAROUSEL BROKEN", f"Fan-out bug: {actual} replies, expected {expected_replies}. Auto-deleted '{topic.get('title','?')[:50]}'.")
+                    send_alert("CHAIN BROKEN", f"{msg}. Auto-deleted '{topic.get('title','?')[:50]}'.")
                 _cleanup(remove_pending=True, current_topic=topic)
                 sys.exit(1)
             elif ok is True:
-                log('POST', f"✅ Carousel structure OK: {actual} top-level replies (expected {expected_replies})")
+                log('POST', f"✅ Chain structure OK: {actual} top-level reply (chain head visible)")
             else:
-                log('POST', f"⚠️ Could not verify carousel via API (skipped)")
+                log('POST', f"⚠️ Could not verify chain via API (skipped)")
         else:
             log('POST', f"⚠️ No Threads token — skipped API verification")
 
