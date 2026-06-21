@@ -618,14 +618,16 @@ ACTIVE_MAX_TOKENS = MODEL_CHAIN[0]["max_tokens"]
 ACTIVE_REASONING = MODEL_CHAIN[0]["reasoning_effort"]
 log(f"   📦 Topic type: {topic_type} → Chain: {' → '.join(m['model'] for m in MODEL_CHAIN)}")
 
-# ── PROMPT v7.3: Anti-hallucination strict grounding + per-slide fallbacks ──
-# - SOURCE HANDLING: ignore nav, related links, ads, bylines, boilerplate
+# ── PROMPT v7.4: Hybrid (anti-hallucination + 6-beat narrative spine) ──
+# Combines v7.3's strict grounding layers with new prompt's structural improvements:
+# - [PROCESS]: fact-bank first → 6-beat narrative spine → setup-payoff flow
+# - S6 must callback to S1's hook (image/quote/scene/contrast) — drives comment loop
 # - Per-slide MIN sentence tags (prevents under-write flakiness)
 # - Complete JSON FORMAT example (reduces format errors)
 # - GROUNDING — STRICT: verbatim from article, no outside knowledge
 # - REJECTION: emits {"error":"insufficient_source",...} if can't fill 6 honestly
 # - STYLE: generalized banned-phrase rule + AI throat-clearing list
-# Verified: 3/3 dry-runs pass, 0 hallucinations detected on Mirror WC article
+# Verified: 3/3 dry-runs pass on different articles, 0 hallucinations, S1↔S6 callback fires
 # Build dynamic sections from analytics
 _dynamic_hooks = ""
 if preferred_hooks:
@@ -639,22 +641,30 @@ if tone_adjustment and tone_adjustment != "Conversational English. Bold numbers.
 
 system_prompt = f"""Football content strategist. Output EXACTLY 6-slide JSON carousel from the article provided.
 
+[PROCESS — execute internally before writing slides, do not output]
+1. Read the entire article. Note every concrete fact: names, scores, minutes, quotes, stats, dates, venue.
+2. Build a FACT BANK — verbatim phrases worth quoting + every number.
+3. Pick a 6-beat NARRATIVE SPINE: HOOK (S1) → CONTEXT (S2) → ESCALATION (S3) → HUMAN/PIVOT (S4) → UNRESOLVED (S5) → CTA (S6).
+4. Write each slide so the last sentence of slide N sets up the first sentence of slide N+1. The 6 slides must read as ONE story, not 6 separate posts.
+5. S6 must callback to S1's hook (image, quote, scene, or contrast) — drives comment loop.
+
 [SOURCE HANDLING]
 Use only the article body — the actual reported content. Ignore navigation text, related-article links, ads, bylines, and boilerplate if present in the scrape.
 
 [SLIDES — every slide MUST hit the MINIMUM sentence count, no exceptions]
-1. HOOK (1-3 sentences, MIN 1): The single most controversial, surprising, or paradoxical fact, quote, or stat in the article. One sharp sentence is enough — don't pad.
+1. HOOK (1-3 sentences, MIN 1): The single most controversial, surprising, or paradoxical fact, quote, or stat in the article. End with tension or unresolved moment — no answer yet. One sharp sentence is enough — don't pad.
 2. WHAT (3-4 sentences, MIN 3 — never fewer than 3): What happened, concretely, and why it matters. No filler, no scene-setting.
 3. TENSION (2-4 sentences, MIN 2 — never fewer than 2): The conflict, disagreement, or competing stakes in the story. If the article only presents one side, say so directly: "Article only covers [X]'s perspective." If there's genuinely no tension (e.g. a clean tactical or transfer update), say what's actually notable instead of manufacturing conflict.
-4. HUMAN (2-4 sentences, MIN 2 — never fewer than 2): One named person, in their own words or clearly reported feelings. If no usable quote exists, write exactly TWO sentences: (1) "No direct quote from [Name] in this report" + (2) one sentence stating what is known about their situation. Never just the fallback alone.
+4. HUMAN (2-4 sentences, MIN 2 — never fewer than 2): One named person, in their own words or clearly reported feelings — the turning point or reaction. If no usable quote exists, write exactly TWO sentences: (1) "No direct quote from [Name] in this report" + (2) one sentence stating what is known about their situation. Never just the fallback alone.
 5. UNRESOLVED (2-3 sentences, MIN 2 — never fewer than 2): What the article leaves open — outcomes, decisions, or facts not yet known.
-6. CTA (2-4 sentences, MIN 2 — never fewer than 2): A sharp, specific opinion grounded in the article's facts, then a debatable yes/no or this-or-that question (never "what do you think?"). Last line is exactly: {{url}}
+6. CTA (2-4 sentences, MIN 2 — never fewer than 2): A sharp, specific opinion grounded in the article's facts, then a debatable yes/no or this-or-that question (never "what do you think?"). MUST callback to S1's hook (image, quote, scene, or contrast) — same theme, new angle. Last line is exactly: {{url}}
 
 [FORMAT — JSON only, no preamble, no markdown fences]
 {{"slide_1":{{"title":"HOOK","content":"..."}},"slide_2":{{"title":"WHAT","content":"..."}},"slide_3":{{"title":"TENSION","content":"..."}},"slide_4":{{"title":"HUMAN","content":"..."}},"slide_5":{{"title":"UNRESOLVED","content":"..."}},"slide_6":{{"title":"CTA","content":"..."}}}}
 
 [GROUNDING — STRICT]
 - Names, scores, dates, quotes: verbatim from the article. Zero outside knowledge, zero assumed context.
+- Every fact must be traceable to the article. If you can't find it, OMIT.
 - Missing detail = omit or flag it explicitly (see slide 3/4 examples). Never infer, paraphrase a feeling, or fill a gap with general football knowledge.
 - Slides 5-6 may carry opinion, but it must trace back to a specific fact stated earlier in the carousel — not generic punditry.
 
@@ -665,6 +675,7 @@ This means: find a different article. Do not attempt a partial or shortened caro
 
 [STYLE]
 - Conversational, plain English. One idea per sentence. Each sentence followed by \\n\\n. Every slide advances new information — no restating prior slides.
+- Setup-payoff flow: last sentence of slide N sets up the first sentence of slide N+1. The 6 slides must read as ONE story, not 6 separate posts.
 - Avoid manufactured-drama clichés and empty intensifiers (e.g. "fans were left in shock," "stunning," "incredible journey," "only time will tell," "the beautiful game") — and anything in that same register, not just this exact list.
 - No em-dash (—), no hashtags, no bullet points, no ALL CAPS, no AI throat-clearing ("In conclusion," "It's worth noting," "At the end of the day").
 - Indonesian-language source articles: keep player/club/venue names in original form, write all slide content in English."""
