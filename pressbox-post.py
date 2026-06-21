@@ -206,8 +206,6 @@ def main():
     # Partial post detection
     # < 3 slides = truly broken → delete
     # 3+ slides but < expected = acceptable → warn only
-    mode = staging.get("mode", "thread")
-    
     if mode != "single_paragraph" and len(post_ids) < 3:
         log('POST', f"⚠️ Critical partial post ({len(post_ids)} of {expected_slides} slides), deleting...")
         del_out, del_code = shell(f"python3 {POST_SCRIPT} --delete {root_id} --partial", timeout=15)
@@ -271,7 +269,8 @@ def main():
 
     # 8. Cleanup
     _cleanup(remove_pending=False, current_topic=topic)
-    open(LATEST_MD, 'w').close()
+    with open(LATEST_MD, 'w') as f:
+        pass
 
     # 9. Done — simple report
     threads_link = permalink if permalink else f"https://www.threads.com/@parkthebus.football/post/{root_id}"

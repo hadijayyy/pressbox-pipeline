@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Press Box Direct Post — Post text threads to Threads API with multi-slide support.
-Each slide (separated by ---) becomes its own post chained via reply_to_id.
+Each slide (separated by ===) becomes its own post chained via reply_to_id.
 
 STRATEGY: Publish root first, wait for it to fully index, then create + publish
 each reply sequentially using the PUBLISHED post ID as reply_to_id.
@@ -104,7 +104,7 @@ def create_container(uid, token, text, reply_to=None, image_url=None, max_retrie
                 time.sleep(2)
                 continue
             raise
-    raise Exception(f"Container create failed after {max_retries} retries")
+    raise Exception(f"Container create failed after {max_retries + 1} attempts")
 
 def publish(uid, token, container_id, max_retries=1):
     """Publish a container. Returns published post ID."""
@@ -139,7 +139,7 @@ def publish(uid, token, container_id, max_retries=1):
                 time.sleep(2)
                 continue
             raise
-    raise Exception(f"Publish failed after {max_retries} retries")
+    raise Exception(f"Publish failed after {max_retries + 1} attempts")
 
 def get_latest_permalink(uid, token):
     """Get the actual post permalink (alphanumeric format) for the most recent post."""
@@ -187,8 +187,7 @@ def post_thread(uid, token, slides, image_url=None):
             if i == 0:
                 print(f"Root: {pid}")
                 # Get actual permalink (alphanumeric format like DZvnqdoE7-k)
-                import time as _t
-                _t.sleep(1)
+                time.sleep(1)
                 permalink = get_latest_permalink(uid, token)
                 if permalink:
                     print(f"Post: {permalink}")
@@ -208,8 +207,7 @@ def post_thread(uid, token, slides, image_url=None):
                 print(f"   ✅ Slide {i+1}/{len(filtered)} retry succeeded: → {pid}", file=sys.stderr)
                 if i == 0:
                     print(f"Root: {pid}")
-                    import time as _t
-                    _t.sleep(1)
+                    time.sleep(1)
                     permalink = get_latest_permalink(uid, token)
                     if permalink:
                         print(f"Post: {permalink}")
@@ -218,6 +216,9 @@ def post_thread(uid, token, slides, image_url=None):
                 parent_pid = pid
             except Exception as retry_err:
                 print(f"   ❌ Slide {i+1}/{len(filtered)} retry also failed: {retry_err}", file=sys.stderr)
+                if parent_pid is None and i > 0:
+                    print(f"   🛑 Cannot continue — no root post to reply to.", file=sys.stderr)
+                    break
                 print(f"   Continuing with remaining slides...", file=sys.stderr)
                 # Don't update parent_pid — next slide becomes a reply to the last successful one
             continue

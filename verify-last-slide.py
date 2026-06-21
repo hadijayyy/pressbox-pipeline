@@ -15,6 +15,7 @@ Exits 0 if the URL is found, 1 if missing or unreachable.
 """
 
 import argparse
+import atexit
 import json
 import re
 import sys
@@ -27,6 +28,7 @@ HOME = Path.home()
 TOKEN_FILE = HOME / ".hermes" / "threads_token.json"
 THREADS_API = "https://graph.threads.net/v1.0"
 _HTTP = httpx.Client(timeout=10)
+atexit.register(_HTTP.close)
 
 
 def load_token():
