@@ -8,18 +8,19 @@ import json, os, sys, subprocess, time
 from pressbox_common import log, WIB, STAGING, HOME
 
 PIPELINE_SCRIPT = f"{os.path.dirname(os.path.abspath(__file__))}/pressbox-pipeline-v7.py"
-MAX_RETRIES = 1  # Aggressive attempts to ensure content ready
+MAX_RETRIES = 2  # 1 retry attempt to ensure content ready
 
 def is_staging_ready():
-    """Check if either staging file has content."""
-    for sf in [STAGING["v2"], STAGING["v3"]]:
-        if os.path.exists(sf):
-            try:
-                with open(sf) as f:
-                    data = json.load(f)
-                if data.get("topic") and data.get("content"):
-                    return True
-            except: pass
+    """Check if v2 staging file has content (pipeline only writes to v2)."""
+    sf = STAGING["v2"]
+    if os.path.exists(sf):
+        try:
+            with open(sf) as f:
+                data = json.load(f)
+            if data.get("topic") and data.get("content"):
+                return True
+        except Exception:
+            pass
     return False
 
 # Check if staging already has content
@@ -40,14 +41,19 @@ for attempt in range(MAX_RETRIES):
         )
         if result.returncode == 0:
             log('CHECK', f"✅ Pipeline sukses on attempt {attempt+1}")
-            if result.stdout.strip():
-                print(result.stdout.strip())
-            sys.exit(0)
+            if is_staging_ready():
+                if result.stdout.strip():
+                    print(result.stdout.strip())
+                sys.exit(0)
+            else:
+                log('CHECK', f"⚠️ Pipeline exit 0 but staging still not ready — treating as failure")
         else:
             log('CHECK', f"❌ Attempt {attempt+1} failed (exit {result.returncode})")
-            if attempt < MAX_RETRIES - 1:
-                log('CHECK', f"  Retrying in 5s...")
-                time.sleep(5)
+            if result.stderr.strip():
+                log('CHECK', f"  stderr: {result.stderr.strip()[:300]}")
+        if attempt < MAX_RETRIES - 1:
+            log('CHECK', f"  Retrying in 5s...")
+            time.sleep(5)
     except subprocess.TimeoutExpired:
         log('CHECK', f"❌ Attempt {attempt+1} timeout (180s)")
         if attempt < MAX_RETRIES - 1:
