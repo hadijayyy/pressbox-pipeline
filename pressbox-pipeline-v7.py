@@ -758,11 +758,13 @@ for attempt in range(1, MAX_RETRIES + 1):
         )
         if r.status_code != 200:
             log(f"❌ API error: HTTP {r.status_code} {r.text[:200]}")
-            if r.status_code >= 500 and attempt < MAX_RETRIES:
-                log(f"   Retrying ({attempt}/{MAX_RETRIES})...")
+            # Always try next model in chain (Mistral 4xx/5xx → fall through to MiniMax)
+            # Only sys.exit after ALL chain entries exhausted.
+            if attempt < MAX_RETRIES:
+                log(f"   Trying next model in chain ({attempt}/{MAX_RETRIES})...")
                 time.sleep(2 + attempt)
                 continue
-            print(f"❌ Pipeline failed: LLM API error HTTP {r.status_code}", flush=True)
+            print(f"❌ Pipeline failed: LLM API error HTTP {r.status_code} after {MAX_RETRIES} attempts", flush=True)
             sys.exit(1)
         
         # Process SSE stream
