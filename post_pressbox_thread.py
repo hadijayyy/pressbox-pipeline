@@ -82,7 +82,9 @@ def main():
         staging = json.load(f)
 
     slides = staging.get("slides")
-    if not slides:
+    # Note: pipeline sets "slides" to an INTEGER COUNT (e.g. 6), not the actual slides dict.
+    # Only treat dict/list with actual slide data as valid.
+    if not isinstance(slides, (dict, list)) or not slides:
         # Try v2 fallback: parse content field with === separators
         content = staging.get("content", "")
         if content:

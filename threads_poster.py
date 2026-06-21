@@ -218,6 +218,11 @@ class ThreadsPoster:
         reply_to_id: Optional[str] = None
 
         for i, text in enumerate(parts):
+            # Defensive: Threads API rejects >500 chars. Trim at 500 (no ellipsis — chars is chars).
+            if len(text) > 500:
+                logger.warning("Slide %d/%d is %d chars — trimming to 500", i + 1, len(parts), len(text))
+                text = text[:500].rstrip()
+
             img = image_urls[i] if image_urls else None
             try:
                 post_id = self.post_single(text, reply_to_id=reply_to_id, image_url=img)
