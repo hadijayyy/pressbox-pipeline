@@ -83,6 +83,70 @@ def extract_post_ids(output):
                     post_ids.append(pid_part)
     return root_id, permalink, post_ids
 
+def verify_carousel_structure(root_id, expected_slides, access_token, max_attempts=3):
+    """Query Threads API to verify slides posted as fan-out (siblings), not chain (nested).
+
+    Returns:
+        (ok, actual_replies, expected_replies)
+        ok: True if fan-out correct, False if broken, None if API check failed
+        actual_replies: count of top-level replies from API
+        expected_replies: N-1 (root + N-1 siblings for an N-slide carousel)
+    """
+    if expected_slides <= 1:
+        # Single post, no replies expected
+        return True, 0, 0
+
+    expected_replies = expected_slides - 1  # Root + N-1 siblings
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            r = requests.get(
+                f"https://graph.threads.net/v1.0/{root_id}",
+                params={
+                    "access_token": access_token,
+                    "fields": "replies{id,text}"
+                },
+                timeout=15
+            )
+            if r.status_code != 200:
+                if attempt < max_attempts:
+                    time.sleep(5)
+                    continue
+                return None, 0, expected_replies
+
+            data = r.json()
+            actual = len(data.get("replies", {}).get("data", []))
+
+            if actual >= expected_replies:
+                return True, actual, expected_replies
+
+            # API might still be indexing — retry
+            if attempt < max_attempts:
+                time.sleep(5)
+                continue
+
+            return False, actual, expected_replies
+        except Exception as e:
+            if attempt < max_attempts:
+                time.sleep(5)
+                continue
+            log('POST', f"⚠️ API verification failed after {max_attempts} attempts: {e}")
+            return None, 0, expected_replies
+
+    return None, 0, expected_replies
+
+
+def _load_threads_token():
+    """Load Threads API access token. Returns (token, user_id) or (None, None)."""
+    try:
+        token_path = f"{HOME}/.hermes/threads_token.json"
+        with open(token_path) as f:
+            data = json.load(f)
+        return data.get("access_token"), str(data.get("user_id", ""))
+    except Exception as e:
+        log('POST', f"⚠️ Failed to load Threads token: {e}")
+        return None, None
+
 def is_posting_too_frequent():
     """Check if we posted too recently (Quality > Quantity)."""
     try:
@@ -196,13 +260,39 @@ def main():
 
     # 5. SAFETY: detect partial post (< 4 slides posted, or fewer than expected)
     mode = staging.get("mode", "thread")
-    
+
     # Count expected slides from content (separated by ---)
     expected_slides = 0
     if content:
         raw_slides = [s for s in re.split(r'(?:\n|^)===\s*\n', content) if s.strip()]
         expected_slides = max(1, len(raw_slides))
-    
+
+    # 5a. CAROUSEL STRUCTURE VERIFICATION — query Threads API to confirm fan-out (siblings, not chain).
+    # Catches the parent_pid=pid bug where slides 3-N get nested under slide 2.
+    if mode != "single_paragraph" and expected_slides > 1 and root_id:
+        log('POST', f"🔍 Verifying carousel structure via API (expecting {expected_slides-1} top-level replies)...")
+        access_token, _ = _load_threads_token()
+        if access_token:
+            ok, actual, expected_replies = verify_carousel_structure(root_id, expected_slides, access_token)
+            if ok is False:
+                # FAN-OUT BUG: slides are nested (chain), not siblings
+                log('POST', f"🚨 Carousel structure BROKEN: {actual} top-level replies, expected {expected_replies}")
+                log('POST', f"🚨 Slides 3-N likely hidden under slide 2 (chain, not fan-out). Auto-deleting...")
+                del_out, del_code = shell(f"python3 {POST_SCRIPT} --delete {root_id} --partial", timeout=15)
+                if del_code != 0:
+                    log('POST', f"❌ Delete failed (exit {del_code}): {del_out[:200]}")
+                    send_alert("CAROUSEL BROKEN + DELETE FAILED", f"Fan-out: {actual} replies, expected {expected_replies}. Manual delete needed for root {root_id}.")
+                else:
+                    send_alert("CAROUSEL BROKEN", f"Fan-out bug: {actual} replies, expected {expected_replies}. Auto-deleted '{topic.get('title','?')[:50]}'.")
+                _cleanup(remove_pending=True, current_topic=topic)
+                sys.exit(1)
+            elif ok is True:
+                log('POST', f"✅ Carousel structure OK: {actual} top-level replies (expected {expected_replies})")
+            else:
+                log('POST', f"⚠️ Could not verify carousel via API (skipped)")
+        else:
+            log('POST', f"⚠️ No Threads token — skipped API verification")
+
     # Partial post detection
     # < 3 slides = truly broken → delete
     # 3+ slides but < expected = acceptable → warn only
