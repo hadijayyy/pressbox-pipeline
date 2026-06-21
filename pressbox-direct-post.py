@@ -157,7 +157,10 @@ def get_latest_permalink(uid, token):
 
 def post_thread(uid, token, slides, image_url=None):
     """
-    Post slides as threaded replies.
+    Post slides as a Threads CAROUSEL (fan-out, not chain).
+    Slide 1 is the root post. Slides 2-N are all direct replies to slide 1,
+    so they appear as siblings in the Threads UI, not nested under each other.
+
     image_url: attach to root slide (slide 1) if provided.
     """
     filtered = [s for s in slides if s.strip()]
@@ -165,7 +168,7 @@ def post_thread(uid, token, slides, image_url=None):
         return []
 
     post_ids = []
-    parent_pid = None
+    root_pid = None  # Track the root post ID; all slides reply to this (fan-out)
 
     for i, slide in enumerate(filtered):
         text = slide.strip()
@@ -183,19 +186,24 @@ def post_thread(uid, token, slides, image_url=None):
                 text = trimmed.rstrip() + "…"
             print(f"   ✂️ Slide {i+1} char-trimmed to {len(text)} chars (final guard)", file=sys.stderr)
 
+        # Carousel parent: root for all slides (fan-out, not chain)
+        reply_to = root_pid if i > 0 else None
+
         try:
-            if parent_pid:
-                print(f"   Slide {i+1}/{len(filtered)}: creating reply to {parent_pid}...", file=sys.stderr)
+            if reply_to:
+                print(f"   Slide {i+1}/{len(filtered)}: creating reply to root {root_pid}...", file=sys.stderr)
             else:
                 print(f"   Slide {i+1}/{len(filtered)}: creating root container...", file=sys.stderr)
 
-            cid = create_container(uid, token, text, parent_pid, image_url if i == 0 else None)
+            cid = create_container(uid, token, text, reply_to, image_url if i == 0 else None)
             print(f"   Slide {i+1}/{len(filtered)}: publishing...", file=sys.stderr)
             pid = publish(uid, token, cid)
             post_ids.append(pid)
             print(f"   Slide {i+1}/{len(filtered)}: → {pid}", file=sys.stderr)
 
             if i == 0:
+                # Save root ID for all subsequent slides
+                root_pid = pid
                 print(f"Root: {pid}")
                 # Get actual permalink (alphanumeric format like DZvnqdoE7-k)
                 time.sleep(1)
@@ -204,19 +212,18 @@ def post_thread(uid, token, slides, image_url=None):
                     print(f"Post: {permalink}")
                 else:
                     print(f"Post: https://www.threads.com/@parkthebus.football/post/{pid}")
-
-            parent_pid = pid
         except Exception as e:
             print(f"   ⚠️ Slide {i+1}/{len(filtered)} failed: {e}", file=sys.stderr)
             # RETRY: wait 5s and try once more before giving up
             try:
                 time.sleep(5)
                 print(f"   🔄 Retrying slide {i+1}/{len(filtered)}...", file=sys.stderr)
-                cid = create_container(uid, token, text, parent_pid, image_url if i == 0 else None)
+                cid = create_container(uid, token, text, reply_to, image_url if i == 0 else None)
                 pid = publish(uid, token, cid)
                 post_ids.append(pid)
                 print(f"   ✅ Slide {i+1}/{len(filtered)} retry succeeded: → {pid}", file=sys.stderr)
                 if i == 0:
+                    root_pid = pid
                     print(f"Root: {pid}")
                     time.sleep(1)
                     permalink = get_latest_permalink(uid, token)
@@ -224,14 +231,13 @@ def post_thread(uid, token, slides, image_url=None):
                         print(f"Post: {permalink}")
                     else:
                         print(f"Post: https://www.threads.com/@parkthebus.football/post/{pid}")
-                parent_pid = pid
             except Exception as retry_err:
                 print(f"   ❌ Slide {i+1}/{len(filtered)} retry also failed: {retry_err}", file=sys.stderr)
-                if parent_pid is None and i > 0:
+                if root_pid is None and i > 0:
                     print(f"   🛑 Cannot continue — no root post to reply to.", file=sys.stderr)
                     break
                 print(f"   Continuing with remaining slides...", file=sys.stderr)
-                # Don't update parent_pid — next slide becomes a reply to the last successful one
+                # Skip this slide but keep root_pid for the rest
             continue
 
         if i < len(filtered) - 1:
