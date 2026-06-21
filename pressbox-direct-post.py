@@ -158,8 +158,13 @@ def get_latest_permalink(uid, token):
 def post_thread(uid, token, slides, image_url=None):
     """
     Post slides as a Threads CAROUSEL (fan-out, not chain).
-    Slide 1 is the root post. Slides 2-N are all direct replies to slide 1,
-    so they appear as siblings in the Threads UI, not nested under each other.
+
+    Slide 1 is the root post. Slides 2-N are all direct replies to slide 1
+    (fan-out), so they appear as siblings in the Threads UI.
+
+    Post order: slide 1 (root) first, then slides N, N-1, ..., 2 (reverse).
+    Threads UI shows replies newest-first, so this reverse posting produces
+    the correct carousel order top→bottom: S1, S2, S3, S4, S5, S6.
 
     image_url: attach to root slide (slide 1) if provided.
     """
@@ -170,7 +175,14 @@ def post_thread(uid, token, slides, image_url=None):
     post_ids = []
     root_pid = None  # Track the root post ID; all slides reply to this (fan-out)
 
-    for i, slide in enumerate(filtered):
+    # Post slide 1 (root) first
+    # Then post remaining slides in REVERSE order (N, N-1, ..., 2)
+    # so the newest reply ends up being slide 2, which Threads UI displays
+    # directly below the root — preserving carousel order top→bottom.
+    slide_indices = [0] + list(range(len(filtered) - 1, 0, -1))
+
+    for i, slide_idx in enumerate(slide_indices):
+        slide = filtered[slide_idx]
         text = slide.strip()
         if not text:
             continue
@@ -184,22 +196,22 @@ def post_thread(uid, token, slides, image_url=None):
                 text = trimmed[:last_period + 1]
             else:
                 text = trimmed.rstrip() + "…"
-            print(f"   ✂️ Slide {i+1} char-trimmed to {len(text)} chars (final guard)", file=sys.stderr)
+            print(f"   ✂️ Slide {slide_idx+1} char-trimmed to {len(text)} chars (final guard)", file=sys.stderr)
 
         # Carousel parent: root for all slides (fan-out, not chain)
         reply_to = root_pid if i > 0 else None
 
         try:
             if reply_to:
-                print(f"   Slide {i+1}/{len(filtered)}: creating reply to root {root_pid}...", file=sys.stderr)
+                print(f"   Slide {slide_idx+1}/{len(filtered)}: creating reply to root {root_pid}...", file=sys.stderr)
             else:
-                print(f"   Slide {i+1}/{len(filtered)}: creating root container...", file=sys.stderr)
+                print(f"   Slide {slide_idx+1}/{len(filtered)}: creating root container...", file=sys.stderr)
 
-            cid = create_container(uid, token, text, reply_to, image_url if i == 0 else None)
-            print(f"   Slide {i+1}/{len(filtered)}: publishing...", file=sys.stderr)
+            cid = create_container(uid, token, text, reply_to, image_url if slide_idx == 0 else None)
+            print(f"   Slide {slide_idx+1}/{len(filtered)}: publishing...", file=sys.stderr)
             pid = publish(uid, token, cid)
-            post_ids.append(pid)
-            print(f"   Slide {i+1}/{len(filtered)}: → {pid}", file=sys.stderr)
+            post_ids.append((slide_idx, pid))
+            print(f"   Slide {slide_idx+1}/{len(filtered)}: → {pid}", file=sys.stderr)
 
             if i == 0:
                 # Save root ID for all subsequent slides
@@ -213,7 +225,7 @@ def post_thread(uid, token, slides, image_url=None):
                 else:
                     print(f"Post: https://www.threads.com/@parkthebus.football/post/{pid}")
         except Exception as e:
-            print(f"   ⚠️ Slide {i+1}/{len(filtered)} failed: {e}", file=sys.stderr)
+            print(f"   ⚠️ Slide {slide_idx+1}/{len(filtered)} failed: {e}", file=sys.stderr)
             # RETRY: wait 5s and try once more before giving up
             try:
                 time.sleep(5)
@@ -345,9 +357,12 @@ def main():
     if not post_ids:
         print("❌ No slides posted")
         sys.exit(1)
+    # post_ids is list of (slide_idx, pid) tuples; sort by slide_idx for stable output
+    sorted_ids = sorted(post_ids, key=lambda x: x[0])
+    pids_only = [pid for _, pid in sorted_ids]
     print(f"✅ Thread posted: {len(post_ids)} slides")
-    print(f"   Root: {post_ids[0]}")
-    for pid in post_ids:
+    print(f"   Root: {sorted_ids[0][1]}")
+    for slide_idx, pid in sorted_ids:
         print(pid)
 
 if __name__ == "__main__":

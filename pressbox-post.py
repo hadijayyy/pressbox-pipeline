@@ -86,9 +86,16 @@ def extract_post_ids(output):
 def verify_carousel_structure(root_id, expected_slides, access_token, max_attempts=3):
     """Query Threads API to verify slides posted as fan-out (siblings), not chain (nested).
 
+    Also verifies that the reply ORDER is correct for carousel display:
+    - Expected posting order: S1 (root, oldest) → S6 → S5 → S4 → S3 → S2 (newest reply)
+    - Threads UI shows newest-first, so S2 should be the FIRST reply in the API response
+      (immediately below root in the carousel).
+    - API returns replies in newest-first order. If replies are in oldest-first order,
+    the carousel will be reversed in the UI.
+
     Returns:
         (ok, actual_replies, expected_replies)
-        ok: True if fan-out correct, False if broken, None if API check failed
+        ok: True if fan-out + order correct, False if broken, None if API check failed
         actual_replies: count of top-level replies from API
         expected_replies: N-1 (root + N-1 siblings for an N-slide carousel)
     """
@@ -104,7 +111,7 @@ def verify_carousel_structure(root_id, expected_slides, access_token, max_attemp
                 f"https://graph.threads.net/v1.0/{root_id}",
                 params={
                     "access_token": access_token,
-                    "fields": "replies{id,text}"
+                    "fields": "replies{id,text,timestamp}"
                 },
                 timeout=15
             )
@@ -115,17 +122,34 @@ def verify_carousel_structure(root_id, expected_slides, access_token, max_attemp
                 return None, 0, expected_replies
 
             data = r.json()
-            actual = len(data.get("replies", {}).get("data", []))
+            replies = data.get("replies", {}).get("data", [])
+            actual = len(replies)
 
-            if actual >= expected_replies:
-                return True, actual, expected_replies
+            if actual < expected_replies:
+                # API might still be indexing — retry
+                if attempt < max_attempts:
+                    time.sleep(5)
+                    continue
+                return False, actual, expected_replies
 
-            # API might still be indexing — retry
-            if attempt < max_attempts:
-                time.sleep(5)
-                continue
+            # Order check: Threads API returns replies newest-first. The newest reply
+            # should be the FIRST one in the array (immediately below root in UI).
+            # Verify by comparing timestamps — first reply must be newer than last.
+            timestamps = [rep.get("timestamp", "") for rep in replies]
+            if len(timestamps) >= 2:
+                # Parse and compare; first should be > last (newest first)
+                from datetime import datetime
+                try:
+                    parsed = [datetime.fromisoformat(ts.replace("Z", "+00:00")) for ts in timestamps]
+                    if parsed[0] < parsed[-1]:
+                        # Replies are in oldest-first order → carousel will be reversed in UI
+                        log('POST', f"🚨 REVERSED ORDER: first reply ({parsed[0]}) is OLDER than last ({parsed[-1]}). Carousel will appear reversed in UI.")
+                        return False, actual, expected_replies
+                except Exception as e:
+                    # Timestamp parse failed — don't block on this, just warn
+                    log('POST', f"⚠️ Could not parse timestamps for order check: {e}")
 
-            return False, actual, expected_replies
+            return True, actual, expected_replies
         except Exception as e:
             if attempt < max_attempts:
                 time.sleep(5)
