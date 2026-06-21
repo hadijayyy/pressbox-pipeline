@@ -246,7 +246,7 @@ if os.path.exists(STAGING["v2"]) and not DRY_RUN:
         log("⚠️ Staging corrupt — overwriting")
 
 START = time.time()
-t_scrape = t_llm = t0 = 0
+t_scrape = t0 = 0
 prompt_tok = completion_tok = total_tok = 0
 content = ""
 reasoning = ""
@@ -305,7 +305,8 @@ CACHE_FILE = f"{HOME}/.hermes/pressbox/scrape_cache.json"
 cache_urls = set()
 if os.path.exists(CACHE_FILE):
     try:
-        cache_data = json.load(open(CACHE_FILE))
+        with open(CACHE_FILE) as _cf:
+            cache_data = json.load(_cf)
         cache_ts = cache_data.get("cached_at", 0)
         if time.time() - cache_ts < 1800:  # 30 min
             for item in (cache_data.get("results") or []):
@@ -564,6 +565,11 @@ else:
 
     # Cache article for next run
     article_cache[url] = {"text": article_text, "image": image_url, "w": image_width, "h": image_height, "ts": time.time()}
+    # Evict old entries (keep last 100)
+    if len(article_cache) > 100:
+        sorted_urls = sorted(article_cache.keys(), key=lambda u: article_cache[u].get("ts", 0))
+        for old_url in sorted_urls[:len(article_cache) - 100]:
+            del article_cache[old_url]
     try:
         with open(ARTICLE_CACHE, "w") as f:
             json.dump(article_cache, f)
@@ -624,6 +630,7 @@ system_prompt = f"""[ROLE] Football content strategist. Output: EXACTLY 6-slide 
 user_prompt = f"ARTICLE: {article_text}\n[Note: article may be truncated. Use only what is provided above.]\nSOURCE: {url}"
 
 log(f"   Calling LLM ({ACTIVE_MODEL})...")
+llm_t0 = time.time()
 
 headers = {"Content-Type": "application/json"}
 if API_KEY:
@@ -640,6 +647,11 @@ SENTENCE_COUNTS = {
     5: (2, 3),   # Unresolved: what's unclear (short)
     6: (2, 4),   # CTA: opinion + question + url
 }
+
+def _count_sentences(text: str) -> int:
+    """Count sentences by splitting on sentence-ending punctuation."""
+    sents = re.split(r'(?<=[.!?])\s+', text.strip())
+    return len([s for s in sents if len(s.strip()) > 5])
 raw_json = ""
 
 for attempt in range(1, MAX_RETRIES + 1):
@@ -775,7 +787,8 @@ for attempt in range(1, MAX_RETRIES + 1):
                 log("   Strategy 2: scanning for last valid JSON with content...")
                 best_json = ""
                 best_score = 0
-                # Scan from end, find all valid JSONs with 8+ keys
+                # Scan from end, find valid JSON with 8+ keys
+                # Optimization: break inner loop after first valid JSON (it's the largest from this })
                 for i in range(len(reasoning) - 1, max(len(reasoning) - 50000, -1), -1):
                     if reasoning[i] == '}':
                         for j in range(i, max(i - 15000, -1), -1):
@@ -783,14 +796,11 @@ for attempt in range(1, MAX_RETRIES + 1):
                                 try:
                                     obj = json.loads(reasoning[j:i+1])
                                     if isinstance(obj, dict) and len(obj) >= 8:
-                                        # Score by total content length
-                                        total_content = 0
-                                        for k, v in obj.items():
-                                            if isinstance(v, dict) and "content" in v:
-                                                total_content += len(v["content"])
+                                        total_content = sum(len(v.get("content", "")) for v in obj.values() if isinstance(v, dict))
                                         if total_content > best_score:
                                             best_score = total_content
                                             best_json = reasoning[j:i+1]
+                                        break  # First valid JSON = largest from this }
                                 except json.JSONDecodeError:
                                     pass
                         if best_json:
@@ -829,19 +839,12 @@ for attempt in range(1, MAX_RETRIES + 1):
         else:
             slide_list = [slides_data.get(f"slide_{i}", {}) for i in range(1, 7)]
 
-        def count_sentences(text: str) -> int:
-            """Count sentences by splitting on sentence-ending punctuation."""
-            import re
-            # Split on . ? ! followed by space or end, but not on decimals or abbreviations
-            sents = re.split(r'(?<=[.!?])\s+', text.strip())
-            return len([s for s in sents if len(s.strip()) > 5])
-
         for i, s in enumerate(slide_list[:6]):  # slides 1-6
             if not isinstance(s, dict):
                 sentence_issues.append(f"s{i+1}: not a dict")
                 continue
             body = s.get("content") or ""
-            n = count_sentences(body)
+            n = _count_sentences(body)
             min_s, max_s = SENTENCE_COUNTS.get(i + 1, (3, 5))
             if n < min_s:
                 sentence_issues.append(f"s{i+1}: {n}s < {min_s}")
@@ -864,11 +867,6 @@ if not raw_json:
     sys.exit(1)
 
 # ── Parse & validate slides ──────────────────────────────────────
-
-def _count_sentences(text: str) -> int:
-    """Count sentences by splitting on sentence-ending punctuation."""
-    sents = re.split(r'(?<=[.!?])\s+', text.strip())
-    return len([s for s in sents if len(s.strip()) > 5])
 
 # SINGLE VALIDATION FUNCTION (sentence-count based)
 def validate_and_fix(slides: list) -> tuple:
@@ -905,11 +903,11 @@ if "slides" in slides_data and isinstance(slides_data["slides"], list):
             slides.append({"title": titles[i] if i < len(titles) else f"Slide {i+1}", "content": s.strip()})
         elif isinstance(s, dict):
             title = (s.get("title") or "").strip()
-            content = (s.get("content") or "").strip()
-            if not content:
+            slide_content = (s.get("content") or "").strip()
+            if not slide_content:
                 log(f"❌ slides[{i}] empty content")
                 sys.exit(1)
-            slides.append({"title": title or f"Slide {i+1}", "content": content})
+            slides.append({"title": title or f"Slide {i+1}", "content": slide_content})
         else:
             log(f"❌ slides[{i}] unexpected type: {type(s)}")
             sys.exit(1)
@@ -928,11 +926,11 @@ else:
             log(f"❌ {key} not a dict")
             sys.exit(1)
         title = (slide.get("title") or "").strip()
-        content = (slide.get("content") or "").strip()
-        if not title or not content:
+        slide_content = (slide.get("content") or "").strip()
+        if not title or not slide_content:
             log(f"❌ {key} missing title or content")
             sys.exit(1)
-        slides.append({"title": title, "content": content})
+        slides.append({"title": title, "content": slide_content})
 
 # Truncate to MAX_SLIDES (model sometimes generates extra empty slides)
 if len(slides) > MAX_SLIDES:
@@ -1002,7 +1000,7 @@ metrics = {
     "topic": best.get("title", "")[:60],
     "url": url,
     "scrape_s": round(t_scrape, 1),
-    "llm_s": round(time.time() - t0, 1),
+    "llm_s": round(time.time() - llm_t0, 1),
     "total_s": round(total, 1),
     "slides": len(slides),
     "prompt_tok": prompt_tok,
