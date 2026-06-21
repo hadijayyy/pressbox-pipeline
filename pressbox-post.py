@@ -81,8 +81,8 @@ def extract_post_ids(output):
                 sc = m.group(1)
                 if sc.isdigit() and len(sc) > 15 and not root_id:
                     root_id = sc
-        # [1] {post_id}: ... chain indexing lines (most reliable for numeric IDs)
-        elif line_stripped.startswith('[') and ']' in line_stripped and not root_id:
+        # [N] {post_id}: ... chain indexing lines (most reliable for numeric IDs)
+        elif line_stripped.startswith('[') and ']' in line_stripped:
             m = _re.match(r'\[(\d+)\]\s+(\d{15,20})', line_stripped)
             if m:
                 idx = int(m.group(1))
@@ -90,7 +90,8 @@ def extract_post_ids(output):
                 if pid not in seen:
                     seen.add(pid)
                     post_ids.append(pid)
-                    if idx == 1:
+                    # Always set root_id from [1] (or update if first occurrence)
+                    if idx == 1 or (root_id is None and idx == 1):
                         root_id = pid
         # Legacy "Root:" line (defensive — in case chain driver output changes)
         elif line_stripped.startswith('Root:') and not root_id:
@@ -337,11 +338,12 @@ def main():
             log('POST', f"⚠️ No Threads token — skipped API verification")
 
     # Partial post detection
-    # < 3 slides = truly broken → delete
+    # < 3 slides = truly broken → delete via pressbox-direct-post.py (chain driver has no --delete)
     # 3+ slides but < expected = acceptable → warn only
     if mode != "single_paragraph" and len(post_ids) < 3:
         log('POST', f"⚠️ Critical partial post ({len(post_ids)} of {expected_slides} slides), deleting...")
-        del_out, del_code = shell(f"python3 {POST_SCRIPT} --delete {root_id} --partial", timeout=15)
+        del_cmd = f"python3 {os.path.dirname(POST_SCRIPT)}/pressbox-direct-post.py --delete {root_id} --partial"
+        del_out, del_code = shell(del_cmd, timeout=15)
         if del_code != 0:
             log('POST', f"❌ Delete failed (exit {del_code}): {del_out[:200]}")
             send_alert("DELETE FAILED", f"Partial post delete failed for '{topic.get('title','?')[:50]}' — manual cleanup needed.")
