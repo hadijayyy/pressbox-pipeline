@@ -66,8 +66,8 @@ def get_model_config(topic_type):
     Fallback: MiniMax-M3 (tokenrouter)
     """
     return [
-        {"model": "mistral-large-latest", "max_tokens": 5000, "reasoning_effort": None},
-        {"model": "MiniMax-M3",           "max_tokens": 5000, "reasoning_effort": None},
+        {"model": "mistral-large-latest", "max_tokens": 8000, "reasoning_effort": None},  # Mistral-large supports up to 8192; bumped from 5000 after truncation observed on 6-slide carousels
+        {"model": "MiniMax-M3",           "max_tokens": 8000, "reasoning_effort": None},
     ]
 
 
