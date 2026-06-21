@@ -22,16 +22,18 @@ WIB = timezone(timedelta(hours=7))
 # ── API config ──
 API_KEY = ""
 if os.path.exists(ENV_PATH):
-    for line in open(ENV_PATH):
-        line = line.strip()
-        if line.startswith("OPENCODE_GO_API_KEY=") and not line.startswith("#"):
-            API_KEY = line.split("=", 1)[1].strip()
-            break
+    with open(ENV_PATH) as _env:
+        for line in _env:
+            line = line.strip()
+            if line.startswith("OPENCODE_GO_API_KEY=") and not line.startswith("#"):
+                API_KEY = line.split("=", 1)[1].strip()
+                break
 if not API_KEY and os.path.exists(ENV_PATH):
-    for line in open(ENV_PATH):
-        if line.startswith("OPENROUTER_API_KEY=") and not line.startswith("#"):
-            API_KEY = line.split("=", 1)[1].strip()
-            break
+    with open(ENV_PATH) as _env:
+        for line in _env:
+            if line.startswith("OPENROUTER_API_KEY=") and not line.startswith("#"):
+                API_KEY = line.split("=", 1)[1].strip()
+                break
 API_BASE = "https://opencode.ai/zen/go/v1"
 API_URL = f"{API_BASE}/chat/completions"
 MODEL = "deepseek-v4-flash"
@@ -107,7 +109,7 @@ def fetch_last_reply_text(tok, root_id):
                 break
             last_text = replies[0].get("text", "")
             pid = replies[0]["id"]
-        except:
+        except Exception:
             break
     return last_text
 
@@ -288,7 +290,7 @@ def main():
     for p in raw_posts:
         try:
             metrics = fetch_engagement(tok, p["id"])
-        except:
+        except Exception:
             metrics = {"likes": 0, "replies": 0, "reposts": 0, "views": 0, "quotes": 0}
         
         text = p.get("text", "") or ""

@@ -26,11 +26,12 @@ def fetch_posts(tok, uid, limit=100):
         if after:
             params["after"] = after
         r = httpx.get(f"https://graph.threads.net/v1.0/{uid}/threads", params=params, timeout=15)
-        data = r.json().get("data", [])
+        resp = r.json()
+        data = resp.get("data", [])
         if not data:
             break
         all_posts.extend(data)
-        after = r.json().get("paging", {}).get("cursors", {}).get("after")
+        after = resp.get("paging", {}).get("cursors", {}).get("after")
         if not after:
             break
     return all_posts[:limit]
@@ -44,7 +45,7 @@ def fetch_engagement(tok, post_id):
         for x in r.json().get("data", []):
             m[x["name"]] = x["values"][0]["value"]
         return m
-    except:
+    except Exception:
         return {"likes": 0, "replies": 0, "reposts": 0, "views": 0, "quotes": 0}
 
 def calc_score(m):
@@ -128,8 +129,10 @@ def main():
     }
     
     os.makedirs(os.path.dirname(FEEDBACK_PATH), exist_ok=True)
-    with open(FEEDBACK_PATH, "w") as f:
+    tmp_path = FEEDBACK_PATH + ".tmp"
+    with open(tmp_path, "w") as f:
         json.dump(feedback, f, indent=2)
+    os.replace(tmp_path, FEEDBACK_PATH)
     print(f"✅ Saved: {FEEDBACK_PATH}")
     
     # Update daily feedback
@@ -138,8 +141,10 @@ def main():
         with open(DAILY_FEEDBACK) as f:
             daily = json.load(f)
     daily["weekly_hook_insights"] = hook_analysis["recommendation"]
-    with open(DAILY_FEEDBACK, "w") as f:
+    tmp_path = DAILY_FEEDBACK + ".tmp"
+    with open(tmp_path, "w") as f:
         json.dump(daily, f, indent=2)
+    os.replace(tmp_path, DAILY_FEEDBACK)
     
     # Print report
     print()

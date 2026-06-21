@@ -15,6 +15,8 @@ Usage:
 import json, os, httpx, re
 from datetime import datetime, timezone, timedelta
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import time as _t
 
 TOKEN_PATH = os.path.expanduser("~/.hermes/threads_token.json")
 FEEDBACK_PATH = os.path.expanduser("~/.hermes/pressbox/analytics_feedback.json")
@@ -32,7 +34,6 @@ def get_token():
 
 def fetch_all_posts(tok, uid):
     """Fetch ALL posts using pagination (not just 50)."""
-    import time as _t
     posts = []
     url = f"https://graph.threads.net/v1.0/{uid}/threads"
     params = {"access_token": tok, "fields": "id,text,timestamp", "limit": 50}
@@ -149,7 +150,6 @@ def main():
 
     # Fetch engagement for new posts
     enriched = []
-    from concurrent.futures import ThreadPoolExecutor, as_completed
     with ThreadPoolExecutor(max_workers=8) as ex:
         futs = {ex.submit(fetch_engagement, tok, p["id"]): p for p in raw}
         for f in as_completed(futs):
