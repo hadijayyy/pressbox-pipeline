@@ -172,6 +172,17 @@ def post_thread(uid, token, slides, image_url=None):
         if not text:
             continue
 
+        # Char-cap safety net: Threads API rejects > 500 chars. Pipeline should already trim,
+        # but this is the final guard in case staging was written before the fix.
+        if len(text) > 500:
+            trimmed = text[:500]
+            last_period = max(trimmed.rfind(". "), trimmed.rfind("! "), trimmed.rfind("? "))
+            if last_period > 50:
+                text = trimmed[:last_period + 1]
+            else:
+                text = trimmed.rstrip() + "…"
+            print(f"   ✂️ Slide {i+1} char-trimmed to {len(text)} chars (final guard)", file=sys.stderr)
+
         try:
             if parent_pid:
                 print(f"   Slide {i+1}/{len(filtered)}: creating reply to {parent_pid}...", file=sys.stderr)

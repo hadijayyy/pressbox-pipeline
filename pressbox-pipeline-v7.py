@@ -630,31 +630,37 @@ _dynamic_tone = ""
 if tone_adjustment and tone_adjustment != "Conversational English. Bold numbers. High-impact words.":
     _dynamic_tone = f"\n- TONE: {tone_adjustment}"
 
-system_prompt = f"""Football content strategist. Output EXACTLY 6-slide JSON carousel.
+system_prompt = f"""Football content strategist. Output EXACTLY 6-slide JSON carousel from the article provided.
 
-[SLIDES]
-1. HOOK (2-3 sentences, MIN 2): Controversy or paradox from article. If none, use most surprising fact/quote. Never invent.
-2. WHAT (4-7 sentences, MIN 4): What happened + why it matters. No filler.
-3. TENSION (3-5 sentences, MIN 3): Both perspectives. If article is one-sided, say "Article only covers [X]'s perspective." Don't fabricate other side.
-4. HUMAN (3-5 sentences, MIN 3): One person, their words/feelings. If no quote, say "No direct quote from [Name]." Don't guess feelings.
-5. UNRESOLVED (2-4 sentences, MIN 2): What's still unknown.
-6. CTA (3-5 sentences, MIN 3): Sharp opinion + debatable question with clear polarity ("Was this fair?" not "What do you think?"). Last line: {{url}}
+[SOURCE HANDLING]
+Use only the article body — the actual reported content. Ignore navigation text, related-article links, ads, bylines, and boilerplate if present in the scrape.
 
-[FORMAT]
-{{"slide_1":{{"title":"HOOK","content":"..."}},...,"slide_6":{{"title":"CTA","content":"..."}}}}
+[SLIDES — every slide MUST hit the MINIMUM sentence count, no exceptions]
+1. HOOK (1-3 sentences, MIN 1): The single most controversial, surprising, or paradoxical fact, quote, or stat in the article. One sharp sentence is enough — don't pad.
+2. WHAT (3-4 sentences, MIN 3 — never fewer than 3): What happened, concretely, and why it matters. No filler, no scene-setting.
+3. TENSION (2-4 sentences, MIN 2 — never fewer than 2): The conflict, disagreement, or competing stakes in the story. If the article only presents one side, say so directly: "Article only covers [X]'s perspective." If there's genuinely no tension (e.g. a clean tactical or transfer update), say what's actually notable instead of manufacturing conflict.
+4. HUMAN (2-4 sentences, MIN 2 — never fewer than 2): One named person, in their own words or clearly reported feelings. If no usable quote exists, write exactly TWO sentences: (1) "No direct quote from [Name] in this report" + (2) one sentence stating what is known about their situation. Never just the fallback alone.
+5. UNRESOLVED (2-3 sentences, MIN 2 — never fewer than 2): What the article leaves open — outcomes, decisions, or facts not yet known.
+6. CTA (2-4 sentences, MIN 2 — never fewer than 2): A sharp, specific opinion grounded in the article's facts, then a debatable yes/no or this-or-that question (never "what do you think?"). Last line is exactly: {{url}}
+
+[FORMAT — JSON only, no preamble, no markdown fences]
+{{"slide_1":{{"title":"HOOK","content":"..."}},"slide_2":{{"title":"WHAT","content":"..."}},"slide_3":{{"title":"TENSION","content":"..."}},"slide_4":{{"title":"HUMAN","content":"..."}},"slide_5":{{"title":"UNRESOLVED","content":"..."}},"slide_6":{{"title":"CTA","content":"..."}}}}
 
 [GROUNDING — STRICT]
-- Facts, names, quotes, scores, dates: VERBATIM from the article. NO outside knowledge.
-- Missing detail? OMIT. Never invent, assume, or paraphrase. Brevity beats fabrication.
-- Slides 5-6: opinion allowed, but derived from article facts — not general football wisdom.
-- If article cannot fill 6 slides honestly: {{"error":"insufficient_source","slides_produced":N,"reason":"..."}}
+- Names, scores, dates, quotes: verbatim from the article. Zero outside knowledge, zero assumed context.
+- Missing detail = omit or flag it explicitly (see slide 3/4 examples). Never infer, paraphrase a feeling, or fill a gap with general football knowledge.
+- Slides 5-6 may carry opinion, but it must trace back to a specific fact stated earlier in the carousel — not generic punditry.
 
-[RULES]
-- Conversational English. Every sentence followed by \\n\\n. New fact per slide. No repetition.
-- BANNED phrases: "fans were left in shock", "the beautiful game", "at the end of the day", "only time will tell", "stunning", "incredible journey", "in a stunning turn of events".
-- No: em-dash (—), hashtags, bullet points, ALL CAPS, AI filler ("In conclusion", "It's worth noting").
-- Indonesian articles: keep player/club/venue names original, prose in English.
-- JSON only. No preamble."""
+[REJECTION]
+If the article cannot honestly fill slides 1-4 with real, distinct facts (i.e. you would need to fabricate or pad more than one slide), do not produce a carousel. Output only:
+{{"error":"insufficient_source","reason":"<one sentence: what's missing>"}}
+This means: find a different article. Do not attempt a partial or shortened carousel.
+
+[STYLE]
+- Conversational, plain English. One idea per sentence. Each sentence followed by \\n\\n. Every slide advances new information — no restating prior slides.
+- Avoid manufactured-drama clichés and empty intensifiers (e.g. "fans were left in shock," "stunning," "incredible journey," "only time will tell," "the beautiful game") — and anything in that same register, not just this exact list.
+- No em-dash (—), no hashtags, no bullet points, no ALL CAPS, no AI throat-clearing ("In conclusion," "It's worth noting," "At the end of the day").
+- Indonesian-language source articles: keep player/club/venue names in original form, write all slide content in English."""
 
 user_prompt = f"ARTICLE: {article_text}\n[Note: article may be truncated. Use only what is provided above.]\nSOURCE: {url}"
 
@@ -668,13 +674,16 @@ llm_t0 = time.time()
 MAX_RETRIES = 3
 # Sentence count targets per slide (min, max) — 6-slide format
 SENTENCE_COUNTS = {
-    1: (2, 3),   # Hook: 2-3 sentences (punchy)
-    2: (3, 5),   # What: what happened (tight)
-    3: (3, 5),   # Tension: conflict/stakes
-    4: (3, 5),   # Human: one person, emotion
-    5: (2, 3),   # Unresolved: what's unclear (short)
-    6: (2, 4),   # CTA: opinion + question + url
+    1: (1, 3),   # Hook: 1-3 sentences (sharp single sentence OK)
+    2: (3, 4),   # What: 3-4 sentences
+    3: (2, 4),   # Tension: 2-4 sentences
+    4: (2, 4),   # Human: 2-4 sentences
+    5: (2, 3),   # Unresolved: 2-3 sentences
+    6: (2, 4),   # CTA: 2-4 sentences
 }
+# Hard char cap per slide (Threads API limit = 500 chars/slide).
+# Auto-trim cuts by sentence; if a single sentence is too long, char-trim fires here.
+MAX_CHARS_PER_SLIDE = 500
 
 def _count_sentences(text: str) -> int:
     """Count sentences by splitting on sentence-ending punctuation."""
@@ -887,7 +896,7 @@ for attempt in range(1, MAX_RETRIES + 1):
                 continue
             body = s.get("content") or ""
             n = _count_sentences(body)
-            min_s, max_s = SENTENCE_COUNTS.get(i + 1, (3, 5))
+            min_s, max_s = SENTENCE_COUNTS.get(i + 1, (3, 4))
             if n > max_s:
                 # Auto-trim: keep first max_s sentences (don't reject — just clip)
                 parts = re.split(r'(?<=[.!?])\s+', body.strip())
@@ -897,6 +906,18 @@ for attempt in range(1, MAX_RETRIES + 1):
                     trimmed_count += 1
             elif n < min_s:
                 sentence_issues.append(f"s{i+1}: {n}s < {min_s}")
+
+            # Char-cap safety net: Threads API hard limit is 500 chars/slide.
+            # Cuts to last sentence-ending within the limit, or just truncates if no boundary.
+            if len(s.get("content", "")) > MAX_CHARS_PER_SLIDE:
+                text = s["content"][:MAX_CHARS_PER_SLIDE]
+                # Try to keep last full sentence within the cap
+                last_period = max(text.rfind(". "), text.rfind("! "), text.rfind("? "))
+                if last_period > 50:  # keep at least some content
+                    s["content"] = text[:last_period + 1]
+                else:
+                    s["content"] = text.rstrip() + "…"
+                log(f"   ✂️ Char-trimmed s{i+1} to {len(s['content'])} chars")
 
         if not sentence_issues:
             if trimmed_count:
