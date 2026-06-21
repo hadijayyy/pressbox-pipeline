@@ -1,21 +1,18 @@
 #!/usr/bin/env python3
 """
-post_pressbox_thread.py — Post a 2-post chained thread to Threads.
+post_pressbox_thread.py — Post N-post chained thread to Threads.
 
-Reads staging JSON (slide_1 = hook, slide_2 = detail), chains S2 to S1 via
-reply_to_id, and prints the permalink of the root post.
+Reads staging JSON (slide_1 ... slide_N), chains each slide to the previous
+via reply_to_id (Threads native "Add to thread" pattern), and prints the
+permalink of the root post.
 
 Usage:
     python3 post_pressbox_thread.py [--staging PATH] [--dry-run]
-
-Environment:
-    THREADS_ACCESS_TOKEN, THREADS_USER_ID  (read from ~/.hermes/threads_token.json if not set)
 """
 import argparse
 import json
 import os
 import sys
-import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path.home() / ".hermes" / "scripts"))
@@ -26,7 +23,6 @@ def load_token():
     """Load Threads access token + user_id from ~/.hermes/threads_token.json."""
     token_path = Path.home() / ".hermes" / "threads_token.json"
     if not token_path.exists():
-        # Fallback to env
         tok = os.environ.get("THREADS_ACCESS_TOKEN", "")
         uid = os.environ.get("THREADS_USER_ID", "")
         if not tok or not uid:
@@ -36,6 +32,12 @@ def load_token():
     with open(token_path) as f:
         data = json.load(f)
     return data.get("access_token", ""), str(data.get("user_id", ""))
+
+
+def get_slide_keys(slides_obj):
+    """Return ordered list of slide keys (slide_1, slide_2, ...)."""
+    keys = [k for k in slides_obj.keys() if k.startswith("slide_") and k[6:].isdigit()]
+    return sorted(keys, key=lambda k: int(k.split("_")[1]))
 
 
 def main():
@@ -48,25 +50,29 @@ def main():
         staging = json.load(f)
 
     slides = staging.get("slides")
-    if not slides or len(slides) < 2:
-        print(f"❌ Need 2 slides in staging, got {len(slides) if slides else 0}")
+    if not slides:
+        print(f"❌ No slides in staging")
         sys.exit(1)
 
-    parts = [slides["slide_1"]["content"], slides["slide_2"]["content"]]
-    image_url = staging.get("image") or staging.get("image_url")
-    image_urls = [image_url, None]  # image on root only
+    slide_keys = get_slide_keys(slides)
+    if len(slide_keys) < 2:
+        print(f"❌ Need at least 2 slides, got {len(slide_keys)}")
+        sys.exit(1)
 
-    print(f"📝 2-post thread")
-    print(f"   S1 (root): {len(parts[0])} chars")
-    print(f"   S2 (reply): {len(parts[1])} chars")
+    parts = [slides[k]["content"] for k in slide_keys]
+    image_url = staging.get("image") or staging.get("image_url")
+    image_urls = [image_url] + [None] * (len(parts) - 1)  # image only on root
+
+    print(f"📝 {len(parts)}-post chained thread")
+    for i, (k, p) in enumerate(zip(slide_keys, parts), 1):
+        print(f"   {k} [{len(p)} chars]: {p[:60]}...")
     print(f"   Image: {image_url[:80] if image_url else 'none'}...")
 
     if args.dry_run:
         print("\n🔍 DRY RUN — not posting")
-        print(f"\n--- S1 (root) ---")
-        print(parts[0])
-        print(f"\n--- S2 (chained reply) ---")
-        print(parts[1])
+        for i, (k, p) in enumerate(zip(slide_keys, parts), 1):
+            print(f"\n--- {k} ---")
+            print(p)
         sys.exit(0)
 
     tok, uid = load_token()

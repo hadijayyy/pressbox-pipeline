@@ -18,7 +18,7 @@ import atexit
 from pathlib import Path
 
 HOME = Path.home()
-TOKEN_FILE = HOME / ".hermes" / "threads_token.json"
+TOKEN_FILE = HOME / ".hermes" / "threads_token.json"  # default: @parkthebus.football
 THREADS_API = "https://graph.threads.net/v1.0"
 _HTTP = httpx.Client(timeout=8)
 atexit.register(_HTTP.close)
@@ -288,8 +288,16 @@ def delete_post(uid, token, post_id):
     return r.status_code == 200
 
 def main():
+    global TOKEN_FILE
     token, uid = load_token()
     image_url = None
+
+    if "--token-file" in sys.argv:
+        idx = sys.argv.index("--token-file")
+        if idx + 1 < len(sys.argv):
+            TOKEN_FILE = Path(sys.argv[idx + 1])
+            token, uid = load_token()  # reload with new path
+            print(f"🔑 Token file: {TOKEN_FILE}", file=sys.stderr)
 
     if "--image" in sys.argv:
         idx = sys.argv.index("--image")

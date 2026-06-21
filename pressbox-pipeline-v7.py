@@ -639,42 +639,47 @@ _dynamic_tone = ""
 if tone_adjustment and tone_adjustment != "Conversational English. Bold numbers. High-impact words.":
     _dynamic_tone = f"\n- TONE: {tone_adjustment}"
 
-system_prompt = f"""Football content strategist for Threads. Output EXACTLY 2-post JSON thread from the article provided.
+system_prompt = f"""Football content strategist for Threads. Output EXACTLY 6-slide JSON thread from the article provided.
 
 [STRATEGY]
-Two-post chained thread, not a 6-slide carousel. This matches the proven @parkthebus.football posting pattern:
-- S1 (root): sharp hook — 3 sentences MAX. End with tension/question. Drives comments.
-- S2 (reply chained to S1): full story — 3-5 sentences. Context + quote + implications. NO URL here.
-- User comments naturally extend the conversation from S2.
+6-post chained thread (Threads native "Add to thread" pattern). Each slide replies to the previous via reply_to_id, NOT siblings of root.
+- S1 (root): HOOK — 1-3 sentences. End with tension.
+- S2 (replies to S1): WHAT — 3-4 sentences.
+- S3 (replies to S2): TENSION — 2-4 sentences.
+- S4 (replies to S3): HUMAN — 2-4 sentences.
+- S5 (replies to S4): UNRESOLVED — 2-3 sentences.
+- S6 (replies to S5): CTA — 2-4 sentences. Last line: {{url}}
 
-[PROCESS — execute internally before writing, do not output]
+[PROCESS — internal only]
 1. Read article. FACT BANK: names, scores, minutes, quotes, stats, dates, venue.
-2. Pick the single most tension-packed fact for the hook.
-3. S1 ends with a question or unresolved moment — drives comment loop.
-4. S2 answers/extends: what happened, why it matters, the human angle.
+2. NARRATIVE SPINE: HOOK → WHAT → TENSION → HUMAN → UNRESOLVED → CTA.
+3. Last sentence of slide N sets up first sentence of slide N+1.
+4. S6 callbacks S1's hook.
 
 [SOURCE HANDLING]
-Use only the article body — actual reported content. Ignore nav, related links, ads, bylines, boilerplate.
+Use only article body. Ignore nav, related links, ads, bylines, boilerplate.
 
-[POSTS — hit MIN sentence counts]
-1. HOOK (1-3 sentences, MIN 1): The single most controversial/surprising/paradoxical fact, quote, or stat. End with tension or unresolved moment — no answer yet. Sharp beats padded.
-2. DETAIL (3-5 sentences, MIN 3): What happened concretely + why it matters + human angle (quote if available) + implication. No scene-setting filler. NO URL.
+[SLIDES — MIN sentence counts]
+1. HOOK (1-3, MIN 1): Most controversial/surprising/paradoxical fact. End with tension.
+2. WHAT (3-4, MIN 3): What happened concretely + why it matters.
+3. TENSION (2-4, MIN 2): Conflict/competing stakes. One-sided: "Article only covers [X]'s perspective."
+4. HUMAN (2-4, MIN 2): One named person, own words or reported feelings. No quote: "No direct quote from [Name]" + one sentence on situation.
+5. UNRESOLVED (2-3, MIN 2): What's left open.
+6. CTA (2-4, MIN 2): Sharp opinion + debatable yes/no question. MUST callback S1. Last line: """ + url + """
 
-[FORMAT — JSON only, no preamble, no markdown fences]
-{{"slide_1":{{"title":"HOOK","content":"..."}},"slide_2":{{"title":"DETAIL","content":"..."}}}}
+[FORMAT — JSON only, no fences]
+{{"slide_1":{{"title":"HOOK","content":"..."}},"slide_2":{{"title":"WHAT","content":"..."}},"slide_3":{{"title":"TENSION","content":"..."}},"slide_4":{{"title":"HUMAN","content":"..."}},"slide_5":{{"title":"UNRESOLVED","content":"..."}},"slide_6":{{"title":"CTA","content":"..."}}}}
 
 [GROUNDING — STRICT]
-- Names, scores, dates, quotes: verbatim from article. Zero outside knowledge.
-- Every fact traceable to the article. If not findable, OMIT.
-- Missing detail = omit or flag. Never infer feelings or fill gaps.
-- Last line of S2 may include source attribution if natural, but URL goes in the IMAGE caption or omitted entirely.
+- Names, scores, dates, quotes: verbatim from article. No outside knowledge.
+- Missing detail = omit or flag. Never infer feelings.
+- S5-6 may have opinion but trace to specific stated facts.
 
 [REJECTION]
-If the article cannot honestly fill 2 posts with real, distinct facts: {{"error":"insufficient_source","reason":"<one sentence>"}}
+Can't fill 6 slides honestly? Output: {{"error":"insufficient_source","reason":"..."}}
 
 [STYLE]
-- Conversational, plain English. One idea per sentence, each followed by \\n\\n.
-- S1 = punchy hook, S2 = fuller story. Reads as ONE thread when chained.
+- Conversational plain English. One idea per sentence, each followed by \\n\\n.
 - No em-dash (—), no hashtags, no bullets, no ALL CAPS, no AI throat-clearing.
 - Indonesian articles: keep names original, write content in English."""
 
@@ -691,7 +696,11 @@ MAX_RETRIES = 3
 # Sentence count targets per slide (min, max) — 6-slide format
 SENTENCE_COUNTS = {
     1: (1, 3),   # Hook: 1-3 sentences (sharp single sentence OK)
-    2: (3, 5),   # Detail: 3-5 sentences (full story)
+    2: (3, 4),   # What: 3-4 sentences
+    3: (2, 4),   # Tension: 2-4 sentences
+    4: (2, 4),   # Human: 2-4 sentences
+    5: (2, 3),   # Unresolved: 2-3 sentences
+    6: (2, 4),   # CTA: 2-4 sentences
 }
 # Hard char cap per slide (Threads API limit = 500 chars/slide).
 # Auto-trim cuts by sentence; if a single sentence is too long, char-trim fires here.
@@ -900,9 +909,9 @@ for attempt in range(1, MAX_RETRIES + 1):
         if "slides" in slides_data and isinstance(slides_data["slides"], list):
             slide_list = slides_data["slides"]
         else:
-            slide_list = [slides_data.get(f"slide_{i}", {}) for i in range(1, 3)]
+            slide_list = [slides_data.get(f"slide_{i}", {}) for i in range(1, 7)]
 
-        for i, s in enumerate(slide_list[:2]):  # slides 1-2 (2-post format)
+        for i, s in enumerate(slide_list[:6]):  # slides 1-6
             if not isinstance(s, dict):
                 sentence_issues.append(f"s{i+1}: not a dict")
                 continue
@@ -976,13 +985,13 @@ except json.JSONDecodeError as e:
     sys.exit(1)
 
 slides = []
-MAX_SLIDES = 2
+MAX_SLIDES = 6
 
 # Handle both formats: {"slide_1": {...}} and {"slides": [...]}
 if "slides" in slides_data and isinstance(slides_data["slides"], list):
     for i, s in enumerate(slides_data["slides"]):
         if isinstance(s, str):
-            titles = ['HOOK', 'DETAIL']
+            titles = ['HOOK', 'WHAT', 'TENSION', 'HUMAN', 'UNRESOLVED', 'CTA']
             slides.append({"title": titles[i] if i < len(titles) else f"Slide {i+1}", "content": s.strip()})
         elif isinstance(s, dict):
             title = (s.get("title") or "").strip()
@@ -995,7 +1004,7 @@ if "slides" in slides_data and isinstance(slides_data["slides"], list):
             log(f"❌ slides[{i}] unexpected type: {type(s)}")
             sys.exit(1)
 else:
-    for i in range(1, 3):
+    for i in range(1, 7):
         key = f"slide_{i}"
         if key not in slides_data:
             alt_key = f"Slide {i}"
@@ -1039,14 +1048,12 @@ for s in slides:
     # Enforce blank line after every sentence (if missing)
     s["content"] = re.sub(r'([.!?])(\s+)([A-Z"])', r'\1\n\n\3', s["content"])
 
-# Guarantee source URL is available in image caption OR last slide.
-# 2-post format: S1=hook (image with article photo), S2=detail (NO URL by design — keeps it clean for user comments).
-# URL is attached as image caption via the posting tool, not embedded in slide text.
-# This keeps S2 clean for user engagement.
+# Guarantee source URL on last slide (CTA) — bulletproof, doesn't rely on model
 if slides and url:
-    # Stash URL on the staging object so the posting tool can use it as image caption
-    # (NOT embedded in slide text — proven pattern from @parkthebus.football)
-    pass  # URL is consumed by threads_poster.post_thread() as image caption text if needed
+    last = slides[-1]
+    if url not in last["content"]:
+        # Strip trailing whitespace/newlines, then append URL as final line
+        last["content"] = last["content"].rstrip() + "\n\n" + url
 
 joined = "\n===\n".join(s["content"] for s in slides)
 
