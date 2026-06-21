@@ -958,7 +958,7 @@ for s in slides:
     # Enforce blank line after every sentence (if missing)
     s["content"] = re.sub(r'([.!?])(\s+)([A-Z"])', r'\1\n\n\3', s["content"])
 
-joined = "\n---\n".join(s["content"] for s in slides)
+joined = "\n===\n".join(s["content"] for s in slides)
 
 # ── 6. STAGE or DRY RUN ──────────────────────────────────────────
 staging_obj = {

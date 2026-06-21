@@ -200,27 +200,31 @@ def main():
     # Count expected slides from content (separated by ---)
     expected_slides = 0
     if content:
-        raw_slides = [s for s in re.split(r'(?:\n|^)---\s*\n', content) if s.strip()]
+        raw_slides = [s for s in re.split(r'(?:\n|^)===\s*\n', content) if s.strip()]
         expected_slides = max(1, len(raw_slides))
     
-    is_partial = False
-    if mode != "single_paragraph" and len(post_ids) < min(4, expected_slides):
-        is_partial = True
-    elif mode != "single_paragraph" and expected_slides > 1 and len(post_ids) < expected_slides:
-        is_partial = True
+    # Partial post detection
+    # < 3 slides = truly broken → delete
+    # 3+ slides but < expected = acceptable → warn only
+    mode = staging.get("mode", "thread")
     
-    if is_partial:
-        log('POST', f"⚠️ Partial post ({len(post_ids)} of {expected_slides} slides), deleting...")
+    if mode != "single_paragraph" and len(post_ids) < 3:
+        log('POST', f"⚠️ Critical partial post ({len(post_ids)} of {expected_slides} slides), deleting...")
         del_out, del_code = shell(f"python3 {POST_SCRIPT} --delete {root_id} --partial", timeout=15)
         if del_code != 0:
             log('POST', f"❌ Delete failed (exit {del_code}): {del_out[:200]}")
             send_alert("DELETE FAILED", f"Partial post delete failed for '{topic.get('title','?')[:50]}' — manual cleanup needed.")
         else:
-            partial_msg = f"❌ Partial post ({len(post_ids)} of {expected_slides} slides) — dihapus."
+            partial_msg = f"❌ Critical partial post ({len(post_ids)}/{expected_slides} slides) — dihapus."
             print(partial_msg)
             send_alert("PARTIAL POST", f"Only {len(post_ids)}/{expected_slides} slides posted for '{topic.get('title','?')[:50]}' — deleted.")
         _cleanup(remove_pending=True, current_topic=topic)
         sys.exit(0)
+    elif mode != "single_paragraph" and len(post_ids) < expected_slides:
+        log('POST', f"⚠️ Partial post ({len(post_ids)} of {expected_slides} slides) — keeping thread (warn only)")
+        warn_msg = f"⚠️ Partial post ({len(post_ids)}/{expected_slides} slides) — thread kept."
+        print(warn_msg)
+        # Don't delete, don't exit — continue to tracking and success path
 
     # 6. Verify (skip if script missing)
     if os.path.exists(VERIFY_SCRIPT):

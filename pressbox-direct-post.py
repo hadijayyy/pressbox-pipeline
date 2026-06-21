@@ -174,15 +174,15 @@ def post_thread(uid, token, slides, image_url=None):
 
         try:
             if parent_pid:
-                print(f"   Slide {i+1}/8: creating reply to {parent_pid}...", file=sys.stderr)
+                print(f"   Slide {i+1}/{len(filtered)}: creating reply to {parent_pid}...", file=sys.stderr)
             else:
-                print(f"   Slide {i+1}/8: creating root container...", file=sys.stderr)
+                print(f"   Slide {i+1}/{len(filtered)}: creating root container...", file=sys.stderr)
 
             cid = create_container(uid, token, text, parent_pid, image_url if i == 0 else None)
-            print(f"   Slide {i+1}/8: publishing...", file=sys.stderr)
+            print(f"   Slide {i+1}/{len(filtered)}: publishing...", file=sys.stderr)
             pid = publish(uid, token, cid)
             post_ids.append(pid)
-            print(f"   Slide {i+1}/8: → {pid}", file=sys.stderr)
+            print(f"   Slide {i+1}/{len(filtered)}: → {pid}", file=sys.stderr)
 
             if i == 0:
                 print(f"Root: {pid}")
@@ -198,8 +198,28 @@ def post_thread(uid, token, slides, image_url=None):
             parent_pid = pid
         except Exception as e:
             print(f"   ⚠️ Slide {i+1}/{len(filtered)} failed: {e}", file=sys.stderr)
-            print(f"   Continuing with remaining slides...", file=sys.stderr)
-            # Don't update parent_pid — next slide becomes a reply to the last successful one
+            # RETRY: wait 5s and try once more before giving up
+            try:
+                time.sleep(5)
+                print(f"   🔄 Retrying slide {i+1}/{len(filtered)}...", file=sys.stderr)
+                cid = create_container(uid, token, text, parent_pid, image_url if i == 0 else None)
+                pid = publish(uid, token, cid)
+                post_ids.append(pid)
+                print(f"   ✅ Slide {i+1}/{len(filtered)} retry succeeded: → {pid}", file=sys.stderr)
+                if i == 0:
+                    print(f"Root: {pid}")
+                    import time as _t
+                    _t.sleep(1)
+                    permalink = get_latest_permalink(uid, token)
+                    if permalink:
+                        print(f"Post: {permalink}")
+                    else:
+                        print(f"Post: https://www.threads.com/@parkthebus.football/post/{pid}")
+                parent_pid = pid
+            except Exception as retry_err:
+                print(f"   ❌ Slide {i+1}/{len(filtered)} retry also failed: {retry_err}", file=sys.stderr)
+                print(f"   Continuing with remaining slides...", file=sys.stderr)
+                # Don't update parent_pid — next slide becomes a reply to the last successful one
             continue
 
         if i < len(filtered) - 1:
@@ -214,8 +234,8 @@ def post_thread(uid, token, slides, image_url=None):
     return post_ids
 
 def parse_slides(text):
-    """Split text into slides by --- separator."""
-    slides = re.split(r'(?:\n|^)---\s*\n', text)
+    """Split text into slides by === separator."""
+    slides = re.split(r'(?:\n|^)===\s*\n', text)
     return [s.strip() for s in slides if s.strip()]
 
 def verify_posts(uid, token, limit=15):
