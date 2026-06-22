@@ -21,23 +21,29 @@ Press Box is a fully automated content pipeline that scrapes football news (Mirr
 ## ✨ Features
 
 - **Automated research** — scrapes Mirror RSS + Sky Sports RSS + Goal.com for fresh football news
-- **Smart dedup** — URL-based, title Jaccard similarity (35% threshold), 30-min article cache
+- **Smart dedup** — URL-based, title Jaccard similarity (35% normal / 50% relaxed), 30-min article cache
+- **Relaxed filter on low volume** — when scrape yields < 10 topics, threshold relaxes to 50% and skip_topics is bypassed (prevents no-content hours)
+- **11-category classifier** — injury, transfer, managerial change, fifa_political, WC team guide, controversy, tactical analysis (with VAR/penalty/offside keywords), match result, player profile, tournament news, other
+- **Sensitive filter with word-boundary** — `strip` only matches as a standalone word (avoids "striped kit" false positives)
 - **LLM-generated threads** — 6 slides with sentence-count blueprints and strict grounding rules
 - **Sentence-count validation** — replaces char-count, ensures consistent slide density
 - **3-level image fallback** — og:image → article body `<img>` → RSS image
 - **Image validation** — HEAD request checks every image URL before use
-- **Content filtering** — skips women's football (title, description, URL)
+- **Content filtering** — skips women's football (title, description, URL), TV guides
 - **Strategy 2 JSON extraction** — score-based fallback for reasoning-heavy responses
 - **Analytics feedback** — daily engagement analysis tunes posting hours
 - **Atomic staging** — tmp + os.replace prevents corruption
+- **Staging delete on post** — `os.remove()` after successful post (no 35-byte stub left behind)
+- **Real permalink fetch** — alphanumeric shortcode via `/v1.0/{id}?fields=permalink` API
 - **Auto-recovery** — `:15` check-staging runs pipeline if staging is empty
 - **Cron notifications** — all 3 cron jobs notify chat on success and failure
 
 ## 🏗 Architecture
-
+## 🏗 Architecture
 ```
 :00 Pipeline ──► scrape (Mirror + Sky Sports + Goal.com)
-                  ├── filter (dedup, similarity, freshness, women's football)
+                  ├── filter (dedup, similarity 35%/50%-relaxed, freshness, women's football)
+                  │   └── RELAXED_FILTER when len(all_topics) < 10 (loosen dedup + skip analytics)
                   ├── score (WC boost +50, viral +25)
                   ├── extract (article text + 3-level image fallback)
                   ├── LLM generate (Mistral primary → MiniMax-M3 fallback, v7.3 anti-hallucination prompt)
@@ -49,7 +55,8 @@ Press Box is a fully automated content pipeline that scrapes football news (Mirr
 
 :30 Post ──► read staging → post to Threads (slide-by-slide)
               ├── verify ≥ 4 slides posted (auto-delete partial)
-              ├── fetch alphanumeric permalink via /me/threads API
+              ├── fetch real permalink via /v1.0/{id}?fields=permalink
+              ├── delete staging file (no stub left behind)
               └── notify chat with link + title
 ```
 
@@ -137,10 +144,12 @@ THREADS_USER_ID=your_threads_user_id
 
 ### Pipeline Flow
 
-```
+```bash
 pressbox-pipeline-v7.py:
   1. Parallel scrape Mirror RSS + Sky Sports RSS + Goal.com (5-10s)
-  2. Filter candidates (URL dedup, Jaccard similarity 35%, 30-min cache, women's football)
+  2. Filter candidates (URL dedup, Jaccard similarity 35% normal / 50% relaxed, 30-min cache, women's football)
+     - RELAXED_FILTER auto-engages when scrape yields < 10 topics — loosens dedup
+       and bypasses skip_topics so low-volume hours still produce content
   3. Score with WC boost (+50), viral keywords (+25)
   4. Pick best candidate
   5. Extract article text via curl (with 30-min cache)
@@ -153,24 +162,42 @@ pressbox-pipeline-v7.py:
      - Auto-trim over-sentence slides (cuts to SENTENCE_COUNTS max, no reject)
      - Post-parse URL append on slide 6 (bulletproof, regardless of model behavior)
   8. Validate sentence count per slide (auto-trim → sentence cap 500 chars)
-  9. Save to staging.json (atomic write)
+  9. Save to staging.json (atomic write: tmp + os.replace)
 ```
 
 ### Post Flow
 
-```
+```bash
 pressbox-post.py:
   1. Read staging.json (v2 or v3)
   2. Duplicate check via posted_topics.json
   3. Write content to latest.md
-  4. Call pressbox-direct-post.py (timeout 100s)
+  4. Call post_pressbox_thread.py (chain driver, timeout 100s)
   5. Extract post IDs from output (digit lines + "→ {pid}" pattern)
   6. Safety: if < 4 slides posted → auto-delete thread
-  7. Fetch alphanumeric permalink via GET /me/threads API
+  7. Fetch real permalink via /v1.0/{root_id}?fields=permalink (alphanumeric shortcode)
   8. Update posted_topics.json
-  9. Clear staging
+  9. Delete staging file (no stub — pipeline guard's os.path.exists() handles clean state)
   10. Print: ✅ Title\n   permalink
 ```
+
+### Topic Classifier (11 categories, priority-ordered)
+
+`classify_topic_type()` lives in `pressbox_common.py` and is the **single source of truth** — both the pipeline and `pressbox-analytics-llm.py` import from there. Categories:
+
+| # | Category | Example keywords |
+|---|----------|------------------|
+| 1 | `injury_update` | injury, injured, sidelined, ruled out |
+| 2 | `transfer_rumor` | transfer, signs, signing, bid, contract |
+| 3 | `managerial_change` | sacked, fired, appointed, replaces, head coach |
+| 4 | `fifa_political` | (WC) + ban, protest, trump, government, backlash |
+| 5 | `WC_team_guide` | (WC) + guide, preview, squad, predicted |
+| 6 | `controversy` | racism, scandal, hate symbol, var official |
+| 7 | `tactical_analysis` | tactical, formation, var, red card, penalty, offside, referee |
+| 8 | `match_result` | win, beat, defeat, victory, draw, score, lost |
+| 9 | `player_profile` | profile, career, who is, story of |
+| 10 | `tournament_news` | (WC) general — default for WC headlines |
+| 11 | `other` | fallback |
 
 ### LLM Prompt (v7.3)
 
@@ -287,10 +314,54 @@ analytics_recommendations.json
 | Staging empty at :15 | Auto-run pipeline (recovery) |
 | Partial post (< 4 slides) | Auto-delete thread, notify chat |
 | Post ID extraction | Dual method: digit lines + `→ {pid}` pattern |
-| Permalink format | Fetched via `GET /me/threads` (alphanumeric, not numeric container ID) |
-| All candidates fail | Exit code 1 → check-staging recovery |
+| Permalink format | Real alphanumeric via `/v1.0/{id}?fields=permalink` (was: constructed with numeric ID, may 404) |
+| Staging cleanup | `os.remove()` after post (was: 35-byte stub causing false "Staging invalid" warnings) |
+| All candidates fail | Exit code 1 → check-staging recovery → relaxed-filter retry |
+
+## 🧪 Testing
+
+```bash
+# Run all tests
+pytest tests/
+
+# Run a specific test file
+pytest tests/test_classifier.py -v
+pytest tests/test_filter.py -v
+```
+
+57 tests covering:
+- **test_classifier.py** (42 tests) — all 11 categories, priority order, regression tests for 22 Jun 2026 fixes (managerial_change, VAR keywords)
+- **test_filter.py** (13 tests) — sensitive filter word-boundary, skip_topics matching, RELAXED_FILTER logic
+- **test_smoke.py** (2 tests) — module compilation, config presence
 
 ## 📝 Changelog
+
+### v7.5 — Classifier Expansion + Filter Reliability + Permalink Fix (2026-06-22)
+
+**Topic classifier:**
+- New `managerial_change` category (sacked, fired, appointed, replaces, manager, head coach)
+- VAR keywords added to `tactical_analysis` (var, red card, yellow card, penalty, offside, referee, officials)
+- Sensitive filter: `strip` uses word-boundary regex (no more "striped kit" false positives)
+- `pressbox-analytics-llm.py` now imports classifier from `pressbox_common` (single source of truth — was generating mismatched skip_topics with wrong category names)
+
+**Filter chain:**
+- New `RELAXED_FILTER` flag: when scrape yields < 10 topics, Jaccard threshold relaxes 35% → 50% and skip_topics enforcement is bypassed
+- Prevents no-content hours when analytics skip list is over-aggressive (was killing all transfer/team_profile/match_result)
+- Logs "⚠️ Low scrape volume — relaxing filters" so it's visible in cron output
+
+**Staging cleanup:**
+- `pressbox-post.py _cleanup()` now `os.remove()` instead of writing `{"topic": null, "written_at": null}` stub
+- Eliminates 15+ false "Staging invalid (missing topic/content)" warnings per day (recurring since 17 Jun)
+- Pipeline guard's `os.path.exists()` check skips cleanly when file is missing
+
+**Permalink:**
+- `post_pressbox_thread.py` now fetches real permalink via `/v1.0/{id}?fields=permalink` (1s delay for API propagation)
+- Was printing constructed URL with numeric ID — that may 404 or redirect
+- Test: `get_post_permalink("18113407171917568", token)` → `https://www.threads.com/@parkthebus.football/post/DZ4GHmNk1mE`
+
+**Tests:**
+- New `tests/test_classifier.py` (42 tests) — all 11 categories, priority order, regression
+- New `tests/test_filter.py` (13 tests) — sensitive strip boundary, skip_topics match, relaxed filter logic
 
 ### v7.4 — Anti-Hallucination Prompt + Mistral Chain (2026-06-21)
 - **Model chain**: Mistral `mistral-large-latest` (primary) → `MiniMax-M3` via tokenrouter (fallback)
