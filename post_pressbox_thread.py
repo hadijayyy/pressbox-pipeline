@@ -14,10 +14,34 @@ import json
 import os
 import re
 import sys
+import time
+import requests
 from pathlib import Path
 
 sys.path.insert(0, str(Path.home() / ".hermes" / "scripts"))
-from threads_poster import ThreadsPoster, ThreadsAPIError
+from threads_poster import ThreadsPoster, ThreadsAPIError, GRAPH_API_BASE
+
+
+def get_post_permalink(post_id: str, token: str) -> str:
+    """Fetch real alphanumeric permalink for a post via Threads API.
+
+    The constructed URL with numeric ID often 404s or redirects. The API
+    returns a working URL with the alphanumeric shortcode (e.g.
+    https://www.threads.com/t/ABC123xyz or /post/ABC123xyz).
+    """
+    try:
+        r = requests.get(
+            f"{GRAPH_API_BASE}/{post_id}",
+            params={"fields": "permalink", "access_token": token},
+            timeout=10,
+        )
+        if r.status_code == 200:
+            permalink = r.json().get("permalink", "").strip()
+            if permalink:
+                return permalink
+    except Exception:
+        pass
+    return ""
 
 
 def load_token():
@@ -148,9 +172,15 @@ def main():
     for i, r in enumerate(results, 1):
         print(f"   [{i}] {r.post_id}: {r.text[:60]}...")
 
-    # Print root permalink
+    # Print root permalink (fetch real alphanumeric URL from API)
     root_id = results[0].post_id
-    print(f"\nRoot permalink: https://www.threads.com/@parkthebus.football/post/{root_id}")
+    time.sleep(1)  # let Threads API propagate the new post
+    real_permalink = get_post_permalink(root_id, tok)
+    if real_permalink:
+        print(f"\nRoot permalink: {real_permalink}")
+    else:
+        print(f"\nRoot permalink: https://www.threads.com/@parkthebus.football/post/{root_id}")
+        print(f"   ⚠️ Could not fetch real permalink from API — using constructed URL (may redirect)")
 
 
 if __name__ == "__main__":
