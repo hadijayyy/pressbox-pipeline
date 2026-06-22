@@ -28,11 +28,11 @@ def _cleanup(remove_pending=True, current_topic=None):
         except (FileNotFoundError, json.JSONDecodeError) as e:
             log(f"   ⚠️ Cleanup failed (remove_pending): {e}")
             
-    # Clear both staging files
+    # Clear staging files (delete entirely — pipeline guard uses os.path.exists)
     for sf in [STAGING["v2"], STAGING["v3"]]:
         try:
-            with open(sf, 'w') as f:
-                json.dump({"topic": None, "written_at": None}, f)
+            if os.path.exists(sf):
+                os.remove(sf)
         except Exception as e:
             log(f"   ⚠️ Cleanup failed (staging): {e}")
 
