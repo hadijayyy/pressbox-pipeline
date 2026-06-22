@@ -132,6 +132,18 @@ def main():
             print(f"   Payload: {e.payload}")
         sys.exit(1)
 
+    # Explicit partial-chain check — threads_poster.post_thread catches
+    # ThreadsAPIError internally and returns whatever succeeded. If we got
+    # fewer results than parts, surface it loudly so the orchestrator's
+    # partial-post + verify_chain_structure guards can fire.
+    if len(results) < len(parts):
+        missing = len(parts) - len(results)
+        print(f"⚠️ PARTIAL CHAIN: posted {len(results)}/{len(parts)} slides "
+              f"({missing} failed silently)", file=sys.stderr)
+        # Still print successful results so orchestrator can extract root_id
+        # and trigger partial-delete / alert. Do NOT exit 0 — orchestrator's
+        # sys.exit(1) on partial keeps cron from marking this run as ok.
+
     print(f"\n✅ Posted {len(results)} posts as chain")
     for i, r in enumerate(results, 1):
         print(f"   [{i}] {r.post_id}: {r.text[:60]}...")

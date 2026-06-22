@@ -58,12 +58,25 @@ def log(msg, component=None):
 
 
 def send_alert(subject, body):
-    """Placeholder: alert / notify about pipeline events.
+    """Alert / notify about pipeline events.
 
-    Override with real notification logic (Slack, e-mail, etc.)
-    without changing downstream call sites.
+    Writes to ~/.hermes/pressbox/alerts.log (tailable for monitoring)
+    AND logs to stderr (visible in cron capture). Replace this function
+    with real notification (Slack/Telegram/email) without changing call sites.
     """
+    import json as _json
+    from pathlib import Path as _Path
+    from datetime import datetime as _dt, timezone as _tz
     log(f"🔔 ALERT: {subject} — {body[:200]}")
+    # Persist to alerts.log for monitoring (cron capture doesn't always reach operator)
+    try:
+        alerts_path = _Path(HOME) / ".hermes" / "pressbox" / "alerts.log"
+        alerts_path.parent.mkdir(parents=True, exist_ok=True)
+        ts = _dt.now(_tz(timedelta(hours=7))).isoformat()
+        with open(alerts_path, "a") as f:
+            f.write(f"[{ts}] [{subject}] {body}\n")
+    except Exception as e:
+        log(f"⚠️ Could not write alerts.log: {e}")
 
 
 # ── Text processing helpers ─────────────────────────────────────────

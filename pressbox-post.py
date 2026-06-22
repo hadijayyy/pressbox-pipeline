@@ -115,7 +115,7 @@ def extract_post_ids(output):
                     post_ids.append(pid_part)
     return root_id, permalink, post_ids
 
-def verify_chain_structure(root_id, expected_slides, access_token, max_attempts=3):
+def verify_chain_structure(root_id, expected_slides, access_token, max_attempts=2):
     """Query Threads API to verify slides posted as CHAIN (reply_to_id), not fan-out (siblings).
 
     For a chain: root has exactly 1 top-level reply (slide 2). All other slides
@@ -148,9 +148,12 @@ def verify_chain_structure(root_id, expected_slides, access_token, max_attempts=
                 timeout=15
             )
             if r.status_code != 200:
+                # Transient API error — retry only if we have attempts left
                 if attempt < max_attempts:
-                    time.sleep(5)
+                    log('POST', f"   ⚠️ Verify API HTTP {r.status_code} — retry {attempt}/{max_attempts}")
+                    time.sleep(3 + attempt)
                     continue
+                log('POST', f"⚠️ Verify API HTTP {r.status_code} after {max_attempts} attempts — skipping")
                 return None, 0, expected_replies
 
             data = r.json()
@@ -158,21 +161,21 @@ def verify_chain_structure(root_id, expected_slides, access_token, max_attempts=
             actual = len(replies)
 
             if actual != expected_replies:
-                # Either 0 (chain broken — slide 2 didn't reply) or >1 (fan-out regression)
-                if attempt < max_attempts:
-                    time.sleep(5)
-                    continue
+                # STRUCTURAL failure (chain broken / fan-out regression).
+                # User comments only ACCUMULATE over time — retrying won't help and
+                # wastes 5-15s while audience sees a broken post. Fail fast.
                 if actual == 0:
+                    log('POST', f"🚨 CHAIN BROKEN: 0 top-level replies on root (slide 2 didn't reply). FAIL FAST.")
                     return False, 0, expected_replies
                 else:
-                    # Fan-out regression — root has multiple siblings
-                    log('POST', f"🚨 CHAIN BROKEN — FAN-OUT REGRESSION: {actual} top-level replies (expected {expected_replies})")
+                    log('POST', f"🚨 CHAIN BROKEN — FAN-OUT REGRESSION: {actual} top-level replies (expected {expected_replies}). FAIL FAST.")
                     return False, actual, expected_replies
 
             return True, actual, expected_replies
         except Exception as e:
             if attempt < max_attempts:
-                time.sleep(5)
+                log('POST', f"   ⚠️ Verify exception: {e} — retry {attempt}/{max_attempts}")
+                time.sleep(3 + attempt)
                 continue
             log('POST', f"⚠️ API verification failed after {max_attempts} attempts: {e}")
             return None, 0, expected_replies
