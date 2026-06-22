@@ -31,43 +31,72 @@ except Exception as e:
 
 # ── Load env ────────────────────────────────────────────────────────
 env_config = load_env()
-# Mistral (primary, mistral-large-latest) — custom:Mistral
+# FreeLLMAPI unified gateway — proxies gpt-oss-20b → Groq
+FREELLMAPI_BASE_URL_RAW = env_config.get("FREELLMAPI_BASE_URL", "http://localhost:3001/v1")
+FREELLMAPI_API_KEY = env_config.get("FREELLMAPI_API_KEY", "")
+# Resolve chat-completions URL (FreeLLMAPI_BASE_URL ends with /v1)
+FREELLMAPI_URL = FREELLMAPI_BASE_URL_RAW.rstrip("/")
+if not FREELLMAPI_URL.endswith("/v1"):
+    FREELLMAPI_URL = FREELLMAPI_URL + "/v1"
+FREELLMAPI_URL = FREELLMAPI_URL + "/chat/completions"
+# Legacy providers (kept available for ad-hoc use, not in active chain)
+GROQ_API_KEY = env_config.get("GROQ_API_KEY", "")
+GITHUB_TOKEN = env_config.get("GITHUB_TOKEN", "")
 MISTRAL_API_KEY = env_config.get("MISTRAL_API_KEY", "")
-# Tokenrouter (fallback, MiniMax-M3) — custom:tokenrouter; opencode-go kept as final fallback
 MINIMAX_API_KEY = env_config.get("MINIMAX_API_KEY") or env_config.get("OPENCODE_GO_API_KEY", "")
 # Legacy globals (some legacy callers may still reference these)
-API_KEY = MINIMAX_API_KEY
-API_URL = "https://api.tokenrouter.com/v1/chat/completions"
-MODEL = "mistral-large-latest"
+API_KEY = FREELLMAPI_API_KEY or GROQ_API_KEY or GITHUB_TOKEN or MINIMAX_API_KEY
+API_URL = FREELLMAPI_URL
+MODEL = "gpt-oss-20b"
 
 # ── Provider registry (per-model URL + key) ──────────────────────────────
 PROVIDERS = {
+    # Primary: FreeLLMAPI proxy → Groq (model id: openai/gpt-oss-20b)
+    "gpt-oss-20b": {
+        "base_url": FREELLMAPI_URL,
+        "api_key":  FREELLMAPI_API_KEY,
+        "provider": "groq (via FreeLLMAPI)",
+    },
+    # Legacy providers — kept available, not in active chain
+    "openai/gpt-oss-20b": {
+        "base_url": "https://api.groq.com/openai/v1/chat/completions",
+        "api_key":  GROQ_API_KEY,
+        "provider": "groq (direct)",
+    },
     "mistral-large-latest": {
         "base_url": "https://api.mistral.ai/v1/chat/completions",
         "api_key":  MISTRAL_API_KEY,
+        "provider": "mistral",
     },
     "MiniMax-M3": {
         "base_url": "https://api.tokenrouter.com/v1/chat/completions",
         "api_key":  MINIMAX_API_KEY,
+        "provider": "tokenrouter",
     },
 }
 
 def get_provider_for_model(model_name):
-    """Look up provider config for a model. Falls back to tokenrouter globals."""
+    """Look up provider config for a model. Returns None if the model's
+    specific key is missing — caller must skip that chain entry.
+    Falls back to FreeLLMAPI globals ONLY when the model isn't in PROVIDERS.
+    """
     p = PROVIDERS.get(model_name)
-    if p and p["api_key"]:
-        return p
-    return {"base_url": API_URL, "api_key": API_KEY}
+    if p is None:
+        return {"base_url": API_URL, "api_key": API_KEY}
+    if not p["api_key"]:
+        # Model IS known but its key isn't configured — signal skip
+        return None
+    return p
 
 # ── Model routing by article type ──────────────────────────────────
 def get_model_config(topic_type):
     """Model chain with fallback order.
-    Primary: mistral-large-latest (Mistral API)
-    Fallback: MiniMax-M3 (tokenrouter)
+    Primary: gpt-oss-20b (FreeLLMAPI → Groq)
+    Fallback: mistral-large-latest (Mistral API, direct)
     """
     return [
-        {"model": "mistral-large-latest", "max_tokens": 8000, "reasoning_effort": None},  # Mistral-large supports up to 8192; bumped from 5000 after truncation observed on 6-slide carousels
-        {"model": "MiniMax-M3",           "max_tokens": 8000, "reasoning_effort": None},
+        {"model": "gpt-oss-20b",         "max_tokens": 4000, "reasoning_effort": None},  # Groq: gpt-oss-20b (Groq rejects >4000 output tokens on this model — 429)
+        {"model": "mistral-large-latest","max_tokens": 8000, "reasoning_effort": None},  # Mistral API: supports up to 8192 — bumped from 4000 to avoid 6-slide carousel truncation
     ]
 
 
@@ -664,7 +693,7 @@ system_prompt = f"""Football content strategist for Threads. Output EXACTLY 6-sl
 - S2 (replies to S1): WHAT — 3-4 sentences.
 - S3 (replies to S2): TENSION — 2-4 sentences.
 - S4 (replies to S3): HUMAN — 2-4 sentences.
-- S5 (replies to S4): UNRESOLVED — 2-3 sentences.
+- S5 (replies to S4): UNRESOLVED — 3-4 sentences.
 - S6 (replies to S5): CTA — 2-4 sentences. Last line: {{url}}
 
 [PROCESS — internal only]
@@ -672,6 +701,10 @@ system_prompt = f"""Football content strategist for Threads. Output EXACTLY 6-sl
 2. NARRATIVE SPINE: HOOK → WHAT → TENSION → HUMAN → UNRESOLVED → CTA.
 3. Last sentence of slide N sets up first sentence of slide N+1.
 4. S6 callbacks S1's hook.
+
+[DEDUP — STRICT]
+- Each named person from FACT BANK appears in AT MOST ONE slide. Prefer S4 HUMAN slot.
+- Never repeat the same person in S2 + S4. If S2 names someone, S4 must use a different person (or stay source-agnostic).
 
 [SOURCE HANDLING]
 Use only article body. Ignore nav, related links, ads, bylines, boilerplate.
@@ -681,8 +714,8 @@ Use only article body. Ignore nav, related links, ads, bylines, boilerplate.
 2. WHAT (3-4, MIN 3): What happened concretely + why it matters.
 3. TENSION (2-4, MIN 2): Conflict/competing stakes. One-sided: "Article only covers [X]'s perspective."
 4. HUMAN (2-4, MIN 2): One named person, own words or reported feelings. No quote: "No direct quote from [Name]" + one sentence on situation.
-5. UNRESOLVED (2-3, MIN 2): What's left open.
-6. CTA (2-4, MIN 2): Sharp opinion + debatable yes/no question. MUST callback S1. Last line: """ + url + """
+5. UNRESOLVED (3-4, MIN 3): What's left open. One concrete conditional ("If X, then Y") + a monitoring/timing detail.
+6. CTA (2-4, MIN 2): Rhetorical yes/no question to reader. NO first-person ("I"/"we"/"my"). NO personal opinion. Implied editorial framing OK. MUST callback S1. Last line: """ + url + """
 
 [FORMAT — JSON only, no fences]
 {{"slide_1":{{"title":"HOOK","content":"..."}},"slide_2":{{"title":"WHAT","content":"..."}},"slide_3":{{"title":"TENSION","content":"..."}},"slide_4":{{"title":"HUMAN","content":"..."}},"slide_5":{{"title":"UNRESOLVED","content":"..."}},"slide_6":{{"title":"CTA","content":"..."}}}}
@@ -690,7 +723,7 @@ Use only article body. Ignore nav, related links, ads, bylines, boilerplate.
 [GROUNDING — STRICT]
 - Names, scores, dates, quotes: verbatim from article. No outside knowledge.
 - Missing detail = omit or flag. Never infer feelings.
-- S5-6 may have opinion but trace to specific stated facts.
+- S5-6 may have implicit editorial framing but must trace to specific stated facts.
 
 [REJECTION]
 Can't fill 6 slides honestly? Output: {{"error":"insufficient_source","reason":"..."}}
@@ -716,7 +749,7 @@ SENTENCE_COUNTS = {
     2: (3, 4),   # What: 3-4 sentences
     3: (2, 4),   # Tension: 2-4 sentences
     4: (2, 4),   # Human: 2-4 sentences
-    5: (2, 3),   # Unresolved: 2-3 sentences
+    5: (3, 4),   # Unresolved: 3-4 sentences (bumped from 2-3 — slide 5 was too thin)
     6: (2, 4),   # CTA: 2-4 sentences
 }
 # Hard char cap per slide (Threads API limit = 500 chars/slide).
@@ -737,6 +770,9 @@ for attempt in range(1, MAX_RETRIES + 1):
     ACTIVE_MAX_TOKENS=chain_entry["max_tokens"]
     ACTIVE_REASONING = chain_entry["reasoning_effort"]
     _provider = get_provider_for_model(ACTIVE_MODEL)
+    if _provider is None:
+        log(f"   ⚠️ No API key for {ACTIVE_MODEL} — skipping to next chain entry")
+        continue
     ACTIVE_URL = _provider["base_url"]
     ACTIVE_KEY = _provider["api_key"]
 
