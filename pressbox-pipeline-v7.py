@@ -854,8 +854,18 @@ for attempt in range(1, MAX_RETRIES + 1):
         completion_tok = usage.get("completion_tokens", 0)
         total_tok = usage.get("total_tokens", 0)
 
+        # Heuristic: ~4 chars/token for English text (standard OpenAI approximation).
+        tok_source = "api"
+        if total_tok == 0:
+            prompt_chars = len(system_prompt) + len(user_prompt)
+            completion_chars = len(content) + len(reasoning)
+            prompt_tok = prompt_chars // 4
+            completion_tok = completion_chars // 4
+            total_tok = prompt_tok + completion_tok
+            tok_source = "est"
+
         log(f"   Response: content={len(content)} chars, reasoning={len(reasoning)} chars")
-        log(f"   Tokens: prompt={prompt_tok} completion={completion_tok} total={total_tok}")
+        log(f"   Tokens: prompt={prompt_tok} completion={completion_tok} total={total_tok} ({tok_source})")
 
         # Extract JSON — content first, then reasoning (deepseek puts JSON there)
         candidate_json = ""
