@@ -13,6 +13,10 @@ Output: Markdown report + analytics_recommendations.json
 import json, os, sys, re, httpx
 from datetime import datetime, timezone, timedelta
 
+# Import shared classifier from pressbox_common — single source of truth
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from pressbox_common import classify_topic_type
+
 HOME = os.path.expanduser("~")
 TOKEN_PATH = f"{HOME}/.hermes/threads_token.json"
 ENV_PATH = f"{HOME}/.hermes/.env"
@@ -56,9 +60,9 @@ HOOK_FORMULAS = {
 }
 
 TOPIC_CATEGORIES = [
-    "WC_team_guide", "transfer_rumor", "controversy", "match_analysis",
-    "player_profile", "tournament_news", "tactical_analysis", "historical",
-    "fan_reaction", "injury_update", "schedule_info", "other"
+    "injury_update", "transfer_rumor", "managerial_change", "fifa_political",
+    "WC_team_guide", "controversy", "tactical_analysis", "match_result",
+    "player_profile", "tournament_news", "other"
 ]
 
 
@@ -139,28 +143,8 @@ def classify_hook(text):
     return "uncategorized"
 
 
-def classify_topic_type(text):
-    """Classify post topic into a category."""
-    if not text:
-        return "other"
-    lower = text.lower()
-    if any(w in lower for w in ["transfer", "signs", "signing", "move to", "bid", "contract"]):
-        return "transfer_rumor"
-    if any(w in lower for w in ["world cup", "wc", "2026", "tournament"]):
-        if any(w in lower for w in ["guide", "preview", "squad", "team guide"]):
-            return "WC_team_guide"
-        return "tournament_news"
-    if any(w in lower for w in ["controversy", "drama", "storms", "backlash", "fans react"]):
-        return "controversy"
-    if any(w in lower for w in ["analysis", "tactical", "formation", "system"]):
-        return "tactical_analysis"
-    if any(w in lower for w in ["profile", "career", "who is", "story of"]) or len(text.split()) < 30:
-        return "player_profile"
-    if any(w in lower for w in ["injury", "out for", "sidelined", "fitness"]):
-        return "injury_update"
-    if any(w in lower for w in ["match", "win", "loss", "draw", "beat", "defeat", "score"]) and len(text) > 50:
-        return "match_analysis"
-    return "other"
+# classify_topic_type is now imported from pressbox_common (single source of truth)
+# Local duplicate removed on 22 Jun 2026 — was causing skip_topics mismatch with v7 pipeline.
 
 
 def call_llm(prompt):
