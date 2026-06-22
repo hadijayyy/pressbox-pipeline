@@ -298,6 +298,10 @@ with ThreadPoolExecutor(max_workers=3) as ex:
 
 t_scrape = time.time() - t0
 log(f"   Total scraped: {len(all_topics)} topics")
+# Relax filter when scrape volume is low — prevents killing all topics
+RELAXED_FILTER = len(all_topics) < 10
+if RELAXED_FILTER:
+    log(f"   ⚠️ Low scrape volume ({len(all_topics)} < 10) — relaxing filters")
 
 if not all_topics:
     log("❌ No topics scraped — exit")
@@ -455,12 +459,15 @@ for t in all_topics:
         continue
     if url in cache_urls:
         continue
-    if is_similar(title, posted_titles, 0.35):
+    sim_threshold = 0.50 if RELAXED_FILTER else 0.35
+    if is_similar(title, posted_titles, sim_threshold):
         continue
     # Skip low-performing topics from analytics
     topic_type = classify_topic_type(title)
-    if topic_type in skip_topics:
+    if not RELAXED_FILTER and topic_type in skip_topics:
         continue
+    elif RELAXED_FILTER and topic_type in skip_topics:
+        log(f"   🔓 Relaxed skip: {topic_type} ({title[:40]})")
     # Boost topics matching recommended keywords
     if research_keywords_add:
         kw_hits = sum(1 for kw in research_keywords_add if kw.lower() in title_lower)
@@ -749,6 +756,10 @@ for attempt in range(1, MAX_RETRIES + 1):
         headers = {"Content-Type": "application/json"}
         if ACTIVE_KEY:
             headers["Authorization"] = f"Bearer {ACTIVE_KEY}"
+        # Defensive: strip reasoning_content from assistant msgs (Mistral rejects extra fields, HTTP 422)
+        for _m in payload.get("messages", []):
+            _m.pop("reasoning_content", None)
+
         r = requests.post(
             ACTIVE_URL,
             headers=headers,
