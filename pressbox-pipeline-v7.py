@@ -95,8 +95,8 @@ def get_model_config(topic_type):
     Fallback: mistral-large-latest (Mistral API, direct)
     """
     return [
-        {"model": "gpt-oss-20b",         "max_tokens": 4000, "reasoning_effort": None},  # Groq: gpt-oss-20b (Groq rejects >4000 output tokens on this model — 429)
         {"model": "mistral-large-latest","max_tokens": 8000, "reasoning_effort": None},  # Mistral API: supports up to 8192 — bumped from 4000 to avoid 6-slide carousel truncation
+        {"model": "gpt-oss-20b",         "max_tokens": 4000, "reasoning_effort": None},  # Groq: gpt-oss-20b (Groq rejects >4000 output tokens on this model — 429)
     ]
 
 
