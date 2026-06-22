@@ -452,7 +452,12 @@ for t in all_topics:
         "discrimination", "slavery", "slave trade", "apartheid",
         "ethnic tension", "tribal clash", "clan violence",
     ]
-    if any(kw in title_lower or kw in desc_lower for kw in sensitive_kw):
+    def _sensitive_match(kw, text):
+        # Word-boundary for "strip" to avoid false positives: "striped kit", "strips"
+        if kw == "strip":
+            return bool(re.search(r'\bstrip\b', text))
+        return kw in text
+    if any(_sensitive_match(kw, title_lower) or _sensitive_match(kw, desc_lower) for kw in sensitive_kw):
         log(f"   🚫 Sensitive content skipped: {title[:50]}")
         continue
     if url in posted_urls:

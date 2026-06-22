@@ -138,6 +138,8 @@ def is_similar(new_title, posted_ws, threshold=0.35):
 _INJURY_KW  = {"injury", "injured", "sidelined", "fitness", "out for", "ruled out"}
 _TRANSFER_KW = {"transfer", "signs", "signing", "sign", "move to", "bid", "contract",
                 "offer", "fee", "€", "£", "million", "deal"}
+_MANAGERIAL_KW = {"sacked", "fired", "appointed", "dismissed", "replaces",
+                  "manager", "head coach", "coaching change", "new boss"}
 _POLITICAL_KW = {"ban", "banned", "banne", "protest", "visa", "travel",
                  "trump", "government", "policy", "staff denied", "oppressed",
                  "u-turn", "backlash", "boo", "booed", "complaint", "fifa",
@@ -145,7 +147,9 @@ _POLITICAL_KW = {"ban", "banned", "banne", "protest", "visa", "travel",
 _GUIDE_KW = {"guide", "preview", "squad", "team guide", "lineup", "predicted"}
 _CONTROVERSY_KW = {"controversy", "scandal", "racism", "racist", "abuse",
                    "hate symbol", "var official"}
-_TACTICAL_KW = {"tactical", "formation", "system", "analysis", "pressing"}
+_TACTICAL_KW = {"tactical", "formation", "system", "analysis", "pressing",
+                "var", "red card", "yellow card", "penalty", "penalties",
+                "offside", "referee", "officials"}
 _MATCH_KW = {"win", "wins", "beat", "defeat", "victory", "score", "goal",
              "result", "draw", "draws", "lost", "loses", "beat"}
 _PROFILE_KW = {"profile", "career", "who is", "story of", "rise of", "biography"}
@@ -155,8 +159,8 @@ def classify_topic_type(text):
     """Classify a topic string into a category.
 
     Priority order matters — more specific matches go first.
-    Categories: injury_update, transfer_rumor, fifa_political, WC_team_guide,
-    controversy, tactical_analysis, match_result, player_profile,
+    Categories: injury_update, transfer_rumor, managerial_change, fifa_political,
+    WC_team_guide, controversy, tactical_analysis, match_result, player_profile,
     tournament_news, other.
     """
     if not text:
@@ -172,7 +176,11 @@ def classify_topic_type(text):
     if any(w in lower for w in _TRANSFER_KW):
         return "transfer_rumor"
 
-    # 3. FIFA / political controversy (World Cup + political keywords)
+    # 3. Managerial change (specific — sacking/appointment)
+    if any(w in lower for w in _MANAGERIAL_KW):
+        return "managerial_change"
+
+    # 4. FIFA / political controversy (World Cup + political keywords)
     if is_wc and any(w in lower for w in _POLITICAL_KW):
         return "fifa_political"
 
