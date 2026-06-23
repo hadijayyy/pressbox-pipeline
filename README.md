@@ -4,6 +4,13 @@
 
 Press Box is a fully automated content pipeline that scrapes football news (Mirror, Sky Sports, Goal.com), generates 6-slide threads via LLM (Mistral primary → gpt-oss-20b fallback via FreeLLMAPI proxy), and posts them to Threads with relevant images — completely unattended. A three‑layer safety net (pre‑flight syntax check, health check, auto‑fix) keeps it running hands‑off.
 
+## 🛡️ Ops Features
+
+- **🛡️ Pre‑flight syntax check** — `py_compile` every script 2 min before the pipeline runs; alerts and blocks broken code
+- **🩺 Health check** — scans latest output of every cron; silent on success, alerts on failure
+- **🔧 Auto‑fix (safe cases)** — re‑runs pipeline for transient failures (timeout, stale staging, empty LLM); re‑runs analytics‑LLM with a 300 s budget on 120 s timeouts; writes success markers so the health check goes quiet
+- **🔌 Circuit breaker** — per‑job CLOSED / HALF‑OPEN / OPEN state via `pressbox-cb-run.sh` + `hermes_circuit_breaker.py`; prevents notification spam on repeated failures
+
 ## ⚡ Performance
 
 | Metric | v6.0 | v7.2 | v7.3 | Improvement (v7.3 vs v6.0) |
@@ -44,6 +51,7 @@ Press Box is a fully automated content pipeline that scrapes football news (Mirr
 - **🛡️ Pre‑flight syntax check** — `py_compile` every script 2 min before the pipeline runs; alerts and blocks broken code
 - **🩺 Health check** — scans latest output of every cron; silent on success, alerts on failure
 - **🔧 Auto‑fix (safe cases)** — re‑runs pipeline for transient failures (timeout, stale staging, empty LLM); re‑runs analytics‑LLM with a 300 s budget on 120 s timeouts; writes success markers so the health check goes quiet
+- **🔌 Circuit breaker** — per‑job CLOSED / HALF‑OPEN / OPEN state via `pressbox-cb-run.sh` + `hermes_circuit_breaker.py`; prevents notification spam on repeated failures
 
 ## 🏗 Architecture
 ## 🏗 Architecture
@@ -85,7 +93,7 @@ Press Box is a fully automated content pipeline that scrapes football news (Mirr
 | `:05` | `pressbox-health-check.py` | chat (silent on success) | Verify pipeline ran cleanly |
 | `:10` | `pressbox-autofix.py` | chat (silent on success) | Re‑run pipeline for safe failures |
 | `:15` | `pressbox-check-staging.py` | chat | Verify/recover staging |
-| `:30` | `pressbox-post.py` | chat | Post to Threads |
+| `:30` | `pressbox-post.py` | chat | Post to Threads (via `cron-wrappers/cb-783c6bf97144.sh`) |
 | `:35` | `pressbox-health-check.py` | chat (silent on success) | Verify post ran cleanly |
 | `:40` | `pressbox-autofix.py` | chat (silent on success) | Re‑run pipeline if post failed |
 | `:58` | `pressbox-preflight.py` | chat (silent on success) | `py_compile` all scripts before next hour |
@@ -161,6 +169,12 @@ THREADS_USER_ID=your_threads_user_id
 | `pressbox-check-staging.py` | Recovery job — runs pipeline if staging is empty |
 | `pressbox-post.py` | Post manager — reads staging, calls direct-post, updates tracking |
 | `pressbox-direct-post.py` | Low-level Threads Graph API client — IMAGE/TEXT container creation |
+| `pressbox-preflight.py` | `py_compile` every script 2 min before pipeline (cron `:58`) |
+| `pressbox-health-check.py` | Silent on success, alerts on failure (cron `:05`, `:35`) |
+| `pressbox-autofix.py` | Re‑runs pipeline for safe failures + handles analytics‑LLM timeout (cron `:10`, `:40`) |
+| `pressbox-cb-run.sh` | Circuit‑breaker runner — gates cron with CLOSED/HALF‑OPEN/OPEN state |
+| `hermes_circuit_breaker.py` | Per‑job state persistence (`~/.hermes/scripts/.circuit_breaker.json`) |
+| `cron-wrappers/cb-*.sh` | Per‑cron wrappers that delegate to `pressbox-cb-run.sh` |
 | `pressbox-analytics-feedback.py` | Daily analytics — topic boosts, best/worst hours |
 | `pressbox-analytics-llm.py` | LLM deep analysis — hooks, CTA, topic recommendations |
 
