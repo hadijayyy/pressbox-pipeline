@@ -71,11 +71,11 @@ SCRIPT_STDOUT=$(python3 -u "$SCRIPT" "${ARGS[@]}" 2>&1)
 RUN_EXIT=$?
 set -e
 
-# Forward to topic 20467 (if non-empty)
+# Forward summary to topic 20467 (if non-empty)
 FORWARDER="/home/ubuntu/.hermes/scripts/telegram-topic-send.py"
 if [[ -n "$SCRIPT_STDOUT" && -f "$FORWARDER" ]]; then
-    HEADER="📋 ${SCRIPT} ($(date +%H:%M))"
-    printf "%s\n\n%s" "$HEADER" "$SCRIPT_STDOUT" | python3 "$FORWARDER" 2>/dev/null || true
+    HEADER="${SCRIPT} ($(date +%H:%M))"
+    printf "%s\n%s" "$HEADER" "$SCRIPT_STDOUT" | python3 "$FORWARDER" --summary 2>/dev/null || true
 fi
 
 END_TS=$(date +%s)
