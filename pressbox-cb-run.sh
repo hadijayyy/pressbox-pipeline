@@ -67,8 +67,8 @@ cd "$WORKDIR" || { echo "❌ cannot cd to $WORKDIR"; exit 1; }
 
 # Capture exit code without aborting on failure
 set +e
-python3 "$SCRIPT" "${ARGS[@]}" 2>&1 | tee /tmp/last-cb-stderr.log >/dev/null
-RUN_EXIT=${PIPESTATUS[0]}
+python3 -u "$SCRIPT" "${ARGS[@]}"
+RUN_EXIT=$?
 set -e
 
 END_TS=$(date +%s)
