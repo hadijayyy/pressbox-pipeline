@@ -43,6 +43,7 @@ FREELLMAPI_URL = FREELLMAPI_URL + "/chat/completions"
 GROQ_API_KEY = env_config.get("GROQ_API_KEY", "")
 GITHUB_TOKEN = env_config.get("GITHUB_TOKEN", "")
 MISTRAL_API_KEY = env_config.get("MISTRAL_API_KEY", "")
+VIKEY_API_KEY = env_config.get("VIKEY_API_KEY", "") or "vk-7e2a06ab-3ff2-4a04-a136-1c2f83cc876d"
 MINIMAX_API_KEY = env_config.get("MINIMAX_API_KEY") or env_config.get("OPENCODE_GO_API_KEY", "")
 # Legacy globals (some legacy callers may still reference these)
 API_KEY = FREELLMAPI_API_KEY or GROQ_API_KEY or GITHUB_TOKEN or MINIMAX_API_KEY
@@ -73,6 +74,11 @@ PROVIDERS = {
         "api_key":  MINIMAX_API_KEY,
         "provider": "tokenrouter",
     },
+    "vikey/vclaw": {
+        "base_url": "http://api.vikey.ai/v1/chat/completions",
+        "api_key":  VIKEY_API_KEY,
+        "provider": "vikey",
+    },
 }
 
 def get_provider_for_model(model_name):
@@ -91,11 +97,13 @@ def get_provider_for_model(model_name):
 # ── Model routing by article type ──────────────────────────────────
 def get_model_config(topic_type):
     """Model chain with fallback order.
-    Primary: gpt-oss-20b (FreeLLMAPI → Groq)
-    Fallback: mistral-large-latest (Mistral API, direct)
+    Primary: mistral-large-latest (Mistral API, direct)
+    Fallback 1: vikey/vclaw (Vikey API)
+    Fallback 2: gpt-oss-20b (FreeLLMAPI → Groq)
     """
     return [
         {"model": "mistral-large-latest","max_tokens": 8000, "reasoning_effort": None},  # Mistral API: supports up to 8192 — bumped from 4000 to avoid 6-slide carousel truncation
+        {"model": "vikey/vclaw",         "max_tokens": 4000, "reasoning_effort": None},  # Vikey: vclaw (api.vikey.ai)
         {"model": "gpt-oss-20b",         "max_tokens": 4000, "reasoning_effort": None},  # Groq: gpt-oss-20b (Groq rejects >4000 output tokens on this model — 429)
     ]
 
