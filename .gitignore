@@ -6,3 +6,5 @@ __pycache__/
 *.log
 .DS_Store
 *.bak.*
+# Circuit breaker live state (lives in /tmp/hermes-cb/)
+# Don't commit runtime state files
