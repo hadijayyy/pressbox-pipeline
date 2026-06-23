@@ -167,10 +167,15 @@ def score_topic(t):
     drama = {"secret", "hidden", "exposed", "shocking", "epic", "comeback", "revenge"}
     if any(kw in tl for kw in drama):
         s += 20
+    # Hard skip: quiz/preview/lineup content — never publish
+    hard_skip = {"quiz", "play quiz", "how much", "quiz -", "lineup", "predicted", "preview"}
+    if any(kw in tl for kw in hard_skip):
+        s = -999  # Force skip
+        return s
     # Boring keywords
-    boring = {"quiz", "lineup", "live updates", "preview", "analysis", "opinion"}
+    boring = {"quiz", "lineup", "live updates", "preview", "analysis", "opinion", "play quiz", "how much", "quiz -"}
     if any(kw in tl for kw in boring):
-        s -= 15
+        s -= 50  # Heavy penalty — quiz/preview content kills engagement
     # Title length
     wc = len(title.split())
     if wc <= 8:
@@ -192,6 +197,22 @@ def score_topic(t):
     if topic_type in topic_boosts:
         multiplier = topic_boosts[topic_type]
         s = int(s * multiplier)
+    # Compound topic bonus: world_cup + fifa_political together
+    tl = title.lower()
+    has_wc = any(w in tl for w in ["world cup", "wc", "2026", "tournament"])
+    has_political = any(w in tl for w in ["ban", "banned", "protest", "visa", "trump", "government", "boo", "booed", "iran", "political", "sanction"])
+    if has_wc and has_political:
+        s += 10  # Geopolitics + sport compound bonus
+    # Concrete event bonus: stories with specific actions (denied, banned, etc.)
+    concrete_events = {"denied", "banned", "ruled out", "arrested", "suspended", "injured", "cleared", "fined", "charged", "deported", "refused", "blocked", "barred", "rejected", "disqualified", "sent off", "red card", "miss out"}
+    # Generic transfer rumor penalty: vague phrasing
+    generic_rumors = {"interested in", "considering", "monitoring", "approach", "enquire", "eyeing", "tracking", "scouting", "could sign", "may sign", "set to sign", "close to signing", "in talks", "mulling", "weighing up", "asked to leave", "wants to leave", "wants out", "push for exit", "push for a move", "considering a move", "considering a transfer", "considering a bid", "considering an offer"}
+    # Combine title and description for matching
+    text_blob = (title + " " + t.get("description", "")).lower()
+    if any(kw in text_blob for kw in concrete_events):
+        s += 15
+    if any(kw in text_blob for kw in generic_rumors):
+        s -= 10
     # Keyword boost from recommendations
     s += t.get("_kw_boost", 0)
     return s
@@ -216,6 +237,34 @@ def check_image_accessible(url):
         return (last_status == 200, last_status)
     except Exception:
         return (False, 0)
+
+# ── Image scoring (preference) ────────────────────────────────────
+def score_image(url, width, height):
+    """Score an image candidate for player-photo preference.
+    Higher score = more likely to be a player photo (not article screenshot).
+    Returns int score; -1 if url is empty.
+    """
+    if not url:
+        return -1
+    score = 0
+    # Prefer larger images
+    if width and height:
+        area = width * height
+        score += min(area / 10000, 50)  # up to 50 points for area
+        # Prefer portrait orientation (likely player photo)
+        if height > width:
+            score += 30
+        elif width > height * 1.5:
+            score -= 10  # landscape might be article screenshot
+    # Prefer URLs with player/headshot keywords
+    player_kw = ["player", "headshot", "portrait", "face", "salah", "kane", "mbappe", "foden", "saka", "rashford", "grealish", "bellingham", "haaland", "vinicius", "rodri"]
+    if any(kw in url.lower() for kw in player_kw):
+        score += 40
+    # Penalize article screenshot patterns
+    article_kw = ["screenshot", "article", "news", "story", "thumbnail", "crop", "banner", "header"]
+    if any(kw in url.lower() for kw in article_kw):
+        score -= 30
+    return score
 
 # ── Image quality gate ─────────────────────────────────────────────
 def validate_image_quality(url):
@@ -569,7 +618,7 @@ else:
     article_text = re.sub(r"\s+", " ", article_text).strip()
     article_text = html_mod.unescape(article_text)
 
-    # Extract og:image
+    # Extract images: collect candidates and pick best based on player-photo preference
     image_url = ""
     image_width = 0
     image_height = 0
@@ -578,6 +627,9 @@ else:
         blocked = ["guim.co.uk", "guardian.co.uk"]
         return not any(b in url.lower() for b in blocked)
 
+    candidates = []  # (url, w, h, source)
+
+    # Source 1: og:image / twitter:image
     for pattern in [
         r'<meta\s+property="og:image"\s+content="([^"]+)"',
         r'<meta\s+name="og:image"\s+content="([^"]+)"',
@@ -594,45 +646,39 @@ else:
                 if accessible:
                     is_valid, w, h = validate_image_quality(candidate)
                     if is_valid:
-                        image_url = candidate
-                        image_width = w
-                        image_height = h
-                        log(f"   ✅ OG image: {w}x{h}")
-                        break
+                        candidates.append((candidate, w, h, "og"))
             except Exception as e:
-                log(f"   ⚠️ Image check failed: {e}")
+                log(f"   ⚠️ OG image check failed: {e}")
 
-    # Fallback 1: body image
-    if not image_url:
-        body_img = extract_body_image(raw_html)
-        if body_img and is_threads_compatible(body_img):
-            try:
-                accessible, status = check_image_accessible(body_img)
-                if accessible:
-                    is_valid, w, h = validate_image_quality(body_img)
-                    if is_valid:
-                        image_url = body_img
-                        image_width = w
-                        image_height = h
-                        log(f"   ✅ Body image: {w}x{h}")
-            except Exception as e:
-                log(f"   ⚠️ Image check failed: {e}")
+    # Source 2: body image
+    body_img = extract_body_image(raw_html)
+    if body_img and is_threads_compatible(body_img):
+        try:
+            accessible, status = check_image_accessible(body_img)
+            if accessible:
+                is_valid, w, h = validate_image_quality(body_img)
+                if is_valid:
+                    candidates.append((body_img, w, h, "body"))
+        except Exception as e:
+            log(f"   ⚠️ Body image check failed: {e}")
 
-    # Fallback 2: RSS image
-    if not image_url:
-        candidate = best.get("image_url", "") or ""
-        if candidate and is_threads_compatible(candidate):
-            try:
-                accessible, status = check_image_accessible(candidate)
-                if accessible:
-                    is_valid, w, h = validate_image_quality(candidate)
-                    if is_valid:
-                        image_url = candidate
-                        image_width = w
-                        image_height = h
-                        log(f"   ✅ RSS image: {w}x{h}")
-            except Exception as e:
-                log(f"   ⚠️ Image check failed: {e}")
+    # Source 3: RSS image
+    rss_candidate = best.get("image_url", "") or ""
+    if rss_candidate and is_threads_compatible(rss_candidate):
+        try:
+            accessible, status = check_image_accessible(rss_candidate)
+            if accessible:
+                is_valid, w, h = validate_image_quality(rss_candidate)
+                if is_valid:
+                    candidates.append((rss_candidate, w, h, "rss"))
+        except Exception as e:
+            log(f"   ⚠️ RSS image check failed: {e}")
+
+    # Pick best candidate using score_image (prefers player photos)
+    if candidates:
+        best_candidate = max(candidates, key=lambda c: score_image(c[0], c[1], c[2]))
+        image_url, image_width, image_height, source = best_candidate
+        log(f"   ✅ {source} image: {image_width}x{image_height}")
 
     # Cache article for next run
     article_cache[url] = {"text": article_text, "image": image_url, "w": image_width, "h": image_height, "ts": time.time()}
@@ -710,8 +756,16 @@ system_prompt = f"""Football content strategist for Threads. Output EXACTLY 6-sl
 Use only article body. Ignore nav, related links, ads, bylines, boilerplate.
 
 [SLIDES — MIN sentence counts]
-1. HOOK (1-3, MIN 1): Most controversial/surprising/paradoxical fact. End with tension.
-2. WHAT (3-4, MIN 3): What happened concretely + why it matters.
+1. HOOK (1-3, MIN 1): NO context preamble ("In a recent match...", "During the World Cup..."). Start with the paradox/truth directly. First sentence must be a standalone scroll-stopper.
+   HOOK PRIORITY (order matters):
+   (a) PARADOX: "X happened despite Y" / "X was forced to do the opposite of what X expected"
+   (b) CONCRETE EVENT: A specific action that just happened (denied, banned, ruled out, arrested, suspended) that creates a strong narrative.
+   (c) BETRAYAL: Person/institution broke a promise or rule
+   (d) SHOCK: Unexpected outcome that defies common sense
+   (e) NUMBERS: Stat that reframes the story
+   If no paradox exists in the article, skip to (b) or (c). Never force paradox from unrelated facts.
+   End with tension.
+2. WHAT (2-4, MIN 2): What happened concretely + why it matters.
 3. TENSION (2-4, MIN 2): Conflict/competing stakes. One-sided: "Article only covers [X]'s perspective."
 4. HUMAN (2-4, MIN 2): One named person, own words or reported feelings. No quote: "No direct quote from [Name]" + one sentence on situation.
 5. UNRESOLVED (3-4, MIN 3): What's left open. One concrete conditional ("If X, then Y") + a monitoring/timing detail.
@@ -726,11 +780,19 @@ Use only article body. Ignore nav, related links, ads, bylines, boilerplate.
 - S5-6 may have implicit editorial framing but must trace to specific stated facts.
 
 [REJECTION]
-Can't fill 6 slides honestly? Output: {{"error":"insufficient_source","reason":"..."}}
+Can't fill 6 slides honestly? Output: {{"error":"insufficient_source","reason":"..."}}}
+
+[HOOK QUALITY GATE - MANDATORY]
+S1 must contain AT LEAST:
+- One PROPER NOUN: person name, team name, or country name
+- One CONCRETE DETAIL: score, timeline (hours/days), amount (money/fans), or specific event
+If S1 is vague ("a manager", "the team", "a star") or lacks specific identifiers, REJECT.
+Output: {{"error":"vague_hook","reason":"S1 lacks proper noun or concrete detail"}}
 
 [STYLE]
 - Conversational plain English. One idea per sentence, each followed by \\n\\n.
 - No em-dash (—), no hashtags, no bullets, no ALL CAPS, no AI throat-clearing.
+- Each sentence must pass the "text message test": if you text it alone, does it make sense? No compound sentences with "and", "but", "while" connecting two independent clauses.
 - Indonesian articles: keep names original, write content in English."""
 
 user_prompt = f"ARTICLE: {article_text}\n[Note: article may be truncated. Use only what is provided above.]\nSOURCE: {url}"
@@ -746,7 +808,7 @@ MAX_RETRIES = 3
 # Sentence count targets per slide (min, max) — 6-slide format
 SENTENCE_COUNTS = {
     1: (1, 3),   # Hook: 1-3 sentences (sharp single sentence OK)
-    2: (3, 4),   # What: 3-4 sentences
+    2: (2, 4),   # What: 2-4 sentences
     3: (2, 4),   # Tension: 2-4 sentences
     4: (2, 4),   # Human: 2-4 sentences
     5: (3, 4),   # Unresolved: 3-4 sentences (bumped from 2-3 — slide 5 was too thin)
@@ -805,7 +867,7 @@ for attempt in range(1, MAX_RETRIES + 1):
             ACTIVE_URL,
             headers=headers,
             json=payload,
-            timeout=180,
+            timeout=60,  # Reduced from 180s — fail fast, fall through to next model
             stream=True,
         )
         if r.status_code != 200:
@@ -1067,6 +1129,12 @@ except json.JSONDecodeError as e:
 slides = []
 MAX_SLIDES = 6
 
+# Handle error response from LLM (insufficient_source / vague_hook)
+if "error" in slides_data and "reason" in slides_data:
+    err_type = slides_data.get("error", "unknown")
+    log(f"⚠️ LLM rejected article ({err_type}): {slides_data.get('reason', 'unknown')}")
+    sys.exit(1)
+
 # Handle both formats: {"slide_1": {...}} and {"slides": [...]}
 if "slides" in slides_data and isinstance(slides_data["slides"], list):
     for i, s in enumerate(slides_data["slides"]):
@@ -1100,9 +1168,14 @@ else:
         title = (slide.get("title") or "").strip()
         slide_content = (slide.get("content") or "").strip()
         if not title or not slide_content:
-            log(f"❌ {key} missing title or content")
-            sys.exit(1)
+            log(f"⚠️ {key} empty — skipping slide")
+            continue  # Skip empty slides instead of crashing
         slides.append({"title": title, "content": slide_content})
+
+# Check minimum slides
+if len(slides) < 3:
+    log(f"❌ Only {len(slides)} valid slides — skipping article")
+    sys.exit(1)
 
 # Truncate to MAX_SLIDES (model sometimes generates extra empty slides)
 if len(slides) > MAX_SLIDES:

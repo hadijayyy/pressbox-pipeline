@@ -2,7 +2,7 @@
 
 **Auto-publish football news threads to Threads (@parkthebus.football)**
 
-Press Box is a fully automated content pipeline that scrapes football news (Mirror, Sky Sports, Goal.com), generates 6-slide threads via LLM (Mistral primary → MiniMax-M3 fallback via tokenrouter), and posts them to Threads with relevant images — completely unattended.
+Press Box is a fully automated content pipeline that scrapes football news (Mirror, Sky Sports, Goal.com), generates 6-slide threads via LLM (Mistral primary → gpt-oss-20b fallback via FreeLLMAPI proxy), and posts them to Threads with relevant images — completely unattended. A three‑layer safety net (pre‑flight syntax check, health check, auto‑fix) keeps it running hands‑off.
 
 ## ⚡ Performance
 
@@ -27,35 +27,52 @@ Press Box is a fully automated content pipeline that scrapes football news (Mirr
 - **Sensitive filter with word-boundary** — `strip` only matches as a standalone word (avoids "striped kit" false positives)
 - **LLM-generated threads** — 6 slides with sentence-count blueprints and strict grounding rules
 - **Sentence-count validation** — replaces char-count, ensures consistent slide density
-- **3-level image fallback** — og:image → article body `<img>` → RSS image
+- **Concrete‑event scoring** — `+15` when title/description contains *denied, banned, ruled out, arrested, suspended, injured, cleared, fined, charged, deported, refused, blocked, barred, rejected, disqualified, sent off, red card, miss out* (lessons from the Salah 337K vs Kane 137K A/B test)
+- **Generic‑rumor penalty** — `‑10` for vague transfer phrasing (*interested in, considering, monitoring, approach, enquire, eyeing, tracking, scouting, could sign, may sign, set to sign, close to signing, in talks, mulling, weighing up, asked to leave, wants to leave, wants out, push for exit*)
+- **Player‑photo image preference** — collects all image candidates (og:image, body `<img>`, RSS) and picks the one most likely to be a player photo (portrait orientation, area, URL keywords like *player / headshot / salah / kane / mbappe*)
+- **3-level image fallback** — og:image → article body `<img>` → RSS image, with HEAD validation on every URL
 - **Image validation** — HEAD request checks every image URL before use
 - **Content filtering** — skips women's football (title, description, URL), TV guides
 - **Strategy 2 JSON extraction** — score-based fallback for reasoning-heavy responses
+- **Hook priority** — PARADOX → **CONCRETE EVENT** → BETRAYAL → SHOCK → NUMBERS, with mandatory proper‑noun + concrete‑detail gate
 - **Analytics feedback** — daily engagement analysis tunes posting hours
 - **Atomic staging** — tmp + os.replace prevents corruption
 - **Staging delete on post** — `os.remove()` after successful post (no 35-byte stub left behind)
 - **Real permalink fetch** — alphanumeric shortcode via `/v1.0/{id}?fields=permalink` API
 - **Auto-recovery** — `:15` check-staging runs pipeline if staging is empty
-- **Cron notifications** — all 3 cron jobs notify chat on success and failure
+- **Cron notifications** — all cron jobs notify chat on success and failure
+- **🛡️ Pre‑flight syntax check** — `py_compile` every script 2 min before the pipeline runs; alerts and blocks broken code
+- **🩺 Health check** — scans latest output of every cron; silent on success, alerts on failure
+- **🔧 Auto‑fix (safe cases)** — re‑runs pipeline for transient failures (timeout, stale staging, empty LLM); re‑runs analytics‑LLM with a 300 s budget on 120 s timeouts; writes success markers so the health check goes quiet
 
 ## 🏗 Architecture
 ## 🏗 Architecture
 ```
+:58 Pre-flight ──► py_compile all scripts
+                    └── alert if syntax error (no further crons run until fixed)
+
 :00 Pipeline ──► scrape (Mirror + Sky Sports + Goal.com)
                   ├── filter (dedup, similarity 35%/50%-relaxed, freshness, women's football)
                   │   └── RELAXED_FILTER when len(all_topics) < 10 (loosen dedup + skip analytics)
-                  ├── score (WC boost +50, viral +25)
-                  ├── extract (article text + 3-level image fallback)
-                  ├── LLM generate (Mistral primary → MiniMax-M3 fallback, v7.3 anti-hallucination prompt)
+                  ├── score (WC +50, viral +25, concrete‑event +15, generic‑rumor ‑10)
+                  ├── extract (article text + score_image() picks player‑photo from candidates)
+                  ├── LLM generate (Mistral primary → gpt-oss-20b fallback via FreeLLMAPI, v7.4 prompt)
                   ├── validate (sentence count per slide, auto-trim if over)
                   └── stage (~/.hermes/pressbox/staging.json)
+
+:05 / :35 Health check ──► scan latest output of every cron
+                              └── silent on success · alert on failure
+
+:10 / :40 Auto-fix ──► re-run pipeline for safe failures (timeout, stale, empty LLM)
+                        re-run analytics-llm with 300s budget on 120s timeout
+                        └── write success marker so health check goes quiet
 
 :15 Check Staging ──► if staging empty → auto-run pipeline
                        └── notify chat (success or failure)
 
 :30 Post ──► read staging → post to Threads (slide-by-slide)
               ├── verify ≥ 4 slides posted (auto-delete partial)
-              ├── fetch real permalink via /v1.0/{id}?fields=permalink
+              ├── fetch real permalink via /v1.0/{root_id}?fields=permalink
               ├── delete staging file (no stub left behind)
               └── notify chat with link + title
 ```
@@ -65,10 +82,15 @@ Press Box is a fully automated content pipeline that scrapes football news (Mirr
 | Time | Script | Deliver | Purpose |
 |------|--------|---------|---------|
 | `:00` | `pressbox-pipeline-v7.py` | chat | Pipeline generate |
+| `:05` | `pressbox-health-check.py` | chat (silent on success) | Verify pipeline ran cleanly |
+| `:10` | `pressbox-autofix.py` | chat (silent on success) | Re‑run pipeline for safe failures |
 | `:15` | `pressbox-check-staging.py` | chat | Verify/recover staging |
 | `:30` | `pressbox-post.py` | chat | Post to Threads |
+| `:35` | `pressbox-health-check.py` | chat (silent on success) | Verify post ran cleanly |
+| `:40` | `pressbox-autofix.py` | chat (silent on success) | Re‑run pipeline if post failed |
+| `:58` | `pressbox-preflight.py` | chat (silent on success) | `py_compile` all scripts before next hour |
 | `23:00` | `pressbox-analytics-feedback.py` | local | Daily analytics |
-| `23:00` | `pressbox-analytics-llm.py` | local | LLM deep analysis |
+| `23:22` | `pressbox-analytics-llm.py` | local | LLM deep analysis |
 
 ### Flow per hour
 
@@ -150,14 +172,15 @@ pressbox-pipeline-v7.py:
   2. Filter candidates (URL dedup, Jaccard similarity 35% normal / 50% relaxed, 30-min cache, women's football)
      - RELAXED_FILTER auto-engages when scrape yields < 10 topics — loosens dedup
        and bypasses skip_topics so low-volume hours still produce content
-  3. Score with WC boost (+50), viral keywords (+25)
+  3. Score with WC boost (+50), viral keywords (+25), **concrete‑event bonus (+15)**, **generic‑rumor penalty (‑10)**
   4. Pick best candidate
   5. Extract article text via curl (with 30-min cache)
-  6. Extract article image:
+  6. Extract article image (collect all candidates, `score_image()` picks the most player‑photo‑like):
      a. og:image meta tag → HEAD validate
      b. Article body <img> (first content image) → HEAD validate
      c. RSS image URL → HEAD validate
-  7. LLM generate 6-slide JSON (Mistral primary → MiniMax-M3 fallback, v7.3 anti-hallucination prompt)
+     d. `score_image()` ranks by area + portrait orientation + URL keywords (*player / headshot / salah / kane / mbappe …*)
+  7. LLM generate 6-slide JSON (Mistral primary → gpt-oss-20b fallback, v7.4 anti-hallucination prompt)
      - {url} injected into system prompt via .replace() before LLM call
      - Auto-trim over-sentence slides (cuts to SENTENCE_COUNTS max, no reject)
      - Post-parse URL append on slide 6 (bulletproof, regardless of model behavior)
@@ -199,7 +222,7 @@ pressbox-post.py:
 | 10 | `tournament_news` | (WC) general — default for WC headlines |
 | 11 | `other` | fallback |
 
-### LLM Prompt (v7.3)
+### LLM Prompt (v7.4)
 
 Anti-hallucination strict grounding with per-slide fallbacks:
 
@@ -239,7 +262,7 @@ Key rules:
 - `{url}` in slide_6 replaced before LLM call via `system_prompt.replace("{url}", url)`
 - Post-parse URL append as bulletproof backstop
 
-See [`prompts/pressbox-prompt-v7.3.md`](prompts/pressbox-prompt-v7.3.md) for the full system prompt.
+See [`prompts/prompt-generate-v7.4.md`](prompts/prompt-generate-v7.4.md) for the full system prompt.
 
 ## 🖼️ Image Support
 
