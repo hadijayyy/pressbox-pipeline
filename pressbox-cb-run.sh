@@ -65,11 +65,18 @@ echo "▶ Circuit $ALLOW_OUT — running $SCRIPT"
 START_TS=$(date +%s)
 cd "$WORKDIR" || { echo "❌ cannot cd to $WORKDIR"; exit 1; }
 
-# Capture exit code without aborting on failure
+# Capture stdout + exit code
 set +e
-python3 -u "$SCRIPT" "${ARGS[@]}"
+SCRIPT_STDOUT=$(python3 -u "$SCRIPT" "${ARGS[@]}" 2>&1)
 RUN_EXIT=$?
 set -e
+
+# Forward to topic 20467 (if non-empty)
+FORWARDER="/home/ubuntu/.hermes/scripts/telegram-topic-send.py"
+if [[ -n "$SCRIPT_STDOUT" && -f "$FORWARDER" ]]; then
+    HEADER="📋 ${SCRIPT} ($(date +%H:%M))"
+    printf "%s\n\n%s" "$HEADER" "$SCRIPT_STDOUT" | python3 "$FORWARDER" 2>/dev/null || true
+fi
 
 END_TS=$(date +%s)
 DURATION=$((END_TS - START_TS))
