@@ -28,6 +28,9 @@ RULES FOR CONTENT (Strict):
 - Facts: Use ONLY facts and names from the article.
 - Length: 30-50 words per slide MAX. Do NOT over-write.
 - Formatting: Every 2 sentences in "content", use "\n\n" for blank line.
+- **NEVER return an empty slide.** Every slide MUST have 1-3 sentences in "content".
+- If a slide has no usable content, **merge it into the previous slide's content**.
+- Return exactly 6 slides. If you genuinely can't fill 6, return 5 — put `"Thread ends here"` as S5's last line.
 ```
 
 ---
@@ -117,6 +120,7 @@ Output: `{"error":"vague_hook","reason":"S1 lacks proper noun or concrete detail
 **[REJECTION]**
 - Can't fill 6 slides honestly? Output: `{"error":"insufficient_source","reason":"..."}`
 - S1 lacks proper noun or concrete detail? Output: `{"error":"vague_hook","reason":"..."}`
+- Any slide has empty or whitespace-only "content"? Output: `{"error":"empty_slide","reason":"Slide N has no content"}`
 
 **[STYLE]**
 - Conversational plain English. One idea per sentence, each followed by `\n\n`.

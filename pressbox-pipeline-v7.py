@@ -781,6 +781,12 @@ Use only article body. Ignore nav, related links, ads, bylines, boilerplate.
 
 [REJECTION]
 Can't fill 6 slides honestly? Output: {{"error":"insufficient_source","reason":"..."}}}
+Any slide has empty or whitespace-only "content"? Output: {{"error":"empty_slide","reason":"Slide N has no content"}}
+
+[ANTI-EMPTY-SLIDE — MANDATORY]
+- NEVER return an empty slide. Every slide MUST have 1-3 sentences in "content".
+- If a slide has no usable content, merge it into the previous slide.
+- Return exactly 6 slides. If you can't fill 6, return 5 with "Thread ends here" in S5.
 
 [HOOK QUALITY GATE - MANDATORY]
 S1 must contain AT LEAST:
@@ -1168,8 +1174,8 @@ else:
         title = (slide.get("title") or "").strip()
         slide_content = (slide.get("content") or "").strip()
         if not title or not slide_content:
-            log(f"⚠️ {key} empty — skipping slide")
-            continue  # Skip empty slides instead of crashing
+            log(f"⚠️ LLM rejected article (empty_slide): {key} has empty content")
+            sys.exit(1)
         slides.append({"title": title, "content": slide_content})
 
 # Check minimum slides
