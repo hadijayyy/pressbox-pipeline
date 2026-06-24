@@ -23,31 +23,54 @@ ENV_PATH = f"{HOME}/.hermes/.env"
 RECOMMENDATIONS_FILE = f"{HOME}/.hermes/pressbox/analytics_recommendations.json"
 WIB = timezone(timedelta(hours=7))
 
-# ── API config ──
-API_KEY = ""
+# ── API config — same chain as v7 pipeline ──
+env_config = {}
 if os.path.exists(ENV_PATH):
     with open(ENV_PATH) as _env:
         for line in _env:
             line = line.strip()
-            # Tokenrouter (custom:tokenrouter) primary
-            if line.startswith("MINIMAX_API_KEY=") and not line.startswith("#"):
-                API_KEY = line.split("=", 1)[1].strip()
-                break
-if not API_KEY and os.path.exists(ENV_PATH):
-    with open(ENV_PATH) as _env:
-        for line in _env:
-            if line.startswith("OPENCODE_GO_API_KEY=") and not line.startswith("#"):
-                API_KEY = line.split("=", 1)[1].strip()
-                break
-if not API_KEY and os.path.exists(ENV_PATH):
-    with open(ENV_PATH) as _env:
-        for line in _env:
-            if line.startswith("OPENROUTER_API_KEY=") and not line.startswith("#"):
-                API_KEY = line.split("=", 1)[1].strip()
-                break
-API_BASE = "https://api.tokenrouter.com/v1"
-API_URL = f"{API_BASE}/chat/completions"
-MODEL = "MiniMax-M3"
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                env_config[k.strip()] = v.strip().strip("\"'")
+
+FREELLMAPI_BASE_URL_RAW = env_config.get("FREELLMAPI_BASE_URL", "http://localhost:3001/v1")
+FREELLMAPI_API_KEY = env_config.get("FREELLMAPI_API_KEY", "")
+FREELLMAPI_URL = FREELLMAPI_BASE_URL_RAW.rstrip("/")
+if not FREELLMAPI_URL.endswith("/v1"):
+    FREELLMAPI_URL = FREELLMAPI_URL + "/v1"
+FREELLMAPI_URL = FREELLMAPI_URL + "/chat/completions"
+
+MISTRAL_API_KEY = env_config.get("MISTRAL_API_KEY", "")
+VIKEY_API_KEY = env_config.get("VIKEY_API_KEY", "") or "vk-7e2a06ab-3ff2-4a04-a136-1c2f83cc876d"
+MINIMAX_API_KEY = env_config.get("MINIMAX_API_KEY") or env_config.get("OPENCODE_GO_API_KEY", "")
+
+# Provider registry (same as v7)
+PROVIDERS = {
+    "mistral-large-latest": {
+        "base_url": "https://api.mistral.ai/v1/chat/completions",
+        "api_key":  MISTRAL_API_KEY,
+    },
+    "MiniMax-M3": {
+        "base_url": "https://api.tokenrouter.com/v1/chat/completions",
+        "api_key":  MINIMAX_API_KEY,
+    },
+    "vikey/vclaw": {
+        "base_url": "http://api.vikey.ai/v1/chat/completions",
+        "api_key":  VIKEY_API_KEY,
+    },
+    "gpt-oss-20b": {
+        "base_url": FREELLMAPI_URL,
+        "api_key":  FREELLMAPI_API_KEY,
+    },
+}
+
+# Model chain (same order as v7, lower max_tokens for analytics JSON)
+MODEL_CHAIN = [
+    {"model": "mistral-large-latest", "max_tokens": 4000},
+    {"model": "vikey/vclaw",          "max_tokens": 4000},
+    {"model": "MiniMax-M3",           "max_tokens": 4000},
+    {"model": "gpt-oss-20b",          "max_tokens": 4000},
+]
 LLM_TIMEOUT = 120
 
 # ── HOOK FORMULAS (for LLM classification) ──
@@ -147,80 +170,104 @@ def classify_hook(text):
 # Local duplicate removed on 22 Jun 2026 — was causing skip_topics mismatch with v7 pipeline.
 
 
-def call_llm(prompt):
-    """Call LLM with streaming for faster response. Returns parsed JSON or None."""
-    headers = {"Content-Type": "application/json"}
-    if API_KEY:
-        headers["Authorization"] = f"Bearer {API_KEY}"
+def call_llm(prompt, max_retries=4):
+    """Call LLM with model chain fallback (same order as v7 pipeline).
+    Returns parsed JSON or None.
+    Chain: mistral-large-latest → vikey/vclaw → MiniMax-M3 → gpt-oss-20b
+    """
+    system_msg = f"You are a social media analytics expert. Current time: {datetime.now(WIB).strftime('%A, %d %B %Y %H:%M WIB')}. Analyze the data and return ONLY valid JSON."
 
-    payload = {
-        "model": MODEL,
-        "messages": [
-            {"role": "system", "content": f"You are a social media analytics expert. Current time: {datetime.now(WIB).strftime('%A, %d %B %Y %H:%M WIB')}. Analyze the data and return ONLY valid JSON."},
-            {"role": "user", "content": prompt}
-        ],
-        "max_tokens": 4000,
-        "temperature": 0.5,
-        "stream": True,
-    }
+    for attempt, entry in enumerate(MODEL_CHAIN):
+        model_name = entry["model"]
+        max_tok = entry["max_tokens"]
+        provider = PROVIDERS.get(model_name)
 
-    try:
-        full_content = ""
-        reasoning = ""
+        if not provider or not provider.get("api_key"):
+            print(f"  ⏭️ Skipping {model_name} (no API key)", file=sys.stderr)
+            continue
 
-        with httpx.stream("POST", API_URL, headers=headers, json=payload, timeout=LLM_TIMEOUT) as r:
-            if r.status_code != 200:
-                print(f"  ❌ LLM error: HTTP {r.status_code}", file=sys.stderr)
-                return None
-            for line in r.iter_lines():
-                if not line or not line.startswith("data: "):
-                    continue
-                data_str = line[6:]
-                if data_str.strip() == "[DONE]":
-                    break
-                try:
-                    chunk = json.loads(data_str)
-                    delta = chunk.get("choices", [{}])[0].get("delta", {})
-                    if delta.get("content"):
-                        full_content += delta["content"]
-                    if delta.get("reasoning_content"):
-                        reasoning += delta["reasoning_content"]
-                except json.JSONDecodeError:
-                    continue
+        url = provider["base_url"]
+        api_key = provider["api_key"]
 
-        # Use content if available, otherwise fall back to reasoning
-        content = full_content.strip() if full_content.strip() else reasoning.strip()
+        print(f"  🤖 LLM attempt {attempt + 1}/{max_retries} ({model_name} via {provider.get('provider', url.split('/')[2])})...", file=sys.stderr, flush=True)
 
-        if not content:
-            print("  ❌ Empty response from LLM", file=sys.stderr)
-            return None
+        headers = {"Content-Type": "application/json"}
+        headers["Authorization"] = f"Bearer {api_key}"
 
-        # Strip thinking from content — find valid JSON
-        # Remove markdown code blocks
-        content = re.sub(r'```(?:json)?\s*', '', content)
-        content = re.sub(r'\s*```', '', content)
+        payload = {
+            "model": model_name,
+            "messages": [
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": prompt}
+            ],
+            "max_tokens": max_tok,
+            "temperature": 0.5,
+            "stream": True,
+        }
 
-        # Find outermost JSON object using brace counting
-        brace_depth = 0
-        json_start = -1
-        for i, c in enumerate(content):
-            if c == '{':
-                if brace_depth == 0:
-                    json_start = i
-                brace_depth += 1
-            elif c == '}':
-                brace_depth -= 1
-                if brace_depth == 0 and json_start >= 0:
-                    json_str = content[json_start:i+1]
-                    try:
-                        return json.loads(json_str)
-                    except json.JSONDecodeError:
-                        continue  # try another object if this fails
-
-        # No valid JSON object found — try the whole content
         try:
-            return json.loads(content)
-        except json.JSONDecodeError:
+            full_content = ""
+            reasoning = ""
+
+            with httpx.stream("POST", url, headers=headers, json=payload, timeout=LLM_TIMEOUT) as r:
+                if r.status_code != 200:
+                    print(f"  ❌ LLM error: HTTP {r.status_code} ({model_name})", file=sys.stderr)
+                    continue
+                for line in r.iter_lines():
+                    if not line or not line.startswith("data: "):
+                        continue
+                    data_str = line[6:]
+                    if data_str.strip() == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(data_str)
+                        delta = chunk.get("choices", [{}])[0].get("delta", {})
+                        if delta.get("content"):
+                            full_content += delta["content"]
+                        if delta.get("reasoning_content"):
+                            reasoning += delta["reasoning_content"]
+                    except json.JSONDecodeError:
+                        continue
+
+            # Use content if available, otherwise fall back to reasoning
+            content = full_content.strip() if full_content.strip() else reasoning.strip()
+
+            if not content:
+                print(f"  ❌ Empty response from LLM ({model_name})", file=sys.stderr)
+                continue
+
+            # Strip thinking from content — find valid JSON
+            # Remove markdown code blocks
+            content = re.sub(r'```(?:json)?\s*', '', content)
+            content = re.sub(r'\s*```', '', content)
+
+            # Find outermost JSON object using brace counting
+            brace_depth = 0
+            json_start = -1
+            for i, c in enumerate(content):
+                if c == '{':
+                    if brace_depth == 0:
+                        json_start = i
+                    brace_depth += 1
+                elif c == '}':
+                    brace_depth -= 1
+                    if brace_depth == 0 and json_start >= 0:
+                        json_str = content[json_start:i+1]
+                        try:
+                            result = json.loads(json_str)
+                            print(f"  ✅ Got valid JSON from {model_name}", file=sys.stderr)
+                            return result
+                        except json.JSONDecodeError:
+                            continue
+
+            # No valid JSON object found — try the whole content
+            try:
+                result = json.loads(content)
+                print(f"  ✅ Got valid JSON from {model_name}", file=sys.stderr)
+                return result
+            except json.JSONDecodeError:
+                pass
+
             # Also try reasoning content
             if reasoning and reasoning != content:
                 reasoning_clean = re.sub(r'```(?:json)?\s*', '', reasoning)
@@ -237,18 +284,24 @@ def call_llm(prompt):
                         if brace_depth == 0 and json_start >= 0:
                             json_str = reasoning_clean[json_start:i+1]
                             try:
-                                return json.loads(json_str)
+                                result = json.loads(json_str)
+                                print(f"  ✅ Got valid JSON from reasoning ({model_name})", file=sys.stderr)
+                                return result
                             except json.JSONDecodeError:
                                 continue
                 try:
-                    return json.loads(reasoning_clean)
+                    result = json.loads(reasoning_clean)
+                    print(f"  ✅ Got valid JSON from reasoning ({model_name})", file=sys.stderr)
+                    return result
                 except json.JSONDecodeError:
                     pass
-            return None
 
-    except Exception as e:
-        print(f"  ❌ LLM call failed: {e}", file=sys.stderr)
-        return None
+        except Exception as e:
+            print(f"  ❌ LLM call failed for {model_name}: {e}", file=sys.stderr)
+            continue
+
+    print("  ❌ All LLM models failed — returning None", file=sys.stderr)
+    return None
 
 
 def main():

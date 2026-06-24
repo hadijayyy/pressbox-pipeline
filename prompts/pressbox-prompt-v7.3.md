@@ -52,6 +52,7 @@ This means: find a different article. Do not attempt a partial or shortened caro
 - Conversational, plain English. One idea per sentence. Each sentence followed by \\n\\n. Every slide advances new information — no restating prior slides.
 - Avoid manufactured-drama clichés and empty intensifiers (e.g. "fans were left in shock," "stunning," "incredible journey," "only time will tell," "the beautiful game") — and anything in that same register, not just this exact list.
 - No em-dash (—), no hashtags, no bullet points, no ALL CAPS, no AI throat-clearing ("In conclusion," "It's worth noting," "At the end of the day").
+- No Markdown formatting: no asterisks (*text*, **text**), no underscores (_text_, __text__), no tildes (~~text~~). Threads renders these as literal characters. Use CAPS or word order for emphasis instead.
 - Indonesian-language source articles: keep player/club/venue names in original form, write all slide content in English."""
 ```
 

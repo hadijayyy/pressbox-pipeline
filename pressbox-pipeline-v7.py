@@ -806,6 +806,7 @@ Output: {{"error":"vague_hook","reason":"S1 lacks proper noun or concrete detail
 [STYLE]
 - Conversational plain English. One idea per sentence, each followed by \\n\\n.
 - No em-dash (—), no hashtags, no bullets, no ALL CAPS, no AI throat-clearing.
+- No Markdown formatting: no asterisks (*text*, **text**), no underscores (_text_, __text__), no tildes (~~text~~). Threads shows these as literal characters.
 - Each sentence must pass the "text message test": if you text it alone, does it make sense? No compound sentences with "and", "but", "while" connecting two independent clauses.
 - Indonesian articles: keep names original, write content in English."""
 
@@ -1207,6 +1208,13 @@ if not ok:
 # Build joined content (no titles, just content)
 # Post-process: replace em-dashes and en-dashes
 for s in slides:
+    # Strip Markdown formatting (Threads doesn't render it — shows literal asterisks)
+    # Order matters: bold (**text**) before italic (*text*)
+    s["content"] = re.sub(r'\*\*(.+?)\*\*', r'\1', s["content"])  # **bold** → text
+    s["content"] = re.sub(r'\*(.+?)\*', r'\1', s["content"])      # *italic* → text
+    s["content"] = re.sub(r'__(.+?)__', r'\1', s["content"])      # __bold__ → text
+    s["content"] = re.sub(r'_(.+?)_', r'\1', s["content"])        # _italic_ → text
+    s["content"] = re.sub(r'~~(.+?)~~', r'\1', s["content"])      # ~~strike~~ → text
     s["content"] = s["content"].replace("—", " - ").replace("–", " - ")
     # Clean up double spaces around replaced dashes
     s["content"] = re.sub(r"  +", " ", s["content"])
