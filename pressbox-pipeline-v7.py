@@ -1182,9 +1182,9 @@ else:
             sys.exit(1)
         title = (slide.get("title") or "").strip()
         slide_content = (slide.get("content") or "").strip()
-        if not title or not slide_content:
-            log(f"⚠️ LLM rejected article (empty_slide): {key} has empty content")
-            sys.exit(1)
+        if not slide_content.strip():
+            log(f"⚠️ LLM generated empty slide {i+1} — skipping")
+            continue
         slides.append({"title": title, "content": slide_content})
 
 # Check minimum slides
