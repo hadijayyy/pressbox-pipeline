@@ -10,6 +10,12 @@ from pressbox_common import STOPWORDS, REPLACEMENTS
 
 import requests
 
+# ── New scoring module (v17 port from market-monday) ────────────────
+try:
+    from pressbox_scoring import score_topic as _base_score_topic
+except ImportError:
+    _base_score_topic = None
+    log("⚠️ pressbox_scoring.py not found — using legacy scoring")
 # ── Flags ──────────────────────────────────────────────────────────
 DRY_RUN = "--dry-run" in sys.argv
 
@@ -164,63 +170,67 @@ def extract_body_image(raw_html):
 
 
 def score_topic(t):
+    """Hybrid scoring: v17 additive base (0-100) + legacy pipeline bonuses."""
     title = t.get("title", "")
-    s = 0
     tl = title.lower()
-    # Controversy keywords
-    controversy = {"outrage", "scandal", "banned", "boycott", "protest", "chaos", "crisis"}
-    if any(kw in tl for kw in controversy):
-        s += 30
-    # Drama keywords
-    drama = {"secret", "hidden", "exposed", "shocking", "epic", "comeback", "revenge"}
-    if any(kw in tl for kw in drama):
-        s += 20
-    # Hard skip: quiz/preview/lineup content — never publish
+
+    # ── Hard skip: quiz/preview/lineup content — never publish ──────
     hard_skip = {"quiz", "play quiz", "how much", "quiz -", "lineup", "predicted", "preview"}
     if any(kw in tl for kw in hard_skip):
-        s = -999  # Force skip
-        return s
-    # Boring keywords
-    boring = {"quiz", "lineup", "live updates", "preview", "analysis", "opinion", "play quiz", "how much", "quiz -"}
-    if any(kw in tl for kw in boring):
-        s -= 50  # Heavy penalty — quiz/preview content kills engagement
-    # Title length
-    wc = len(title.split())
-    if wc <= 8:
-        s += 15
-    if wc > 15:
-        s -= 10
-    # World Cup
-    wc_kw = {"world cup", "fifa", "qualifier", "wc 2026", "usa 2026", "mexico 2026", "canada 2026"}
-    if any(kw in tl for kw in wc_kw):
-        s += 50
+        return -999
+
+    # ── Base score: v17 additive module (0-100, or -1 if excluded) ──
+    if _base_score_topic is not None:
+        s = _base_score_topic(t)
+        if s == -1:  # Excluded by keywords
+            return -999
+    else:
+        # Legacy fallback — original scoring logic
+        s = 0
+        controversy = {"outrage", "scandal", "banned", "boycott", "protest", "chaos", "crisis"}
+        if any(kw in tl for kw in controversy):
+            s += 30
+        drama = {"secret", "hidden", "exposed", "shocking", "epic", "comeback", "revenge"}
+        if any(kw in tl for kw in drama):
+            s += 20
+        boring = {"quiz", "lineup", "live updates", "preview", "analysis", "opinion", "play quiz", "how much", "quiz -"}
+        if any(kw in tl for kw in boring):
+            s -= 50
+        wc = len(title.split())
+        if wc <= 8:
+            s += 15
+        if wc > 15:
+            s -= 10
+        wc_kw = {"world cup", "fifa", "qualifier", "wc 2026", "usa 2026", "mexico 2026", "canada 2026"}
+        if any(kw in tl for kw in wc_kw):
+            s += 50
+
+    # ── Pipeline-specific bonuses (always apply) ────────────────────
     if t.get("wc_related") or t.get("wc_boost"):
         s += 40
     if t.get("viral_related"):
         s += 25
-    # Base score from research module
-    s += t.get("score", 0)
+    s += t.get("score", 0)  # Base score from research module
+
     # Analytics topic boost
     topic_type = classify_topic_type(title)
     if topic_type in topic_boosts:
         multiplier = topic_boosts[topic_type]
         s = int(s * multiplier)
+
     # Compound topic bonus: world_cup + fifa_political together
     tl = title.lower()
     has_wc = any(w in tl for w in ["world cup", "wc", "2026", "tournament"])
     has_political = any(w in tl for w in ["ban", "banned", "protest", "visa", "trump", "government", "boo", "booed", "iran", "political", "sanction"])
     if has_wc and has_political:
-        s += 10  # Geopolitics + sport compound bonus
-    # Concrete event bonus: stories with specific actions (denied, banned, etc.)
-    concrete_events = {"denied", "banned", "ruled out", "arrested", "suspended", "injured", "cleared", "fined", "charged", "deported", "refused", "blocked", "barred", "rejected", "disqualified", "sent off", "red card", "miss out"}
-    # Generic transfer rumor penalty: vague phrasing
+        s += 10
+
+    # Generic transfer rumor penalty
     generic_rumors = {"interested in", "considering", "monitoring", "approach", "enquire", "eyeing", "tracking", "scouting", "could sign", "may sign", "set to sign", "close to signing", "in talks", "mulling", "weighing up", "asked to leave", "wants to leave", "wants out", "push for exit", "push for a move", "considering a move", "considering a transfer", "considering a bid", "considering an offer"}
-    # Combine title and description for matching
     text_blob = (title + " " + t.get("description", "")).lower()
-    if any(kw in text_blob for kw in concrete_events):
-        s += 15
     if any(kw in text_blob for kw in generic_rumors):
         s -= 10
+
     # Keyword boost from recommendations
     s += t.get("_kw_boost", 0)
     return s
