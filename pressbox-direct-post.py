@@ -232,7 +232,7 @@ def post_thread(uid, token, slides, image_url=None):
                 print(f"   🔄 Retrying slide {i+1}/{len(filtered)}...", file=sys.stderr)
                 cid = create_container(uid, token, text, reply_to, image_url if i == 0 else None)
                 pid = publish(uid, token, cid)
-                post_ids.append(pid)
+                post_ids.append((slide_idx, pid))
                 print(f"   ✅ Slide {i+1}/{len(filtered)} retry succeeded: → {pid}", file=sys.stderr)
                 if i == 0:
                     root_pid = pid

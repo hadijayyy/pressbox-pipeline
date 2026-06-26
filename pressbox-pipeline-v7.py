@@ -830,6 +830,7 @@ llm_t0 = time.time()
 
 # ── LLM call with streaming + retry ────────────────────────────
 MAX_RETRIES = 3
+LLM_TEMPERATURE = 0.5  # Creative but not too wild — tune here, not in payload
 # Sentence count targets per slide (min, max) — 6-slide format
 SENTENCE_COUNTS = {
     1: (1, 3),   # Hook: 1-3 sentences (sharp single sentence OK)
@@ -876,7 +877,7 @@ for attempt in range(1, MAX_RETRIES + 1):
                 {"role": "user", "content": user_prompt},
             ],
             "max_tokens": ACTIVE_MAX_TOKENS,
-            "temperature": 0.5,
+            "temperature": LLM_TEMPERATURE,
             "stream": True,
         }
         if ACTIVE_REASONING:
