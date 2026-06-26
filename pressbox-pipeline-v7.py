@@ -1070,7 +1070,14 @@ for attempt in range(1, MAX_RETRIES + 1):
             log("   🔧 Fixed truncated JSON (added closing brace)")
 
         # Parse and validate sentence count (with auto-trim for over-max slides)
-        slides_data = json.loads(candidate_json)
+        # Use JSONDecoder to parse only the FIRST valid object — avoids "Extra data"
+        # when LLM appends trailing prose or multiple JSON objects.
+        try:
+            decoder = json.JSONDecoder()
+            slides_data, _ = decoder.raw_decode(candidate_json.lstrip())
+        except json.JSONDecodeError as e:
+            log(f"   ❌ JSON parse failed: {e} — retrying...")
+            continue
         sentence_issues = []
         trimmed_count = 0
         # Handle both formats
