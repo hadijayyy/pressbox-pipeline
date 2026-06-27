@@ -239,6 +239,11 @@ def score_topic(t):
     niche_topics = {"kit launch", "kit reveal", "jersey", "stadium rules", "ticket prices", "travel guide", "how to watch", "tv channel", "broadcast"}
     if any(kw in tl for kw in niche_topics):
         s -= 20
+    # No-image penalty — posts without images get 50% less engagement
+    # RSS image_url is a proxy for article image availability
+    if not t.get("image_url"):
+        s -= 15
+
 
 
     # Keyword boost from recommendations
