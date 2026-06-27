@@ -256,7 +256,7 @@ def check_image_accessible(url):
     Returns (accessible, status_code). On error, returns (False, 0)."""
     try:
         hr = subprocess.run(
-            ["curl", "-sIL", "--max-time", "5", url],
+            ["curl", "-sIL", "--globoff", "--max-time", "5", url],
             capture_output=True, text=True, timeout=8)
         # Parse LAST status code from response headers
         last_status = 0
