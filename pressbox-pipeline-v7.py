@@ -180,12 +180,18 @@ def score_topic(t):
     else:
         # Legacy fallback — original scoring logic
         s = 0
-        controversy = {"outrage", "scandal", "banned", "boycott", "protest", "chaos", "crisis"}
+        controversy = {"outrage", "scandal", "banned", "boycott", "protest", "chaos", "crisis", "demand", "demanded", "ban", "fury", "furious"}
         if any(kw in tl for kw in controversy):
-            s += 30
-        drama = {"secret", "hidden", "exposed", "shocking", "epic", "comeback", "revenge", "row", "slammed", "blasted", "dragged", "hits back", "under fire", "laid bare"}
+            s += 40  # Increased from 30 — controversy = highest engagement (367K views proven)
+        drama = {"secret", "hidden", "exposed", "shocking", "epic", "comeback", "revenge", "row", "slammed", "blasted", "dragged", "hits back", "under fire", "laid bare", "loses the plot", "rages", "bust-up", "explodes", "nightmare"}
         if any(kw in tl for kw in drama):
-            s += 35  # Increased from 20 — drama hooks drive 10x more engagement
+            s += 45  # Increased from 35 — drama/conflict hooks drive 10x more engagement
+        contrast = {"yet", "but", "however", "despite", "after a", "despite winning", "after winning", "couldn't run", "so lazy"}
+        if any(kw in tl for kw in contrast):
+            s += 25  # NEW — contrast/contradiction hooks ("X happened despite Y")
+        shock = {"chain-smoking", "couldn't run", "baffled", "frozen", "stunned", "howler", "blunder", "leaked", "exposed"}
+        if any(kw in tl for kw in shock):
+            s += 20  # NEW — shock/surprise hooks
         boring = {"quiz", "lineup", "live updates", "preview", "analysis", "opinion", "play quiz", "how much", "quiz -", "rules explained", "rules and how", "explained: how", "what are the rules", "how the rules work"}
         if any(kw in tl for kw in boring):
             s -= 60  # Increased penalty — rules/explainers get views but 0 engagement
