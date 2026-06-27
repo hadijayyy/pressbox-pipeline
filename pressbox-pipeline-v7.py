@@ -190,12 +190,12 @@ def score_topic(t):
         controversy = {"outrage", "scandal", "banned", "boycott", "protest", "chaos", "crisis"}
         if any(kw in tl for kw in controversy):
             s += 30
-        drama = {"secret", "hidden", "exposed", "shocking", "epic", "comeback", "revenge"}
+        drama = {"secret", "hidden", "exposed", "shocking", "epic", "comeback", "revenge", "row", "slammed", "blasted", "dragged", "hits back", "under fire", "laid bare"}
         if any(kw in tl for kw in drama):
-            s += 20
-        boring = {"quiz", "lineup", "live updates", "preview", "analysis", "opinion", "play quiz", "how much", "quiz -"}
+            s += 35  # Increased from 20 — drama hooks drive 10x more engagement
+        boring = {"quiz", "lineup", "live updates", "preview", "analysis", "opinion", "play quiz", "how much", "quiz -", "rules explained", "rules and how", "explained: how", "what are the rules", "how the rules work"}
         if any(kw in tl for kw in boring):
-            s -= 50
+            s -= 60  # Increased penalty — rules/explainers get views but 0 engagement
         wc = len(title.split())
         if wc <= 8:
             s += 15
@@ -230,6 +230,16 @@ def score_topic(t):
     text_blob = (title + " " + t.get("description", "")).lower()
     if any(kw in text_blob for kw in generic_rumors):
         s -= 10
+    # Big names boost — controversy + big names = highest engagement
+    big_names = {"messi", "ronaldo", "lineker", "fifa", "uefa", "mbappe", "haaland", "bellingham", "neymar", "salah", "kane", "tuchel", "guardiola", "klopp", "ancelotti", "arteta", "bielsa", "suarez", "terry", "ferdinand", "neville", "rooney", "gerrard", "lampard"}
+    if any(name in tl for name in big_names):
+        s += 15
+    # Niche topic penalty — topics without universal appeal flop
+    # These get views but 0 engagement (passive consumption)
+    niche_topics = {"kit launch", "kit reveal", "jersey", "stadium rules", "ticket prices", "travel guide", "how to watch", "tv channel", "broadcast"}
+    if any(kw in tl for kw in niche_topics):
+        s -= 20
+
 
     # Keyword boost from recommendations
     s += t.get("_kw_boost", 0)
@@ -776,12 +786,14 @@ Use only article body. Ignore nav, related links, ads, bylines, boilerplate.
 [SLIDES — MIN sentence counts]
 1. HOOK (1-3, MIN 1): NO context preamble ("In a recent match...", "During the World Cup..."). Start with the paradox/truth directly. First sentence must be a standalone scroll-stopper.
    HOOK PRIORITY (order matters):
-   (a) PARADOX: "X happened despite Y" / "X was forced to do the opposite of what X expected"
-   (b) CONCRETE EVENT: A specific action that just happened (denied, banned, ruled out, arrested, suspended) that creates a strong narrative.
-   (c) BETRAYAL: Person/institution broke a promise or rule
-   (d) SHOCK: Unexpected outcome that defies common sense
-   (e) NUMBERS: Stat that reframes the story
-   If no paradox exists in the article, skip to (b) or (c). Never force paradox from unrelated facts.
+   (a) CONTROVERSY: "X dragged into row", "X slammed for", "X under fire" — drama + conflict + big names = highest engagement (367K views proven)
+   (b) CONFLICT: "X slams Y", "X blasts Y", "X hits back at Y" — direct confrontation between named parties (119 replies proven)
+   (c) CURIOSITY GAP: "X laid bare after...", "X exposed as...", "The truth about X" — creates intrigue without clickbait
+   (d) PARADOX: "X happened despite Y" / "X was forced to do the opposite of what X expected"
+   (e) SHOCK: Unexpected outcome that defies common sense
+   (f) NUMBERS: Stat that reframes the story
+   If no controversy exists in the article, skip to (b) or (c). Never force drama from unrelated facts.
+   BIG NAMES + DRAMA = ENGAGEMENT: Messi, Lineker, FIFA, controversy, scandal, row, slammed, blasted — these drive 10x more views than generic "demands" or "blasts" without stakes.
    End with tension.
 2. WHAT (2-4, MIN 2): What happened concretely + why it matters.
 3. TENSION (2-4, MIN 2): Conflict/competing stakes. One-sided: "Article only covers [X]'s perspective."
