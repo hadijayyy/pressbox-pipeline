@@ -80,11 +80,6 @@ PROVIDERS = {
         "api_key":  MINIMAX_API_KEY,
         "provider": "tokenrouter",
     },
-    "vikey/vclaw": {
-        "base_url": "http://api.vikey.ai/v1/chat/completions",
-        "api_key":  VIKEY_API_KEY,
-        "provider": "vikey",
-    },
 }
 
 def get_provider_for_model(model_name):
@@ -104,12 +99,10 @@ def get_provider_for_model(model_name):
 def get_model_config(topic_type):
     """Model chain with fallback order.
     Primary: mistral-large-latest (Mistral API, direct)
-    Fallback 1: vikey/vclaw (Vikey API)
-    Fallback 2: gpt-oss-20b (FreeLLMAPI → Groq)
+    Fallback 1: gpt-oss-20b (FreeLLMAPI → Groq)
     """
     return [
         {"model": "mistral-large-latest","max_tokens": 8000, "reasoning_effort": None},  # Mistral API: supports up to 8192 — bumped from 4000 to avoid 6-slide carousel truncation
-        {"model": "vikey/vclaw",         "max_tokens": 4000, "reasoning_effort": None},  # Vikey: vclaw (api.vikey.ai)
         {"model": "gpt-oss-20b",         "max_tokens": 4000, "reasoning_effort": None},  # Groq: gpt-oss-20b (Groq rejects >4000 output tokens on this model — 429)
     ]
 
