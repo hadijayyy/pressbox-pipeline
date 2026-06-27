@@ -305,7 +305,7 @@ def validate_image_quality(url):
     Returns (is_valid, width, height). On any error, returns (False, 0, 0)."""
     try:
         result = subprocess.run(
-            ["curl", "-s", "-r", "0-8191", "--max-time", "5", url],
+            ["curl", "-s", "--globoff", "-r", "0-8191", "--max-time", "5", url],
             capture_output=True, timeout=8
         )
         data = result.stdout
