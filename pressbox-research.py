@@ -282,7 +282,7 @@ def scrape_sky_sports():
                 title=title,
                 source="sky-sports",
                 url=url,
-                score=14 if has_wc else (13 if is_transfer else 12),
+                score=12 if has_wc else (10 if is_transfer else 9),
                 comments=0,
                 wc_boost=has_wc,
                 transfer_related=is_transfer,
@@ -398,7 +398,7 @@ def scrape_goal():
                 
                 topics.append(dict(
                     title=title, source="goal", url=url,
-                    score=14 if has_wc else (13 if is_transfer else 12),
+                    score=19 if has_wc else (18 if is_transfer else 17),
                     comments=0, wc_boost=has_wc, transfer_related=is_transfer,
                     description=(text or title)[:500], published_ts=published_ts, image_url=image_url))
             except: pass
