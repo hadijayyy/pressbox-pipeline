@@ -47,6 +47,9 @@ except Exception as e:
 # ── Load env ────────────────────────────────────────────────────────
 env_config = load_env()
 
+# MISTRAL_API_KEY needed for PROVIDERS registry
+MISTRAL_API_KEY = env_config.get('MISTRAL_API_KEY', "")
+
 # Legacy globals removed — use PROVIDERS + get_model_config() instead
 
 # ── Provider registry (per-model URL + key) ──────────────────────────────
