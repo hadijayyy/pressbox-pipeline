@@ -563,7 +563,7 @@ analytics_recommendations.json
 - `content` field comes back empty
 - Pipeline has fallback: extract JSON from `reasoning_content` via brace counting
 - This works but wastes ~4000 tokens on reasoning vs direct output
-- Alternative models tested: minimax-m3 (zero reasoning), glm-5 (112 chars reasoning)
+- Alternative models tested: qwen3-32b via 9router (fallback)
 
 ### Analytics LLM (Deep Analysis)
 
@@ -760,7 +760,7 @@ def send_alert(msg):
 | 5 | **No image quality tracking** | Can't measure fallback frequency | Log which fallback level succeeded per post |
 | 6 | **Stale analytics ignored silently** | >48h old analytics → defaults, no alert | Send Telegram alert when using stale defaults |
 | 7 | **No content performance correlation** | Don't know which slide structures perform best | Track slide content patterns vs engagement |
-| 8 | **Single LLM model** | deepseek-v4-flash only | Could fallback to minimax-m3 or glm-5 |
+| 8 | **Single LLM model** | deepseek-v4-flash only | Could fallback to qwen3-32b via 9router |
 | 9 | **No A/B testing framework** | LLM suggests experiments, no way to run them | Implement hook/tone variation tracking |
 | 10 | **Duplicate log_error function** | Defined twice in pipeline-v7.py (lines 78-86 and 257-260) | Remove duplicate |
 
