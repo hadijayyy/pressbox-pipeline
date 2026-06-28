@@ -61,7 +61,11 @@ fi
 # Log state for visibility (won't trigger cron delivery since stdout is forwarded only on success)
 echo "▶ Circuit $ALLOW_OUT — running $SCRIPT"
 
-# --- 2. Run script ---
+# --- 2a. Auto-install missing Python deps (prevents httpx/bs4 FATAL errors) ---
+python3 -c "import httpx, bs4, requests, dotenv" 2>/dev/null || \
+  python3 -m pip install --quiet httpx beautifulsoup4 requests python-dotenv 2>/dev/null || true
+
+# --- 2b. Run script ---
 START_TS=$(date +%s)
 cd "$WORKDIR" || { echo "❌ cannot cd to $WORKDIR"; exit 1; }
 
@@ -103,7 +107,7 @@ fi
 
 # --- 4. Emit telemetry ---
 # Get stderr line count (rough signal of error verbosity)
-STDERR_LINES=$(wc -l < /tmp/last-cb-stderr.log 2>/dev/null | tr -d ' ' || echo "0")
+STDERR_LINES=$(cat /tmp/last-cb-stderr.log 2>/dev/null | wc -l | tr -d ' ' || echo "0")
 
 cat >> "$TELEMETRY_FILE" <<EOF
 {"ts":${END_TS},"job_id":"${JOB_ID}","script":"${SCRIPT}","event":"run","cb_state_pre":"${PRE_CB_STATE}","cb_state_post":"${POST_CB_STATE}","exit_code":${RUN_EXIT},"duration_s":${DURATION},"stderr_lines":${STDERR_LINES}}
