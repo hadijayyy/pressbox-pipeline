@@ -364,15 +364,17 @@ reasoning = ""
 article_cache = {}
 
 # ── 1. SCRAPE ─────────────────────────────────────────────────────
-log("Scraping Mirror + Sky Sports + Goal.com...")
+log("Scraping Mirror + Sky Sports + Goal.com + BBC + Guardian...")
 t0 = time.time()
-with ThreadPoolExecutor(max_workers=3) as ex:
+with ThreadPoolExecutor(max_workers=5) as ex:
     fut_mirror = ex.submit(scrape_mirror)
     fut_sky = ex.submit(scrape_rss, "https://www.skysports.com/rss/11095", "skysports", 12)
     fut_goal = ex.submit(scrape_goal)
+    fut_bbc = ex.submit(scrape_rss, "https://feeds.bbci.co.uk/sport/football/rss.xml", "bbc", 11)
+    fut_guardian = ex.submit(scrape_rss, "https://www.theguardian.com/football/rss", "guardian", 10)
 
     all_topics = []
-    for fut, name in [(fut_mirror, "mirror"), (fut_sky, "skysports"), (fut_goal, "goal")]:
+    for fut, name in [(fut_mirror, "mirror"), (fut_sky, "skysports"), (fut_goal, "goal"), (fut_bbc, "bbc"), (fut_guardian, "guardian")]:
         try:
             result = fut.result(timeout=15)
             for t in result:
@@ -431,7 +433,7 @@ if os.path.exists(CACHE_FILE):
     except Exception:
         pass
 
-ALLOWED_SOURCES = {"mirror", "skysports", "goal"}
+ALLOWED_SOURCES = {"mirror", "skysports", "goal", "bbc", "guardian"}
 
 # ── Load analytics feedback ──────────────────────────────────────
 ANALYTICS_FEEDBACK = f"{HOME}/.hermes/pressbox/analytics_feedback.json"
@@ -915,45 +917,77 @@ def _count_sentences(text: str) -> int:
     return len([s for s in sents if len(s.strip()) > 5])
 
 # ── Post-generation grounding validator ──────────────────────────────
+_SKIP_WORDS = {
+    'The', 'This', 'That', 'These', 'Those', 'A', 'An',
+    'When', 'Where', 'What', 'Which', 'While', 'After', 'Before', 'During',
+    'Under', 'Over', 'Since', 'Until', 'Between', 'Among', 'Through',
+    'Against', 'Into', 'Upon', 'Within', 'Without', 'From', 'With',
+    'About', 'Above', 'Across', 'Along', 'Around', 'Behind', 'Below',
+    'Beneath', 'Beside', 'Beyond', 'Down', 'Inside', 'Near', 'Off',
+    'Onto', 'Outside', 'Past', 'Round', 'Toward', 'Towards', 'In',
+    'But', 'And', 'Yet', 'So', 'For', 'Nor', 'Once', 'Though',
+    'Although', 'Because', 'Whether', 'If', 'Unless',
+    'Whereas', 'Wherever', 'Whenever',
+    'Even', 'Still', 'Just', 'Now', 'Then', 'Here', 'There',
+    'Only', 'Already', 'Never', 'Always', 'Also', 'Perhaps',
+    'Both', 'Either', 'Neither', 'Each', 'Every', 'Most',
+    'Rather', 'Quite', 'Very', 'Too', 'Enough', 'Almost',
+    'Again', 'Further', 'Instead', 'Indeed', 'Likewise',
+    'Meanwhile', 'Nevertheless', 'Otherwise', 'Therefore',
+    'Can', 'Could', 'Would', 'Should', 'Will', 'Must', 'May',
+    'Might', 'Shall', 'Ought', 'Not',
+    'Make', 'Get', 'Take', 'Give', 'Find', 'Keep',
+    'Come', 'Go', 'Look', 'Think', 'Know', 'See', 'Want',
+    'Use', 'Tell', 'Say', 'Let', 'Help', 'Show', 'Try',
+    'Ask', 'Put', 'End', 'Set', 'Run', 'Cut', 'Hit',
+    'Sit', 'Stand', 'Fall', 'Turn', 'Move', 'Pay', 'Meet',
+    'Expect', 'Build', 'Stay', 'Reach', 'Kill', 'Remain',
+    'Suggest', 'Raise', 'Pass', 'Sell', 'Require', 'Report',
+    'Decide', 'Pull', 'Develop', 'Eat', 'Cover', 'Push',
+    'Perform', 'Save', 'Join', 'Catch', 'Draw', 'Pick',
+    'Prepare', 'Achieve', 'Fight', 'Throw', 'Fill', 'Apply',
+    'Base', 'Carry', 'Break', 'Provide', 'Exist', 'Mention',
+    'Cross', 'Sign', 'Touch', 'Compare', 'Announce', 'Post',
+    'Force', 'Accept', 'Support', 'Hear', 'Listen', 'Write',
+    'Rise', 'Deal', 'Hang', 'Treat', 'Claim', 'Focus', 'Note',
+    'Reveal', 'Discover', 'Cause', 'Call', 'Live', 'Handle',
+    'Challenge', 'Fear', 'Avoid', 'Bear', 'Beat',
+    'View', 'Image', 'Images', 'Photo', 'Photos',
+    'Getty', 'Reuters', 'AP', 'AFP',
+}
+
+_STAGE_CANONICAL = {
+    'last-32': 'round_of_32', 'last 32': 'round_of_32',
+    'round of 32': 'round_of_32', 'r32': 'round_of_32',
+    'last-16': 'round_of_16', 'last 16': 'round_of_16',
+    'round of 16': 'round_of_16', 'r16': 'round_of_16',
+    'quarter-final': 'quarter_final', 'quarter final': 'quarter_final',
+    'quarterfinal': 'quarter_final', 'qf': 'quarter_final',
+    'semi-final': 'semi_final', 'semi final': 'semi_final',
+    'semifinal': 'semi_final', 'sf': 'semi_final',
+    'final': 'final',
+    'group stage': 'group_stage', 'group stages': 'group_stage',
+}
+
 def _extract_proper_nouns(text: str) -> set:
-    """Extract multi-word proper nouns (2+ capitalized words)."""
-    _SKIP = {'The', 'This', 'That', 'These', 'Those', 'When', 'Where', 'What',
-             'Which', 'While', 'After', 'Before', 'During', 'Under', 'Over',
-             'Since', 'Until', 'Between', 'Among', 'Through', 'Against',
-             'Even', 'Still', 'Just', 'Now', 'Then', 'Here', 'There',
-             'But', 'And', 'Yet', 'So', 'For', 'Nor', 'Once', 'Though',
-             'Can', 'Could', 'Would', 'Should', 'Will', 'Must', 'May',
-             'However', 'Although', 'Despite', 'Because', 'Whether',
-             'Only', 'Already', 'Never', 'Always', 'Also', 'Perhaps',
-             'Both', 'Either', 'Neither', 'Each', 'Every', 'Most'}
-    # Match "Firstname Lastname" patterns, skip sentence starters
-    names = re.findall(r'(?<=[.!?]\s)([A-Z][a-z]+(?:\s[A-Z][a-z]+)+)', text)
-    names += re.findall(r'(?:^|\n)([A-Z][a-z]+(?:\s[A-Z][a-z]+)+)', text)
-    # Filter: strip leading determiner, keep if still multi-word
+    """Extract multi-word proper nouns (2+ capitalized words) with skip-word filtering."""
+    names = re.findall(r'([A-Z][a-z]+(?:\s[A-Z][a-z]+)+)', text)
     cleaned = []
     for n in names:
         words = n.split()
-        if words[0] in _SKIP and len(words) > 2:
+        if words[0] in _SKIP_WORDS and len(words) > 2:
             cleaned.append(' '.join(words[1:]))
-        elif words[0] not in _SKIP:
+        elif words[0] not in _SKIP_WORDS:
             cleaned.append(n)
     return set(n for n in cleaned if len(n) > 4)
 
 def _extract_football_stages(text: str) -> set:
-    """Extract football tournament stage references."""
+    """Extract and normalize football tournament stage references."""
     tl = text.lower()
     stages = set()
-    stage_patterns = [
-        ('last-16', r'\blast[\s-]16\b'), ('last-32', r'\blast[\s-]32\b'),
-        ('quarter-final', r'\bquarter[\s-]final\b'),
-        ('semi-final', r'\bsemi[\s-]final\b'), ('final', r'\bfinal\b'),
-        ('group stage', r'\bgroup\sstage\b'),
-        ('round of 16', r'\bround\sof\s16\b'),
-        ('round of 32', r'\bround\sof\s32\b'),
-    ]
-    for name, pat in stage_patterns:
-        if re.search(pat, tl):
-            stages.add(name)
+    for variant, canonical in _STAGE_CANONICAL.items():
+        if re.search(r'\b' + re.escape(variant) + r'\b', tl):
+            stages.add(canonical)
     return stages
 
 def grounding_check(slides_text: str, article_text: str, article_names: set, article_stages: set) -> list:
