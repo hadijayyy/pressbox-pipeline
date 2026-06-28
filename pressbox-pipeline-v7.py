@@ -18,6 +18,7 @@ from pressbox_common import clean_words, is_similar, classify_topic_type
 from pressbox_common import STOPWORDS, REPLACEMENTS
 
 import requests
+from bs4 import BeautifulSoup
 
 # ── New scoring module (v17 port from market-monday) ────────────────
 try:
@@ -584,6 +585,59 @@ log(f"   🏆 Best: {best['title']} (score={best['_score']})")
 t0 = time.time()
 url = best["url"]
 
+# ── Clean article extraction ───────────────────────────────────────
+_NOISE_PATTERNS = [
+    r'(?:Clarifications\s+)?Privacy\s+Notice.*?(?:Terms\s+(?:and\s+)?Conditions|Cookie\s+Notice)',
+    r'(?:Do\s+Not\s+Sell|Cookie\s+Notice|Terms\s+(?:and\s+)?Conditions).*?(?:Accept|Follow)',
+    r'Follow\s+(?:us\s+on\s+|Daily\s+).*?(?:Snapchat|Comments)',
+    r'Share\s+(?:this\s+|on\s+).*?(?:Comments|$)',
+    r'Comments\s+Sport\s+.*?(?:Writer|Editor).*?(?=\d{1,2}:\d{2}|\d{4})',
+    r'(?:Mirror\s+Football|Make\s+Football\s+Great\s+Again|Preferred\s+Source).*?(?:\.|$)',
+    r'(?:Kitbag|Various\s+Prices|Buy\s+Now|Product\s+Description|Rolls\s+Royce).*?(?:\.|$)',
+    r'(?:Subscribe|Newsletter|Sign\s+up|Signup).*?(?:\.|$)',
+]
+
+def extract_article_text(raw_html: str) -> str:
+    """Extract clean article body from HTML using BeautifulSoup.
+    
+    Strategy:
+    1. <article> tag (most reliable for news sites)
+    2. Fallback: full page strip (current behavior)
+    """
+    soup = BeautifulSoup(raw_html, 'html.parser')
+    
+    article = soup.find('article')
+    if not article:
+        text = re.sub(r'<style[^>]*>.*?</style>', ' ', raw_html, flags=re.DOTALL|re.IGNORECASE)
+        text = re.sub(r'<script[^>]*>.*?</script>', ' ', text, flags=re.DOTALL|re.IGNORECASE)
+        text = re.sub(r'<[^>]+>', ' ', text)
+        text = re.sub(r'\s+', ' ', text).strip()
+        return html_mod.unescape(text)
+    
+    # Remove non-content elements
+    for tag in article.find_all(['nav', 'aside', 'footer', 'script', 'style',
+                                  'form', 'button', 'input', 'select']):
+        tag.decompose()
+    
+    # Remove ad/related content divs by class pattern
+    ad_patterns = ['ad-', 'advert', 'related', 'recommend', 'newsletter',
+                   'subscribe', 'social-share', 'share-', 'promo', 'sponsor',
+                   'cookie', 'consent', 'signup', 'trending', 'more-stories',
+                   'latest-news', 'popular']
+    for div in article.find_all(['div', 'section'], class_=True):
+        classes = ' '.join(div.get('class', [])).lower()
+        if any(p in classes for p in ad_patterns):
+            div.decompose()
+    
+    text = article.get_text(separator=' ', strip=True)
+    
+    # Apply noise patterns
+    for pattern in _NOISE_PATTERNS:
+        text = re.sub(pattern, '', text, flags=re.IGNORECASE|re.DOTALL)
+    
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text
+
 # ARTICLE CACHE — avoid re-fetching same URL within 30 min
 ARTICLE_CACHE = f"{HOME}/.hermes/pressbox/article_cache.json"
 article_cache = {}
@@ -618,12 +672,8 @@ else:
         log(f"❌ curl exception: {e}")
         sys.exit(1)
 
-    # Strip HTML tags, CSS, scripts for clean article text
-    article_text = re.sub(r"<style[^>]*>.*?</style>", " ", raw_html, flags=re.DOTALL|re.IGNORECASE)
-    article_text = re.sub(r"<script[^>]*>.*?</script>", " ", article_text, flags=re.DOTALL|re.IGNORECASE)
-    article_text = re.sub(r"<[^>]+>", " ", article_text)
-    article_text = re.sub(r"\s+", " ", article_text).strip()
-    article_text = html_mod.unescape(article_text)
+    # Extract clean article body (strips nav, footer, ads)
+    article_text = extract_article_text(raw_html)
 
     # Extract images: collect candidates and pick best based on player-photo preference
     image_url = ""
@@ -842,7 +892,70 @@ def _count_sentences(text: str) -> int:
     """Count sentences by splitting on sentence-ending punctuation."""
     sents = re.split(r'(?<=[.!?])\s+', text.strip())
     return len([s for s in sents if len(s.strip()) > 5])
+
+# ── Post-generation grounding validator ──────────────────────────────
+def _extract_proper_nouns(text: str) -> set:
+    """Extract multi-word proper nouns (2+ capitalized words)."""
+    _SKIP = {'The', 'This', 'That', 'These', 'Those', 'When', 'Where', 'What',
+             'Which', 'While', 'After', 'Before', 'During', 'Under', 'Over',
+             'Since', 'Until', 'Between', 'Among', 'Through', 'Against',
+             'Even', 'Still', 'Just', 'Now', 'Then', 'Here', 'There',
+             'But', 'And', 'Yet', 'So', 'For', 'Nor', 'Once', 'Though',
+             'Can', 'Could', 'Would', 'Should', 'Will', 'Must', 'May',
+             'However', 'Although', 'Despite', 'Because', 'Whether',
+             'Only', 'Already', 'Never', 'Always', 'Also', 'Perhaps',
+             'Both', 'Either', 'Neither', 'Each', 'Every', 'Most'}
+    # Match "Firstname Lastname" patterns, skip sentence starters
+    names = re.findall(r'(?<=[.!?]\s)([A-Z][a-z]+(?:\s[A-Z][a-z]+)+)', text)
+    names += re.findall(r'(?:^|\n)([A-Z][a-z]+(?:\s[A-Z][a-z]+)+)', text)
+    # Filter: strip leading determiner, keep if still multi-word
+    cleaned = []
+    for n in names:
+        words = n.split()
+        if words[0] in _SKIP and len(words) > 2:
+            cleaned.append(' '.join(words[1:]))
+        elif words[0] not in _SKIP:
+            cleaned.append(n)
+    return set(n for n in cleaned if len(n) > 4)
+
+def _extract_football_stages(text: str) -> set:
+    """Extract football tournament stage references."""
+    tl = text.lower()
+    stages = set()
+    stage_patterns = [
+        ('last-16', r'\blast[\s-]16\b'), ('last-32', r'\blast[\s-]32\b'),
+        ('quarter-final', r'\bquarter[\s-]final\b'),
+        ('semi-final', r'\bsemi[\s-]final\b'), ('final', r'\bfinal\b'),
+        ('group stage', r'\bgroup\sstage\b'),
+        ('round of 16', r'\bround\sof\s16\b'),
+        ('round of 32', r'\bround\sof\s32\b'),
+    ]
+    for name, pat in stage_patterns:
+        if re.search(pat, tl):
+            stages.add(name)
+    return stages
+
+def grounding_check(slides_text: str, article_text: str, article_names: set, article_stages: set) -> list:
+    """Check generated content for names/stages not in article. Returns list of warnings."""
+    warnings = []
+    # 1. Check proper nouns in slides
+    slide_names = _extract_proper_nouns(slides_text)
+    for name in slide_names:
+        if name not in article_text and len(name) > 4:
+            warnings.append(f"HALLUCINATED_NAME: '{name}' not in article")
+    # 2. Check football stage terms
+    slide_stages = _extract_football_stages(slides_text)
+    for stage in slide_stages:
+        if stage not in article_stages:
+            warnings.append(f"HALLUCINATED_STAGE: '{stage}' used but not in article")
+    return warnings
+
+# Pre-extract article entities once (before retry loop)
+_article_names = _extract_proper_nouns(article_text)
+_article_stages = _extract_football_stages(article_text)
+log(f"   🔍 Grounding: {_article_names.__len__()} names, {_article_stages.__len__()} stages in article")
 raw_json = ""
+grounding_warnings = []
 
 for attempt in range(1, MAX_RETRIES + 1):
     # Cycle through model chain
@@ -1122,8 +1235,24 @@ for attempt in range(1, MAX_RETRIES + 1):
             if trimmed_count:
                 log(f"   ✂️ Auto-trimmed {trimmed_count} slide(s) to SENTENCE_COUNTS max")
             log(f"   ✅ All slides pass sentence count")
+
+            # ── Grounding check: verify names/stages against article ──
+            _slides_text = " ".join(
+                s.get("content", "") for s in (slide_list if "slides" in slides_data else [slides_data.get(f"slide_{i}", {}) for i in range(1, 7)])
+                if isinstance(s, dict)
+            )
+            gw = grounding_check(_slides_text, article_text, _article_names, _article_stages)
+            if gw:
+                log(f"   ⚠️ Grounding warnings: {'; '.join(gw)}")
+                if attempt < MAX_RETRIES:
+                    log(f"   🔄 Grounding fail — retrying ({attempt}/{MAX_RETRIES})...")
+                    continue  # retry — don't break yet
+                else:
+                    log(f"   ⚠️ Grounding warnings on last attempt — accepting with warnings")
+
             # Re-serialize the (possibly trimmed) dict back to JSON
             raw_json = json.dumps(slides_data, ensure_ascii=False)
+            grounding_warnings = gw if gw else []
             break
         else:
             log(f"   ⚠️ Sentence count fail: {', '.join(sentence_issues)} — retrying...")
@@ -1267,6 +1396,7 @@ staging_obj = {
     "image_url": image_url,
     "image_width": image_width,
     "image_height": image_height,
+    "grounding_warnings": grounding_warnings,
 }
 
 if DRY_RUN:
@@ -1279,7 +1409,7 @@ else:
         with open(tmp, "w") as f:
             json.dump(staging_obj, f, indent=2)
         os.replace(tmp, STAGING["v2"])
-        log(f"✅ {best['title']}  ({len(slides)} slides) [{'WC' if staging_obj['is_wc'] else 'Transfer' if staging_obj['is_transfer'] else 'General'}]")
+        log(f"✅ {best['title']}  ({len(slides)} slides) [{'WC' if staging_obj['is_wc'] else 'Transfer' if staging_obj['is_transfer'] else 'General'}]{f' ⚠️ {len(grounding_warnings)} grounding warning(s)' if grounding_warnings else ''}")
     except Exception as e:
         log_error(f"Staging write failed: {e}")
         log(f"❌ Staging write failed: {e}")
@@ -1305,6 +1435,7 @@ metrics = {
     "content_c": len(content),
     "image": bool(image_url),
     "cached": _was_cached,
+    "grounding_warnings": len(grounding_warnings),
 }
 METRICS_LOG = f"{HOME}/.hermes/pressbox/metrics.jsonl"
 try:
