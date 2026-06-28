@@ -7,6 +7,7 @@ Automated football content pipeline for [@parkthebus.football](https://www.threa
 ## Architecture
 
 ```
+run-mvp.sh            ← Cron entry point
 pressbox-mvp.py       ← Main pipeline (scrape, score, LLM generate, post)
 threads_poster.py     ← Threads Graph API wrapper
 pressbox_common.py    ← Shared utils (paths, logging, dedup, classification)
@@ -30,7 +31,7 @@ pressbox_scoring.py   ← 7-component analytics-driven scoring (0-120 pts)
 pip install -r requirements.txt
 
 # LLM API key
-echo 'MISTRAL_API_KEY=***' > ~/.hermes/.env
+echo 'MISTRAL_API_KEY=***' >> ~/.hermes/.env
 
 # Threads token
 echo '{"access_token": "TOKEN", "user_id": "26778473708441722"}' > ~/.hermes/threads_token.json
@@ -44,20 +45,22 @@ echo '{"topics": []}' > ~/.hermes/pressbox/posted_topics.json
 
 ```bash
 # Dry run (scrape + generate, no post)
-python3 pressbox-mvp.py --dry-run
+bash run-mvp.sh --dry-run
 
 # Live run
-python3 pressbox-mvp.py
+bash run-mvp.sh
 ```
 
-## Cron
+## Schedule
 
-Single cron job runs every 2 hours:
-```
-0 */2 * * * cd /home/ubuntu/pressbox-pipeline && python3 -u pressbox-mvp.py
-```
+Runs **every hour** via Hermes cron (`0 * * * *`), from 00:00 to 23:00 WIB.
 
-Built-in 30-minute cooldown prevents spam.
+Built-in **30-minute cooldown** prevents duplicate posts — effective rate is ~1 post per 1-2 hours.
+
+| Window | Behavior |
+|--------|----------|
+| 00:00–23:00 WIB | Scrape + score + post (if new topic found) |
+| Cooldown hit | Skip silently, try again next hour |
 
 ## Scoring (0-120 pts)
 
