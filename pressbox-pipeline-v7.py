@@ -595,39 +595,60 @@ _NOISE_PATTERNS = [
     r'(?:Mirror\s+Football|Make\s+Football\s+Great\s+Again|Preferred\s+Source).*?(?:\.|$)',
     r'(?:Kitbag|Various\s+Prices|Buy\s+Now|Product\s+Description|Rolls\s+Royce).*?(?:\.|$)',
     r'(?:Subscribe|Newsletter|Sign\s+up|Signup).*?(?:\.|$)',
+    r'(?:Also See|Download the Sky Sports app|Get Sky Sports|Play Super 6).*?(?:\.|$)',
+    r'(?:Article continues below|Join our new WhatsApp community).*?(?:\.|$)',
+    r'(?:This article contains affiliate links).*?(?:\.|$)',
 ]
 
 def extract_article_text(raw_html: str) -> str:
-    """Extract clean article body from HTML using BeautifulSoup.
-    
-    Strategy:
-    1. <article> tag (most reliable for news sites)
-    2. Fallback: full page strip (current behavior)
+    """Extract clean article body from HTML.
+    Priority: <article> → <div.sdc-article-body> → <div.article-body> → full strip.
     """
     soup = BeautifulSoup(raw_html, 'html.parser')
     
+    # 1. <article> tag (Mirror, Goal.com)
     article = soup.find('article')
+    
+    # 2. SkySports: <div class="sdc-article-body">
     if not article:
+        article = soup.find('div', class_='sdc-article-body')
+    
+    # 3. Generic: <div> with article-body in class
+    if not article:
+        for d in soup.find_all('div', class_=True):
+            cls = ' '.join(d.get('class', [])).lower()
+            if any(k in cls for k in ['article-body', 'article_content', 'story-body', 'body-content']):
+                article = d
+                break
+    
+    if not article:
+        # Fallback: full page strip
         text = re.sub(r'<style[^>]*>.*?</style>', ' ', raw_html, flags=re.DOTALL|re.IGNORECASE)
         text = re.sub(r'<script[^>]*>.*?</script>', ' ', text, flags=re.DOTALL|re.IGNORECASE)
         text = re.sub(r'<[^>]+>', ' ', text)
         text = re.sub(r'\s+', ' ', text).strip()
         return html_mod.unescape(text)
     
-    # Remove non-content elements
+    # Strip non-content elements
     for tag in article.find_all(['nav', 'aside', 'footer', 'script', 'style',
                                   'form', 'button', 'input', 'select']):
         tag.decompose()
     
-    # Remove ad/related content divs by class pattern
-    ad_patterns = ['ad-', 'advert', 'related', 'recommend', 'newsletter',
-                   'subscribe', 'social-share', 'share-', 'promo', 'sponsor',
-                   'cookie', 'consent', 'signup', 'trending', 'more-stories',
-                   'latest-news', 'popular']
+    # Strip ad/promo/related divs by class
+    _AD_PATTERNS = ['ad-', 'advert', 'related', 'recommend', 'newsletter',
+                    'subscribe', 'social-share', 'share-', 'promo', 'sponsor',
+                    'cookie', 'consent', 'signup', 'trending', 'more-stories',
+                    'latest-news', 'popular', 'strapline', 'banner']
+    targets = []
     for div in article.find_all(['div', 'section'], class_=True):
-        classes = ' '.join(div.get('class', [])).lower()
-        if any(p in classes for p in ad_patterns):
-            div.decompose()
+        try:
+            classes = ' '.join(div.get('class', [])).lower()
+            if any(p in classes for p in _AD_PATTERNS):
+                targets.append(div)
+        except (AttributeError, TypeError):
+            continue
+    for t in targets:
+        t.decompose()
     
     text = article.get_text(separator=' ', strip=True)
     
