@@ -5,9 +5,9 @@ from datetime import datetime, timezone, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ── Auto-install missing deps (prevents FATAL import errors in cron) ──
-_DEPS = ["requests", "httpx", "beautifulsoup4", "python-dotenv", "telegram-send"]
+_DEPS = ["requests", "httpx", "beautifulsoup4", "python-dotenv"]
 for _pkg in _DEPS:
-    _mod = {"beautifulsoup4": "bs4", "telegram-send": "telegram_send", "python-dotenv": "dotenv"}.get(_pkg, _pkg)
+    _mod = {"beautifulsoup4": "bs4", "python-dotenv": "dotenv"}.get(_pkg, _pkg)
     try:
         __import__(_mod)
     except ImportError:
