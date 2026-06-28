@@ -4,6 +4,15 @@ import html as html_mod, json, os, sys, re, time, subprocess, importlib.util, st
 from datetime import datetime, timezone, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+# ── Auto-install missing deps (prevents FATAL import errors in cron) ──
+_DEPS = ["requests", "httpx", "beautifulsoup4", "python-dotenv", "telegram-send"]
+for _pkg in _DEPS:
+    _mod = {"beautifulsoup4": "bs4", "telegram-send": "telegram_send", "python-dotenv": "dotenv"}.get(_pkg, _pkg)
+    try:
+        __import__(_mod)
+    except ImportError:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "--root-user-action=ignore", _pkg], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
 from pressbox_common import WIB, HOME, SCRIPTS, STAGING, POSTED, load_env, log
 from pressbox_common import clean_words, is_similar, classify_topic_type
 from pressbox_common import STOPWORDS, REPLACEMENTS
@@ -37,38 +46,24 @@ except Exception as e:
 
 # ── Load env ────────────────────────────────────────────────────────
 env_config = load_env()
-# FreeLLMAPI unified gateway — proxies gpt-oss-20b → Groq
-FREELLMAPI_BASE_URL_RAW = env_config.get("FREELLMAPI_BASE_URL", "http://localhost:3001/v1")
-FREELLMAPI_API_KEY = env_config.get("FREELLMAPI_API_KEY", "")
-# Resolve chat-completions URL (FreeLLMAPI_BASE_URL ends with /v1)
-FREELLMAPI_URL = FREELLMAPI_BASE_URL_RAW.rstrip("/")
-if not FREELLMAPI_URL.endswith("/v1"):
-    FREELLMAPI_URL = FREELLMAPI_URL + "/v1"
-FREELLMAPI_URL = FREELLMAPI_URL + "/chat/completions"
 # Legacy providers (kept available for ad-hoc use, not in active chain)
 GROQ_API_KEY = env_config.get("GROQ_API_KEY", "")
 GITHUB_TOKEN = env_config.get("GITHUB_TOKEN", "")
 MISTRAL_API_KEY = env_config.get("MISTRAL_API_KEY", "")
 VIKEY_API_KEY = env_config.get("VIKEY_API_KEY", "") or "vk-7e2a06ab-3ff2-4a04-a136-1c2f83cc876d"
 MINIMAX_API_KEY = env_config.get("MINIMAX_API_KEY") or env_config.get("OPENCODE_GO_API_KEY", "")
-# Legacy globals (some legacy callers may still reference these)
-API_KEY = FREELLMAPI_API_KEY or GROQ_API_KEY or GITHUB_TOKEN or MINIMAX_API_KEY
-API_URL = FREELLMAPI_URL
+# Legacy globals (for callers not using PROVIDERS)
+API_KEY = GROQ_API_KEY or GITHUB_TOKEN
+API_URL = "https://api.groq.com/openai/v1/chat/completions"
 MODEL = "gpt-oss-20b"
 
 # ── Provider registry (per-model URL + key) ──────────────────────────────
 PROVIDERS = {
-    # Primary: FreeLLMAPI proxy → Groq (model id: openai/gpt-oss-20b)
-    "gpt-oss-20b": {
-        "base_url": FREELLMAPI_URL,
-        "api_key":  FREELLMAPI_API_KEY,
-        "provider": "groq (via FreeLLMAPI)",
-    },
-    # Legacy providers — kept available, not in active chain
-    "openai/gpt-oss-20b": {
-        "base_url": "https://api.groq.com/openai/v1/chat/completions",
-        "api_key":  GROQ_API_KEY,
-        "provider": "groq (direct)",
+    # Fallback: 9router (qwen/qwen3-32b)
+    "qwen/qwen3-32b": {
+        "base_url": "http://localhost:20128/v1/chat/completions",
+        "api_key":  "9router-noauth",
+        "provider": "9router",
     },
     "mistral-large-latest": {
         "base_url": "https://api.mistral.ai/v1/chat/completions",
@@ -84,12 +79,10 @@ PROVIDERS = {
 
 def get_provider_for_model(model_name):
     """Look up provider config for a model. Returns None if the model's
-    specific key is missing — caller must skip that chain entry.
-    Falls back to FreeLLMAPI globals ONLY when the model isn't in PROVIDERS.
-    """
+    specific key is missing — caller must skip that chain entry."""
     p = PROVIDERS.get(model_name)
     if p is None:
-        return {"base_url": API_URL, "api_key": API_KEY}
+        return None
     if not p["api_key"]:
         # Model IS known but its key isn't configured — signal skip
         return None
@@ -99,11 +92,11 @@ def get_provider_for_model(model_name):
 def get_model_config(topic_type):
     """Model chain with fallback order.
     Primary: mistral-large-latest (Mistral API, direct)
-    Fallback 1: gpt-oss-20b (FreeLLMAPI → Groq)
+    Fallback: qwen/qwen3-32b via 9router API
     """
     return [
         {"model": "mistral-large-latest","max_tokens": 8000, "reasoning_effort": None},  # Mistral API: supports up to 8192 — bumped from 4000 to avoid 6-slide carousel truncation
-        {"model": "gpt-oss-20b",         "max_tokens": 4000, "reasoning_effort": None},  # Groq: gpt-oss-20b (Groq rejects >4000 output tokens on this model — 429)
+        {"model": "qwen/qwen3-32b",         "max_tokens": 4000, "reasoning_effort": None},  # Fallback: qwen/qwen3-32b via 9router
     ]
 
 
@@ -969,6 +962,7 @@ for attempt in range(1, MAX_RETRIES + 1):
             tok_source = "est"
 
         log(f"   Response: content={len(content)} chars, reasoning={len(reasoning)} chars")
+        log(f"   🔍 RAW content[:200]: {repr(content[:200])}")
         log(f"   Tokens: prompt={prompt_tok} completion={completion_tok} total={total_tok} ({tok_source})")
 
         # Extract JSON — content first, then reasoning (deepseek puts JSON there)
@@ -979,6 +973,8 @@ for attempt in range(1, MAX_RETRIES + 1):
             candidate_json = re.sub(r"^```(?:json)?\s*", "", content)
             candidate_json = re.sub(r"\s*```$", "", candidate_json)
             candidate_json = candidate_json.strip()
+            if candidate_json != content:
+                log(f"   🔍 After fence strip: {repr(candidate_json[:150])}")
 
         if not candidate_json and reasoning:
             log("   Content empty, extracting from reasoning...")
@@ -1072,6 +1068,11 @@ for attempt in range(1, MAX_RETRIES + 1):
                 log(f"   ✂️  Extracted JSON from prose wrapper ({len(candidate_json)}c → {len(stripped)}c)")
                 candidate_json = stripped
 
+        # Fix: Mistral sometimes wraps JSON in mustache-style double braces {{...}}
+        if candidate_json.startswith("{{"):
+            candidate_json = candidate_json.replace("{{", "{").replace("}}", "}")
+            log(f"   🔧 Converted mustache-style braces to normal ({len(candidate_json)}c)")
+
         # Fix: Handle truncated JSON from minimax models (missing closing braces)
         # Always check brace count, even if ends with }
         open_braces = candidate_json.count('{')
@@ -1088,6 +1089,7 @@ for attempt in range(1, MAX_RETRIES + 1):
         # Parse and validate sentence count (with auto-trim for over-max slides)
         # Use JSONDecoder to parse only the FIRST valid object — avoids "Extra data"
         # when LLM appends trailing prose or multiple JSON objects.
+        log(f"   🔍 candidate_json preview: {repr(candidate_json[:200])}")
         try:
             decoder = json.JSONDecoder()
             slides_data, _ = decoder.raw_decode(candidate_json.lstrip())

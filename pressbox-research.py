@@ -18,11 +18,19 @@ Runtime: ~6-10s
 
 import json, re, sys, concurrent.futures, time, html
 import xml.etree.ElementTree as ET
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from email.utils import parsedate_to_datetime
-from bs4 import BeautifulSoup
 
+# ── Auto-install missing deps ──
+for _pkg, _mod in [("httpx", "httpx"), ("beautifulsoup4", "bs4")]:
+    try:
+        __import__(_mod)
+    except ImportError:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "--root-user-action=ignore", _pkg], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+from bs4 import BeautifulSoup
 import httpx
 
 NOW = datetime.now(timezone.utc)
