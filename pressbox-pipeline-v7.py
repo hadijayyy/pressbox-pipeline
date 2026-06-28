@@ -782,6 +782,7 @@ Use only article body. Ignore nav, related links, ads, bylines, boilerplate.
 
 [SLIDES — MIN sentence counts]
 1. HOOK (1-3, MIN 1): NO context preamble ("In a recent match...", "During the World Cup..."). Start with the paradox/truth directly. First sentence must be a standalone scroll-stopper.
+   **CONVERSATION STARTER RULE:** If the hook reads like a news headline, rewrite it. Must read like something you'd say to a friend at a pub to make them stop and react.
    HOOK PRIORITY (order matters):
    (a) CONTROVERSY: "X dragged into row", "X slammed for", "X under fire" — drama + conflict + big names = highest engagement (367K views proven)
    (b) CONFLICT: "X slams Y", "X blasts Y", "X hits back at Y" — direct confrontation between named parties (119 replies proven)

@@ -1,7 +1,7 @@
-"""Pressbox Scoring Module — Football-specific additive 0-100 scoring.
+"""Pressbox Scoring Module — Football-specific additive 0-120 scoring.
 
 Adapted from Market Monday v17 scoring system.
-Architecture: 5 named components, each capped. Independently debuggable.
+Architecture: 7 named components, each capped. Independently debuggable.
 
 Components:
   1. Keyword Match   : +8 pts per unique include keyword (max 5 = 40 pts)
@@ -9,9 +9,12 @@ Components:
   3. Recency         : 15 (<6h) / 10 (6-24h) / 5 (24-48h) / 0 (>48h)
   4. Data/Konkret    : 15 (specific: score, fee, %) / 7 (vague digits) / 0
   5. Sumber Tier     : 10 (Tier 1) / 5 (Tier 2) / 0 (unknown)
+  6. Audience Reach  : +5 per big team/nation/star mentioned (max 20)
+  7. Drama Signal    : +5 per drama word in title (max 10)
   Penalti            : -1 hard reject if exclude keyword matched
 
 Threshold: score >= 60 for pipeline.
+Big-audience topics (England, big clubs, drama) score 80-120 → auto-preferred.
 """
 
 import re
@@ -144,6 +147,30 @@ def source_tier(source):
         if t in s:
             return 2
     return 0
+
+
+# ─── AUDIENCE REACH BOOST ──────────────────────────────────────────────────
+# Big teams/nations = massive built-in audience. +15-25 pts.
+BIG_TEAMS = [
+    "england", "brazil", "argentina", "germany", "france", "spain",
+    "manchester united", "man city", "manchester city", "liverpool",
+    "arsenal", "chelsea", "tottenham", "real madrid", "barcelona",
+    "bayern", "psg", "inter milan", "juventus", "ac milan",
+    "ronaldo", "messi", "mbappe", "haaland", "salah", "bellingham",
+    "southgate", "tuchel", "guardiola", "klopp", "mourinho",
+    "arteta", "slot",
+]
+BIG_TEAMS_RE = [re.compile(r'\b' + re.escape(t) + r'\b') for t in BIG_TEAMS]
+
+# High-engagement drama words in title (not body — title drives clicks)
+DRAMA_WORDS = [
+    "locked out", "fatal", "no way out", "slams", "blasts", "hits out",
+    "furious", "outraged", "banned", "sacked", "revolt", "mutiny",
+    "explosive", "shocking", "destroyed", "humiliated", "battered",
+    "war of words", "bust-up", "rift", "scandal", "controversy",
+    "refuses", "walks out", "storms off", "under pressure",
+    "collapsed", "disaster", "nightmare", "crisis",
+]
 
 
 def check_include_keywords(text):
@@ -285,7 +312,22 @@ def score_topic(t):
     else:
         source_pts = 0
 
-    total = keyword_pts + cat_pts + recency_pts + data_pts + source_pts
+    # 6. Audience Reach Boost (max 20 pts) — big teams/nations/players = massive audience
+    audience_pts = 0
+    title_lower = title.lower()
+    for pat in BIG_TEAMS_RE:
+        if pat.search(combined.lower()):
+            audience_pts += 5
+    audience_pts = min(audience_pts, 20)  # cap at 20
+
+    # 7. Drama/Engagement Signal in title (max 10 pts)
+    drama_pts = 0
+    for dw in DRAMA_WORDS:
+        if dw in title_lower:
+            drama_pts += 5
+    drama_pts = min(drama_pts, 10)
+
+    total = keyword_pts + cat_pts + recency_pts + data_pts + source_pts + audience_pts + drama_pts
     return total
 
 

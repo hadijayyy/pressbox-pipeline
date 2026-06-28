@@ -24,29 +24,30 @@ Before writing anything, answer these silently:
 
 ## Step 2: Generate Slides
 
-### Slide 1 — HOOK (150-300 chars)
-Start mid-action. Drop the reader into the story without context.
+### Slide 1 — HOOK (100-200 chars, MAX 3 sentences)
+Drop the reader into the conflict. No setup. No context. Start at the peak of tension.
 
-**Hook types (rotate, never repeat same type twice in a row):**
-- **Stat:** "Only 3 players have ever done this."
-- **Quote:** Direct words from article, no attribution needed
-- **Question:** Unexpected question that demands an answer
-- **Scenario:** "Imagine being told your career is over at 24."
-- **Contrast:** "X rejected £200M. Y accepted £5M. Both think they won."
+**Hook formulas (rotate):**
+- **Conflict:** "[Named person] just [action] [consequence]. The problem? [stake]."
+- **Contrast:** "[Person] is [positive trait]. But now [negative outcome]."
+- **Urgency:** "There's no way out this time."
+- **Accusation:** "[Person] just [mistake] — and now [repeating/worsening it]."
 
-✅ GOOD:
-> "Cristiano Ronaldo has played 1,200 career games. He's never been targeted like this before."
+✅ GOOD (62K views):
+> "Thomas Tuchel just locked England's most lethal weapon out of the World Cup — and now he's repeating Gareth Southgate's fatal mistake. The problem? There's no way out this time."
 
 ✅ GOOD:
 > "Portugal's biggest star just became their biggest problem."
 
-❌ BAD:
-> "In a stunning turn of events, Arsenal have made a huge signing that could change everything."
+❌ BAD (5 views — too informational):
+> "DR Congo's 'Living Statue' fan — adored by 255K followers — has been BANNED from the US for their World Cup clash against England."
 
 ❌ BAD:
-> "Cristiano Ronaldo was targeted. That's the headline from a new report."
+> "In a stunning turn of events, Arsenal have made a huge signing."
 
-**Forbidden:** "Breaking:" / ALL CAPS names / "In [year]..." / Starting with player name
+**Rule:** If the hook reads like a news headline, rewrite it. It must read like a CONVERSATION STARTER.
+
+**Forbidden:** "Breaking:" / ALL CAPS names / "In [year]..." / Starting with neutral description
 
 ---
 
