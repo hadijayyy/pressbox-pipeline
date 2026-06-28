@@ -53,14 +53,15 @@ bash run-mvp.sh
 
 ## Schedule
 
-Runs **every hour** via Hermes cron (`0 * * * *`), from 00:00 to 23:00 WIB.
+Runs **every 30 minutes** via Hermes cron (`*/30 * * * *`), 24/7.
 
-Built-in **30-minute cooldown** prevents duplicate posts — effective rate is ~1 post per 1-2 hours.
+Built-in **30-minute cooldown** prevents duplicate posts — effective rate is ~1 post per 30-60 minutes.
 
 | Window | Behavior |
 |--------|----------|
-| 00:00–23:00 WIB | Scrape + score + post (if new topic found) |
-| Cooldown hit | Skip silently, try again next hour |
+| `:00` and `:30` each hour | MVP: scrape + score + post (if new topic found) |
+| `:10` and `:40` each hour | Watchdog: checks status, retries if last run failed |
+| Cooldown hit | Skip silently, try again next run |
 
 ## Scoring (0-120 pts)
 
