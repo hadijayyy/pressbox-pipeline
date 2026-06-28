@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/local/bin/python3
 """Press Box Pipeline v7 — fast, clean, ~300 lines."""
 import html as html_mod, json, os, sys, re, time, subprocess, importlib.util, struct
 from datetime import datetime, timezone, timedelta

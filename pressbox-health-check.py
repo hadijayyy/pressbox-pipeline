@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/local/bin/python3
 """Pressbox health check — runs after each pipeline/post cron tick.
 Exits 0 silently when everything is fine; exits 1 with a list of failures
 when any of the tracked crons errored in their latest run.

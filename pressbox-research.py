@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/local/bin/python3
 """
 Press Box Research — Batch scraper using 4 verified-working WC2026 sources.
 Google News RSS blocked from this IP. Using direct site scraping.

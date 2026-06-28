@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/local/bin/python3
 """
 Press Box Direct Post — Post text threads to Threads API with multi-slide support.
 Each slide (separated by ===) becomes its own post chained via reply_to_id.

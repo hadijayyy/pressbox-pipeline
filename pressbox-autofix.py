@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/local/bin/python3
 """Pressbox auto-fix — runs after a pipeline failure to handle safe cases.
 Safe to auto-fix:
   - network_timeout  (curl/LLM read timed out)

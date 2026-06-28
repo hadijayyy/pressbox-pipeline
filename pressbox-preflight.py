@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/local/bin/python3
 """Pressbox pre-flight syntax check.
 Runs `python3 -m py_compile` on every pressbox script before the pipeline cron
 fires. Exits 0 silently on success, exits 1 with details if any script is broken.

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/local/bin/python3
 """
 post_pressbox_thread.py — Post N-post chained thread to Threads.
 

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/local/bin/python3
 """
 PRESS BOX — Staging Check (Aggressive).
 Cek staging, kalau kosong → run pipeline with retries.

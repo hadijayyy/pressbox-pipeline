@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/local/bin/python3
 """
 PRESS BOX POST — Phase 2.
 Read staging → post to Threads → verify → update tracking.
