@@ -46,16 +46,8 @@ except Exception as e:
 
 # ── Load env ────────────────────────────────────────────────────────
 env_config = load_env()
-# Legacy providers (kept available for ad-hoc use, not in active chain)
-GROQ_API_KEY = env_config.get("GROQ_API_KEY", "")
-GITHUB_TOKEN = env_config.get("GITHUB_TOKEN", "")
-MISTRAL_API_KEY = env_config.get("MISTRAL_API_KEY", "")
-VIKEY_API_KEY = env_config.get("VIKEY_API_KEY", "") or "vk-7e2a06ab-3ff2-4a04-a136-1c2f83cc876d"
-MINIMAX_API_KEY = env_config.get("MINIMAX_API_KEY") or env_config.get("OPENCODE_GO_API_KEY", "")
-# Legacy globals (for callers not using PROVIDERS)
-API_KEY = GROQ_API_KEY or GITHUB_TOKEN
-API_URL = "https://api.groq.com/openai/v1/chat/completions"
-MODEL = "gpt-oss-20b"
+
+# Legacy globals removed — use PROVIDERS + get_model_config() instead
 
 # ── Provider registry (per-model URL + key) ──────────────────────────────
 PROVIDERS = {
@@ -70,11 +62,7 @@ PROVIDERS = {
         "api_key":  MISTRAL_API_KEY,
         "provider": "mistral",
     },
-    "MiniMax-M3": {
-        "base_url": "https://api.tokenrouter.com/v1/chat/completions",
-        "api_key":  MINIMAX_API_KEY,
-        "provider": "tokenrouter",
-    },
+
 }
 
 def get_provider_for_model(model_name):
@@ -908,7 +896,7 @@ for attempt in range(1, MAX_RETRIES + 1):
         )
         if r.status_code != 200:
             log(f"❌ API error: HTTP {r.status_code} {r.text[:200]}")
-            # Always try next model in chain (Mistral 4xx/5xx → fall through to MiniMax)
+            # Always try next model in chain (Mistral 4xx/5xx → fall through to 9router)
             # Only sys.exit after ALL chain entries exhausted.
             if attempt < MAX_RETRIES:
                 log(f"   Trying next model in chain ({attempt}/{MAX_RETRIES})...")
@@ -969,7 +957,7 @@ for attempt in range(1, MAX_RETRIES + 1):
         # Extract JSON — content first, then reasoning (deepseek puts JSON there)
         candidate_json = ""
         if content:
-            # Strip <think>...</think> block (MiniMax-M3 / reasoning models wrap output)
+            # Strip <think>...</think> block (reasoning models wrap output)
             content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
             candidate_json = re.sub(r"^```(?:json)?\s*", "", content)
             candidate_json = re.sub(r"\s*```$", "", candidate_json)

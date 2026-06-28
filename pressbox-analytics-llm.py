@@ -33,43 +33,24 @@ if os.path.exists(ENV_PATH):
                 k, v = line.split("=", 1)
                 env_config[k.strip()] = v.strip().strip("\"'")
 
-FREELLMAPI_BASE_URL_RAW = env_config.get("FREELLMAPI_BASE_URL", "http://localhost:3001/v1")
-FREELLMAPI_API_KEY = env_config.get("FREELLMAPI_API_KEY", "")
-FREELLMAPI_URL = FREELLMAPI_BASE_URL_RAW.rstrip("/")
-if not FREELLMAPI_URL.endswith("/v1"):
-    FREELLMAPI_URL = FREELLMAPI_URL + "/v1"
-FREELLMAPI_URL = FREELLMAPI_URL + "/chat/completions"
-
 MISTRAL_API_KEY = env_config.get("MISTRAL_API_KEY", "")
-VIKEY_API_KEY = env_config.get("VIKEY_API_KEY", "") or "vk-7e2a06ab-3ff2-4a04-a136-1c2f83cc876d"
-MINIMAX_API_KEY = env_config.get("MINIMAX_API_KEY") or env_config.get("OPENCODE_GO_API_KEY", "")
 
-# Provider registry (same as v7)
+# Provider registry (same as v7 pipeline)
 PROVIDERS = {
     "mistral-large-latest": {
         "base_url": "https://api.mistral.ai/v1/chat/completions",
         "api_key":  MISTRAL_API_KEY,
     },
-    "MiniMax-M3": {
-        "base_url": "https://api.tokenrouter.com/v1/chat/completions",
-        "api_key":  MINIMAX_API_KEY,
-    },
-    "vikey/vclaw": {
-        "base_url": "http://api.vikey.ai/v1/chat/completions",
-        "api_key":  VIKEY_API_KEY,
-    },
-    "gpt-oss-20b": {
-        "base_url": FREELLMAPI_URL,
-        "api_key":  FREELLMAPI_API_KEY,
+    "qwen/qwen3-32b": {
+        "base_url": "http://localhost:20128/v1/chat/completions",
+        "api_key":  "9router-noauth",  # 9router doesn't need auth
     },
 }
 
-# Model chain (same order as v7, lower max_tokens for analytics JSON)
+# Model chain: Mistral primary → 9router fallback
 MODEL_CHAIN = [
     {"model": "mistral-large-latest", "max_tokens": 4000},
-    {"model": "vikey/vclaw",          "max_tokens": 4000},
-    {"model": "MiniMax-M3",           "max_tokens": 4000},
-    {"model": "gpt-oss-20b",          "max_tokens": 4000},
+    {"model": "qwen/qwen3-32b",       "max_tokens": 4000},
 ]
 LLM_TIMEOUT = 120
 
@@ -173,7 +154,7 @@ def classify_hook(text):
 def call_llm(prompt, max_retries=4):
     """Call LLM with model chain fallback (same order as v7 pipeline).
     Returns parsed JSON or None.
-    Chain: mistral-large-latest → vikey/vclaw → MiniMax-M3 → gpt-oss-20b
+    Chain: mistral-large-latest → qwen/qwen3-32b via 9router
     """
     system_msg = f"You are a social media analytics expert. Current time: {datetime.now(WIB).strftime('%A, %d %B %Y %H:%M WIB')}. Analyze the data and return ONLY valid JSON."
 
