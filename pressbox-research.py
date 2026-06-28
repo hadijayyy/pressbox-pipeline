@@ -16,6 +16,10 @@ Output: JSON array of top 5 WC2026 topics with verified source URLs.
 Runtime: ~6-10s
 """
 
+import subprocess as _sp
+for _pkg, _mod in [("httpx","httpx"),("beautifulsoup4","bs4"),("requests","requests"),("python-dotenv","dotenv")]:
+    try: __import__(_mod)
+    except ImportError: _sp.check_call([sys.executable,"-m","pip","install","--quiet","--root-user-action=ignore",_pkg],stdout=_sp.DEVNULL,stderr=_sp.DEVNULL)
 import json, re, sys, concurrent.futures, time, html
 import xml.etree.ElementTree as ET
 import subprocess

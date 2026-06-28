@@ -12,6 +12,11 @@ Usage:
     python3 ~/.hermes/scripts/pressbox-analytics-feedback.py
 """
 
+import subprocess, sys
+for _pkg, _mod in [("httpx","httpx"),("beautifulsoup4","bs4"),("requests","requests"),("python-dotenv","dotenv")]:
+    try: __import__(_mod)
+    except ImportError: subprocess.check_call([sys.executable,"-m","pip","install","--quiet","--root-user-action=ignore",_pkg],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+
 import json, os, httpx, re
 from datetime import datetime, timezone, timedelta
 from collections import defaultdict
