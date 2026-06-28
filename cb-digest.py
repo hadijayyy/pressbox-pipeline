@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/local/bin/python3
 """Circuit Breaker Daily Digest — runs 08:00 WIB daily.
 
 Summarizes last 24h of circuit breaker activity across all tracked jobs.

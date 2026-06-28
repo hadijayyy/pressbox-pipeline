@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/local/bin/python3
 """Threads OAuth Server — Buffer-like auto-flow.
 
 Usage:

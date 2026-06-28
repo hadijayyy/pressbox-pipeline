@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/local/bin/python3
 """
 PRESS BOX ANALYTICS LLM — Smart Daily/Weekly Review.
 Fetches Threads posts + engagement, sends to LLM for deep analysis,

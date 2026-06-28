@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/local/bin/python3
 """
 Verify Last Slide — verify the last slide of a posted carousel contains the
 expected URL. Used by pressbox-post.py to confirm the CTA (call-to-action)

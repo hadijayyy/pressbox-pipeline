@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/local/bin/python3
 """Press Box Analytics → Feedback Loop (v2 — Historical Merge).
 
 Fetches last 50 posts, merges with previous analytics data using

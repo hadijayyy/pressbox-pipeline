@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/local/bin/python3
 """Press Box Auto-Adjust — Rule-Based Pipeline Optimizer.
 
 Reads analytics_feedback.json + daily analytics data and generates

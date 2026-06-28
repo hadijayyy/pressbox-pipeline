@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/local/bin/python3
 """Circuit Breaker Status Reporter — runs every 2h, reports any OPEN circuits.
 
 Silent on success (all CLOSED). Alerts only when a circuit is tripped.

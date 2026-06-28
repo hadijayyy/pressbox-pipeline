@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/local/bin/python3
 """Press Box Weekly Analytics — Deep Pattern Analysis (Fast Version)."""
 
 import json, os, httpx, re

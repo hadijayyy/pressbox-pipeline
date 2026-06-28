@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/local/bin/python3
 """Send a message to a Telegram topic via Bot API. --summary for compact format."""
 import os, sys, json, re, urllib.request
 

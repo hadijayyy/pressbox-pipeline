@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/local/bin/python3
 """Threads Token Refresh — auto-refresh long-lived token before expiry.
 
 Usage:

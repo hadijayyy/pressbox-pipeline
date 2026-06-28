@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/local/bin/python3
 """Common utilities shared by Press Box pipeline modules.
 
 Exports:

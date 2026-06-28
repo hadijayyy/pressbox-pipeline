@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/local/bin/python3
 """Hermes Circuit Breaker — reusable across all cron jobs.
 
 States per job:

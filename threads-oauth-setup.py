@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/local/bin/python3
 """Threads OAuth Setup — one-time flow to get a long-lived access token.
 
 Usage:
