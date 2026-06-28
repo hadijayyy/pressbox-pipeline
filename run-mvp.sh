@@ -1,3 +1,3 @@
 #!/bin/bash
-cd /home/ubuntu/pressbox-pipeline
+cd "$(dirname "$0")"
 python3 -u pressbox-mvp.py
