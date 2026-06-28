@@ -54,12 +54,7 @@ MISTRAL_API_KEY = env_config.get('MISTRAL_API_KEY', "")
 
 # ── Provider registry (per-model URL + key) ──────────────────────────────
 PROVIDERS = {
-    # Fallback: 9router (qwen/qwen3-32b)
-    "qwen/qwen3-32b": {
-        "base_url": "http://localhost:20128/v1/chat/completions",
-        "api_key":  "9router-noauth",
-        "provider": "9router",
-    },
+
     "mistral-large-latest": {
         "base_url": "https://api.mistral.ai/v1/chat/completions",
         "api_key":  MISTRAL_API_KEY,
@@ -81,13 +76,9 @@ def get_provider_for_model(model_name):
 
 # ── Model routing by article type ──────────────────────────────────
 def get_model_config(topic_type):
-    """Model chain with fallback order.
-    Primary: mistral-large-latest (Mistral API, direct)
-    Fallback: qwen/qwen3-32b via 9router API
-    """
+    """Model chain — Mistral large (direct)."""
     return [
         {"model": "mistral-large-latest","max_tokens": 8000, "reasoning_effort": None},  # Mistral API: supports up to 8192 — bumped from 4000 to avoid 6-slide carousel truncation
-        {"model": "qwen/qwen3-32b",         "max_tokens": 4000, "reasoning_effort": None},  # Fallback: qwen/qwen3-32b via 9router
     ]
 
 
@@ -785,9 +776,9 @@ Use only article body. Ignore nav, related links, ads, bylines, boilerplate.
    BIG NAMES + DRAMA = ENGAGEMENT: Messi, Lineker, FIFA, controversy, scandal, row, slammed, blasted — these drive 10x more views than generic "demands" or "blasts" without stakes.
    End with tension.
 2. WHAT (2-4, MIN 2): What happened concretely + why it matters.
-3. TENSION (2-4, MIN 2): Conflict/competing stakes. One-sided: "Article only covers [X]'s perspective."
-4. HUMAN (2-4, MIN 2): One named person, own words or reported feelings. No quote: "No direct quote from [Name]" + one sentence on situation.
-5. UNRESOLVED (3-4, MIN 3): What's left open. One concrete conditional ("If X, then Y") + a monitoring/timing detail.
+3. TENSION (2-4, MIN 2): Conflict, competing stakes, or implications. If no conflict: analyze what this means for the player/team/league. What's at stake?
+4. HUMAN (1-4, MIN 1): One named person, own words or reported feelings. No quote: "No direct quote from [Name]" + one sentence on situation.
+5. UNRESOLVED (2-4, MIN 2): What comes next. Conditional "If X, then Y" + timing/monitoring detail. If article is conclusive: what are the broader implications?
 6. CTA (2-4, MIN 2): Rhetorical yes/no question to reader. NO first-person ("I"/"we"/"my"). NO personal opinion. Implied editorial framing OK. MUST callback S1. Last line: """ + url + """
 
 [FORMAT — JSON only, no fences]
@@ -799,7 +790,9 @@ Use only article body. Ignore nav, related links, ads, bylines, boilerplate.
 - S5-6 may have implicit editorial framing but must trace to specific stated facts.
 
 [REJECTION]
-Can't fill 6 slides honestly? Output: {{"error":"insufficient_source","reason":"..."}}}
+ONLY reject if the article has NO usable facts (no names, no scores, no quotes, no events). Fluff pieces, listicles with no substance = reject.
+Articles with concrete facts (names, stats, quotes, events) are VALID even without controversy. Generate all 6 slides.
+Output: {{"error":"insufficient_source","reason":"..."}}}
 Any slide has empty or whitespace-only "content"? Output: {{"error":"empty_slide","reason":"Slide N has no content"}}
 
 [ANTI-EMPTY-SLIDE — MANDATORY]
@@ -837,8 +830,8 @@ SENTENCE_COUNTS = {
     1: (1, 3),   # Hook: 1-3 sentences (sharp single sentence OK)
     2: (2, 4),   # What: 2-4 sentences
     3: (2, 4),   # Tension: 2-4 sentences
-    4: (2, 4),   # Human: 2-4 sentences
-    5: (3, 4),   # Unresolved: 3-4 sentences (bumped from 2-3 — slide 5 was too thin)
+    4: (1, 4),   # Human: 1-4 sentences (relaxed — sometimes only 1 quote/insight available)
+    5: (2, 4),   # Unresolved: 2-4 sentences (relaxed from 3-4 — non-controversy articles can't fill 3)
     6: (2, 4),   # CTA: 2-4 sentences
 }
 # Hard char cap per slide (Threads API limit = 500 chars/slide).
@@ -899,7 +892,7 @@ for attempt in range(1, MAX_RETRIES + 1):
         )
         if r.status_code != 200:
             log(f"❌ API error: HTTP {r.status_code} {r.text[:200]}")
-            # Always try next model in chain (Mistral 4xx/5xx → fall through to 9router)
+            # Always try next model in chain (Mistral 4xx/5xx → fall through to next model)
             # Only sys.exit after ALL chain entries exhausted.
             if attempt < MAX_RETRIES:
                 log(f"   Trying next model in chain ({attempt}/{MAX_RETRIES})...")

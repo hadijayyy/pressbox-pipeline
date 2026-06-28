@@ -41,16 +41,12 @@ PROVIDERS = {
         "base_url": "https://api.mistral.ai/v1/chat/completions",
         "api_key":  MISTRAL_API_KEY,
     },
-    "qwen/qwen3-32b": {
-        "base_url": "http://localhost:20128/v1/chat/completions",
-        "api_key":  "9router-noauth",  # 9router doesn't need auth
-    },
+
 }
 
-# Model chain: Mistral primary → 9router fallback
+# Model chain: Mistral only
 MODEL_CHAIN = [
     {"model": "mistral-large-latest", "max_tokens": 4000},
-    {"model": "qwen/qwen3-32b",       "max_tokens": 4000},
 ]
 LLM_TIMEOUT = 120
 
@@ -154,7 +150,7 @@ def classify_hook(text):
 def call_llm(prompt, max_retries=4):
     """Call LLM with model chain fallback (same order as v7 pipeline).
     Returns parsed JSON or None.
-    Chain: mistral-large-latest → qwen/qwen3-32b via 9router
+    Chain: mistral-large-latest (single provider)
     """
     system_msg = f"You are a social media analytics expert. Current time: {datetime.now(WIB).strftime('%A, %d %B %Y %H:%M WIB')}. Analyze the data and return ONLY valid JSON."
 
