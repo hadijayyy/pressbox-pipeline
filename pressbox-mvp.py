@@ -391,7 +391,8 @@ ONLY reject if article has NO usable facts. Articles with concrete facts are VAL
 Output: {{"error":"insufficient_source","reason":"..."}}
 
 [STYLE]
-Conversational English. No em-dash, hashtags, bullets, ALL CAPS, Markdown formatting.
+Conversational English. One idea per sentence, each followed by \\n\\n.
+No em-dash, hashtags, bullets, ALL CAPS, Markdown formatting.
 Indonesian articles: keep names original, write in English.{extra}"""
 
     user = f"ARTICLE: {article_text[:6000]}\nSOURCE: {url}"
@@ -492,6 +493,8 @@ Indonesian articles: keep names original, write in English.{extra}"""
                 s["content"] = re.sub(r'\*(.+?)\*', r'\1', s["content"])
                 s["content"] = s["content"].replace("—"," - ").replace("–"," - ")
                 s["content"] = re.sub(r'  +', ' ', s["content"])
+                # Enforce blank line after every sentence
+                s["content"] = re.sub(r'([.!?])(\s+)([A-Z"])', r'\1\n\n\3', s["content"])
 
             # Guarantee source URL on last slide
             if url not in slides[-1]["content"]:
