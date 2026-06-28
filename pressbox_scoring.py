@@ -153,12 +153,16 @@ def source_tier(source):
 # Big teams/nations = massive built-in audience. +15-25 pts.
 BIG_TEAMS = [
     "england", "brazil", "argentina", "germany", "france", "spain",
+    "italy", "portugal", "netherlands", "belgium", "croatia",
     "manchester united", "man city", "manchester city", "liverpool",
     "arsenal", "chelsea", "tottenham", "real madrid", "barcelona",
     "bayern", "psg", "inter milan", "juventus", "ac milan",
+    "atletico madrid", "napoli", "dortmund",
     "ronaldo", "messi", "mbappe", "haaland", "salah", "bellingham",
+    "foden", "saka", "palmer", "yamal", "vinicius", "modric",
     "southgate", "tuchel", "guardiola", "klopp", "mourinho",
-    "arteta", "slot",
+    "arteta", "slot", "ancelotti", "nagelsmann", "deschamps",
+    "fifa", "uefa", "premier league", "champions league",
 ]
 BIG_TEAMS_RE = [re.compile(r'\b' + re.escape(t) + r'\b') for t in BIG_TEAMS]
 
@@ -170,6 +174,11 @@ DRAMA_WORDS = [
     "war of words", "bust-up", "rift", "scandal", "controversy",
     "refuses", "walks out", "storms off", "under pressure",
     "collapsed", "disaster", "nightmare", "crisis",
+    "fate confirmed", "forced", "denied", "banned", "disagrees",
+    "repeating", "mistake", "problem", "rivals", "statement",
+    "risk", "warning", "fears", "anger", "rage", "hit back",
+    "under fire", "disastrous", "catastrophic", "collapse",
+    "betrayal", "backlash", "fury", "rowing", "tensions",
 ]
 
 
@@ -312,20 +321,20 @@ def score_topic(t):
     else:
         source_pts = 0
 
-    # 6. Audience Reach Boost (max 20 pts) — big teams/nations/players = massive audience
+    # 6. Audience Reach Boost (max 30 pts) — big teams/nations/players = massive audience
     audience_pts = 0
     title_lower = title.lower()
     for pat in BIG_TEAMS_RE:
         if pat.search(combined.lower()):
-            audience_pts += 5
-    audience_pts = min(audience_pts, 20)  # cap at 20
+            audience_pts += 10
+    audience_pts = min(audience_pts, 30)  # cap at 30
 
-    # 7. Drama/Engagement Signal in title (max 10 pts)
+    # 7. Drama/Engagement Signal in title (max 15 pts)
     drama_pts = 0
     for dw in DRAMA_WORDS:
         if dw in title_lower:
             drama_pts += 5
-    drama_pts = min(drama_pts, 10)
+    drama_pts = min(drama_pts, 15)
 
     total = keyword_pts + cat_pts + recency_pts + data_pts + source_pts + audience_pts + drama_pts
     return total
