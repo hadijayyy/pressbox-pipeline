@@ -16,7 +16,7 @@ from bs4 import BeautifulSoup
 
 # ── Config ──────────────────────────────────────────────────────────
 DRY_RUN = "--dry-run" in sys.argv
-SOURCES = ["mirror", "goal"]
+SOURCES = ["mirror", "skysports", "goal"]
 MAX_CHARS = 500  # Threads per-slide limit
 SENTENCE_COUNTS = {1:(1,3), 2:(2,4), 3:(2,4), 4:(1,4), 5:(2,4), 6:(2,4)}
 os.makedirs(f"{HOME}/.hermes/pressbox", exist_ok=True)
@@ -148,12 +148,13 @@ def scrape_goal():
 
 def scrape_all():
     """Scrape all sources in parallel."""
-    log("Scraping 2 sources...")
+    log("Scraping 3 sources...")
     t0 = time.time()
     all_t = []
-    with ThreadPoolExecutor(max_workers=2) as ex:
+    with ThreadPoolExecutor(max_workers=3) as ex:
         futs = {
             "mirror": ex.submit(scrape_mirror),
+            "skysports": ex.submit(scrape_rss, "https://www.skysports.com/rss/11095", "skysports", 12),
             "goal": ex.submit(scrape_goal),
         }
         for name, f in futs.items():
@@ -307,8 +308,6 @@ def fetch_article(url):
         r = requests.get(url, headers={"User-Agent": UA}, timeout=10, allow_redirects=True)
         if r.status_code != 200: return "", ""
         text = extract_article(r.text)
-        # Strip inline commercial/promo mentions
-        text = re.sub(r'(?i)(amazon\s+prime|bet365|sky\s+bet|betfair|paddy\s+power|william\s+hill|ladbrokes|betway|unibet|betting|odds|stream\s+live|watch\s+live\s+on|sign\s+up|subscribe|newsletter|affiliate|sponsored)', '', text)
         return text.strip(), extract_image(r.text)
     except: return "", ""
 
