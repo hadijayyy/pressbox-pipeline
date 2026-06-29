@@ -7,7 +7,8 @@ Automated football content pipeline for [@parkthebus.football](https://www.threa
 ## Architecture
 
 ```
-run-mvp.sh            ← Cron entry point
+run-mvp.sh            ← Cron entry point (with retry)
+watchdog.sh           ← Auto-retry watchdog (checks status, retries on failure)
 pressbox-mvp.py       ← Main pipeline (scrape, score, LLM generate, post)
 threads_poster.py     ← Threads Graph API wrapper
 pressbox_common.py    ← Shared utils (paths, logging, dedup, classification)
@@ -31,10 +32,10 @@ pressbox_scoring.py   ← 7-component analytics-driven scoring (0-120 pts)
 pip install -r requirements.txt
 
 # LLM API key
-echo 'MISTRAL_API_KEY=***' >> ~/.hermes/.env
+echo 'MISTRAL_API_KEY=*** >> ~/.hermes/.env
 
 # Threads token
-echo '{"access_token": "TOKEN", "user_id": "26778473708441722"}' > ~/.hermes/threads_token.json
+echo '{"access_token": "***", "user_id": "26778473708441722"}' > ~/.hermes/threads_token.json
 
 # Data dirs
 mkdir -p ~/.hermes/pressbox
@@ -51,17 +52,20 @@ bash run-mvp.sh --dry-run
 bash run-mvp.sh
 ```
 
-## Schedule
+## Cron Setup (Hermes — no_agent)
 
-Runs **every 30 minutes** via Hermes cron (`*/30 * * * *`), 24/7.
+Runs via `no_agent: true` cron jobs (zero token cost, direct script execution).
+
+**Repo location:** `~/.hermes/pressbox-pipeline/` (symlinked from `/home/ubuntu/pressbox-pipeline`).
+
+**Cron scripts:** `~/.hermes/scripts/run-mvp.sh` and `~/.hermes/scripts/watchdog-pressbox.sh`.
+
+| Job | Schedule | Script | Behavior |
+|-----|----------|--------|----------|
+| Pressbox MVP | `*/30 * * * *` | `run-mvp.sh` | Scrape → score → generate → post |
+| Pressbox Watchdog | `10,40 * * * *` | `watchdog-pressbox.sh` | Silent if OK, auto-retry if fail/stale |
 
 Built-in **30-minute cooldown** prevents duplicate posts — effective rate is ~1 post per 30-60 minutes.
-
-| Window | Behavior |
-|--------|----------|
-| `:00` and `:30` each hour | MVP: scrape + score + post (if new topic found) |
-| `:10` and `:40` each hour | Watchdog: checks status, retries if last run failed |
-| Cooldown hit | Skip silently, try again next run |
 
 ## Scoring (0-120 pts)
 
