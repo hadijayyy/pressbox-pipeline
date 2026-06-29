@@ -256,6 +256,30 @@ class ThreadsPoster:
         logger.info("Thread complete: %d/%d parts posted.", len(results), len(parts))
         return results
 
+    def get_metrics(self, post_id: str) -> Optional[dict]:
+        """Pull engagement metrics for a post.
+        
+        Returns dict with views, likes, replies, shares or None on failure.
+        Requires threads_manage_insights scope on the token.
+        """
+        url = f"{GRAPH_API_BASE}/{post_id}/insights"
+        params = {
+            "metric": "views,likes,replies,shares",
+            "access_token": self.access_token,
+        }
+        try:
+            resp = self.session.get(url, params=params, timeout=DEFAULT_TIMEOUT)
+            data = self._parse_response(resp)
+            metrics = {}
+            for item in data.get("data", []):
+                name = item.get("name")
+                value = item.get("values", [{}])[0].get("value", 0)
+                metrics[name] = value
+            return metrics if metrics else None
+        except Exception as e:
+            logger.warning("Failed to get metrics for %s: %s", post_id, e)
+            return None
+
 
 # ----------------------------------------------------------------------
 # Example: wiring into Press Box Pipeline carousel JSON output

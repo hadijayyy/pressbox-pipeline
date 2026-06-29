@@ -205,6 +205,126 @@ def load_analytics():
     except: pass
     return boosts, skips, hooks, cta, tone
 
+def pull_engagement(poster):
+    """Pull metrics for posts > 12h that haven't been tracked yet. Max 10 per run."""
+    if not poster:
+        return
+    try:
+        with open(POSTED) as f:
+            data = json.load(f)
+    except:
+        return
+    
+    cutoff = time.time() - 43200  # 12 hours
+    updated = 0
+    failed = 0
+    processed = 0
+    MAX_PER_RUN = 10  # Limit to avoid timeout
+    
+    for topic in data.get("topics", []):
+        if processed >= MAX_PER_RUN:
+            break
+        # Skip if already has metrics or already failed
+        if topic.get("views") is not None or topic.get("metrics_failed"):
+            continue
+        # Skip if too recent
+        posted_at = topic.get("posted_at", "")
+        if posted_at:
+            try:
+                pt = datetime.fromisoformat(posted_at).timestamp()
+                if pt > cutoff:
+                    continue
+            except:
+                continue
+        # Pull metrics
+        post_id = topic.get("post_id")
+        if not post_id:
+            continue
+        metrics = poster.get_metrics(post_id)
+        processed += 1
+        if metrics:
+            topic["views"] = metrics.get("views", 0)
+            topic["likes"] = metrics.get("likes", 0)
+            topic["replies"] = metrics.get("replies", 0)
+            topic["shares"] = metrics.get("shares", 0)
+            updated += 1
+        else:
+            topic["metrics_failed"] = True
+            failed += 1
+        time.sleep(0.3)  # Rate limit courtesy
+    
+    if updated or failed:
+        with open(POSTED, "w") as f:
+            json.dump(data, f, indent=2)
+        if updated:
+            log(f"📊 Updated metrics for {updated} posts")
+        if failed:
+            log(f"⚠️ Metrics failed for {failed} posts (marked to skip)")
+
+def get_analytics_summary():
+    """Generate analytics summary from posted_topics.json data."""
+    try:
+        with open(POSTED) as f:
+            data = json.load(f)
+    except:
+        return {}
+    
+    topics = data.get("topics", [])
+    with_metrics = [t for t in topics if t.get("views") is not None]
+    
+    if len(with_metrics) < 3:
+        return {}
+    
+    # Calculate averages by category
+    from collections import defaultdict
+    by_hook = defaultdict(list)
+    by_topic = defaultdict(list)
+    by_source = defaultdict(list)
+    
+    for t in with_metrics:
+        views = t.get("views", 0)
+        title = (t.get("title") or "").lower()
+        source = (t.get("source") or "").lower()
+        
+        # Classify hook type (heuristic based on title patterns)
+        hook = "statement"
+        if any(w in title for w in ["slams", "blasts", "hits out", "furious", "outraged", "scandal", "controversy", "row", "rift", "bust-up", "war of words"]):
+            hook = "controversy"
+        elif any(w in title for w in ["vs", "against", "clash", "rival", "battle", "face off", "showdown"]):
+            hook = "conflict"
+        elif any(w in title for w in ["?", "how", "why", "what if", "can", "will", "could"]):
+            hook = "curiosity"
+        elif any(w in title for w in ["just", "dropped", "lost", "won", "banned", "sacked", "arrested", "injured", "denied"]):
+            hook = "event"  # Concrete event (proven high-engagement)
+        
+        topic_type = classify_topic_type(title)
+        by_hook[hook].append(views)
+        by_topic[topic_type].append(views)
+        by_source[source].append(views)
+    
+    # Calculate averages
+    def avg(lst): return sum(lst) / len(lst) if lst else 0
+    
+    best_hooks = sorted(by_hook.items(), key=lambda x: avg(x[1]), reverse=True)
+    best_topics = sorted(by_topic.items(), key=lambda x: avg(x[1]), reverse=True)
+    best_sources = sorted(by_source.items(), key=lambda x: avg(x[1]), reverse=True)
+    
+    # Calculate median for threshold
+    all_views = sorted([t.get("views", 0) for t in with_metrics])
+    median_views = all_views[len(all_views) // 2] if all_views else 0
+    
+    summary = {
+        "total_posts_with_metrics": len(with_metrics),
+        "avg_views": avg([t.get("views", 0) for t in with_metrics]),
+        "median_views": median_views,
+        "best_hooks": [(h, avg(v)) for h, v in best_hooks[:3]],
+        "best_topics": [(t, avg(v)) for t, v in best_topics[:5]],
+        "best_sources": [(s, avg(v)) for s, v in best_sources],
+        "worst_topics": [(t, avg(v)) for t, v in best_topics[-3:] if avg(v) < median_views * 0.5],
+    }
+    
+    return summary
+
 # Sensitive content filter
 _SENSITIVE = [
     "breasts","boobs","topless","nude","naked","wardrobe malfunction",
@@ -217,10 +337,20 @@ _TV_GUIDE = ["tv channel","live stream","kick-off time","kickoff time",
              "how to watch","where to watch","what channel","start time","stream online"]
 _WOMEN = ["women","women's","womens","female","lionaesses","nwsl","wsl"]
 
-def filter_and_score(topics, posted_urls, posted_ws, boosts, skips):
+def filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_summary=None):
     """Filter duplicates, sensitive content, score and rank."""
     results = []
     relaxed = len(topics) < 10
+    
+    # Extract analytics data for dynamic boost
+    best_hooks = []
+    worst_topics = []
+    median_views = 0
+    if analytics_summary:
+        best_hooks = [h[0] for h in analytics_summary.get("best_hooks", [])]
+        worst_topics = [t[0] for t in analytics_summary.get("worst_topics", [])]
+        median_views = analytics_summary.get("median_views", 0)
+    
     for t in topics:
         title = (t.get("title") or "").strip()
         url = (t.get("url") or "").strip()
@@ -247,9 +377,30 @@ def filter_and_score(topics, posted_urls, posted_ws, boosts, skips):
         # Pipeline bonuses
         if t.get("wc_related") or t.get("wc_boost"): s += 40
         if t.get("transfer_related"): s += 10
-        # Analytics topic boost
+        # Analytics topic boost (legacy)
         if tt in boosts:
             s = int(s * boosts[tt])
+        # Dynamic analytics boost (data-driven)
+        if analytics_summary and median_views > 0:
+            # Classify hook type (same heuristic as get_analytics_summary)
+            hook = "statement"
+            if any(w in tl for w in ["slams", "blasts", "hits out", "furious", "outraged", "scandal", "controversy", "row", "rift", "bust-up", "war of words"]):
+                hook = "controversy"
+            elif any(w in tl for w in ["vs", "against", "clash", "rival", "battle", "face off", "showdown"]):
+                hook = "conflict"
+            elif any(w in tl for w in ["?", "how", "why", "what if", "can", "will", "could"]):
+                hook = "curiosity"
+            elif any(w in tl for w in ["just", "dropped", "lost", "won", "banned", "sacked", "arrested", "injured", "denied"]):
+                hook = "event"
+            if hook in best_hooks[:2]:
+                s += 15
+                log(f"   📈 Hook boost: {hook} +15 for '{title[:50]}'")
+            
+            # Penalize worst-performing topic types
+            if tt in worst_topics:
+                s -= 20
+                log(f"   📉 Topic penalty: {tt} -20 for '{title[:50]}'")
+        
         t["_score"] = s
         t["_topic_type"] = tt
         results.append(t)
@@ -654,6 +805,26 @@ def main():
         print("⏸️ Skip — baru posting < 15 menit lalu.", flush=True)
         return
 
+    # 0. Init Threads poster (for metrics)
+    token, user_id = load_threads_token()
+    poster = None
+    if token and user_id:
+        try:
+            from threads_poster import ThreadsPoster
+            poster = ThreadsPoster(access_token=token, user_id=user_id)
+        except:
+            pass
+
+    # 0.5. Pull engagement metrics for old posts (>12h)
+    pull_engagement(poster)
+
+    # 0.6. Get analytics summary for scoring boost
+    analytics_summary = get_analytics_summary()
+    if analytics_summary:
+        log(f"📊 Analytics: {analytics_summary['total_posts_with_metrics']} posts, "
+            f"avg {analytics_summary['avg_views']:.0f} views, "
+            f"best hook: {analytics_summary['best_hooks'][0][0] if analytics_summary['best_hooks'] else 'N/A'}")
+
     # 1. Scrape
     topics = scrape_all()
     if not topics:
@@ -664,7 +835,7 @@ def main():
     # 2. Filter + Score
     posted_urls, posted_ws = load_posted()
     boosts, skips, hooks, cta_pattern, tone = load_analytics()
-    ranked = filter_and_score(topics, posted_urls, posted_ws, boosts, skips)
+    ranked = filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_summary)
     if not ranked:
         log("❌ No topics after filter")
         print("❌ Pipeline: all topics filtered out", flush=True)
