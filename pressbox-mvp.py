@@ -16,7 +16,7 @@ from bs4 import BeautifulSoup
 
 # ── Config ──────────────────────────────────────────────────────────
 DRY_RUN = "--dry-run" in sys.argv
-SOURCES = ["mirror", "skysports", "goal"]
+SOURCES = ["mirror", "goal"]
 MAX_CHARS = 500  # Threads per-slide limit
 SENTENCE_COUNTS = {1:(1,3), 2:(2,4), 3:(2,4), 4:(1,4), 5:(2,4), 6:(2,4)}
 os.makedirs(f"{HOME}/.hermes/pressbox", exist_ok=True)
@@ -63,7 +63,7 @@ def scrape_rss(url, source, base_score=9):
             if pe is not None and pe.text:
                 try: ts = parsedate_to_datetime(pe.text.strip()).timestamp()
                 except: pass
-            if ts and (time.time() - ts) > 21600: continue  # 6h freshness
+            if ts and (time.time() - ts) > 43200: continue  # 12h freshness
             # Image from media:content
             img = ""
             for ns in ["http://search.yahoo.com/mrss/", "http://search.yahoo.com/mrss"]:
@@ -97,7 +97,7 @@ def scrape_mirror():
                 if dm:
                     try: dp = datetime.fromisoformat(dm.group(1).replace("Z","+00:00")).timestamp()
                     except: pass
-                if dp and (time.time() - dp) > 21600: continue
+                if dp and (time.time() - dp) > 43200: continue
                 od = re.search(r'og:description[^>]*content="([^"]*)"', t2)
                 desc = html_mod.unescape(od.group(1)) if od else ""
                 # og:image
@@ -137,7 +137,7 @@ def scrape_goal():
                 if tm:
                     try: ts = datetime.fromisoformat(tm.group(1).replace("Z","+00:00")).timestamp()
                     except: pass
-                if ts and (time.time() - ts) > 21600: continue
+                if ts and (time.time() - ts) > 43200: continue
                 od = re.search(r'og:description[^>]*content="([^"]*)"', t2)
                 desc = html_mod.unescape(od.group(1)) if od else ""
                 topics.append(dict(title=title, source="goal", url=url, score=10,
@@ -148,13 +148,12 @@ def scrape_goal():
 
 def scrape_all():
     """Scrape all sources in parallel."""
-    log("Scraping 3 sources...")
+    log("Scraping 2 sources...")
     t0 = time.time()
     all_t = []
-    with ThreadPoolExecutor(max_workers=3) as ex:
+    with ThreadPoolExecutor(max_workers=2) as ex:
         futs = {
             "mirror": ex.submit(scrape_mirror),
-            "skysports": ex.submit(scrape_rss, "https://www.skysports.com/rss/11095", "skysports", 12),
             "goal": ex.submit(scrape_goal),
         }
         for name, f in futs.items():
@@ -565,7 +564,7 @@ def track_post(title, url, source, root_id, permalink):
 
 # ── MAIN ────────────────────────────────────────────────────────────
 
-def check_cooldown(minutes=30):
+def check_cooldown(minutes=15):
     """Skip if posted too recently."""
     try:
         with open(POSTED) as f:
@@ -585,8 +584,8 @@ def main():
     log("=== PRESSBOX MVP ===")
 
     # Cooldown check (skip dry-run)
-    if not DRY_RUN and check_cooldown(30):
-        print("⏸️ Skip — baru posting < 30 menit lalu.", flush=True)
+    if not DRY_RUN and check_cooldown(15):
+        print("⏸️ Skip — baru posting < 15 menit lalu.", flush=True)
         return
 
     # 1. Scrape
