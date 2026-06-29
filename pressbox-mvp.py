@@ -374,9 +374,15 @@ S5: UNRESOLVED (2-4 sentences, what's next)
 S6: CTA (2-4 sentences, rhetorical question, last line: {url})
 
 [HOOK PRIORITY]
-(a) CONTROVERSY (b) CONFLICT (c) CURIOSITY GAP (d) PARADOX (e) SHOCK (f) NUMBERS
-If no controversy, skip to (b) or (c). Never force drama from unrelated facts.
+(a) CONTROVERSY — drama, scandal, big names clashing
+(b) CONFLICT — direct confrontation between named parties
+(c) CURIOSITY GAP — intrigue without clickbait
+Skip to (b) or (c) if no controversy. Never force drama from unrelated facts.
 Must read like something you'd say to a friend at a pub.
+
+[EXAMPLE — GOOD OUTPUT]
+"Thomas Tuchel just locked England's most lethal weapon out of the World Cup — and now he's repeating Gareth Southgate's fatal mistake. The problem? There's no way out this time."
+This works because: named figures everyone knows, drama language, contrast structure, 3 short escalating paragraphs.
 
 [FORMAT — JSON only, no fences]
 {{"slide_1":{{"title":"HOOK","content":"..."}},"slide_2":{{"title":"WHAT","content":"..."}},"slide_3":{{"title":"TENSION","content":"..."}},"slide_4":{{"title":"HUMAN","content":"..."}},"slide_5":{{"title":"UNRESOLVED","content":"..."}},"slide_6":{{"title":"CTA","content":"..."}}}}
@@ -394,7 +400,7 @@ Conversational English. One idea per sentence, each followed by \\n\\n.
 No em-dash, hashtags, bullets, ALL CAPS, Markdown formatting.
 Indonesian articles: keep names original, write in English.{extra}"""
 
-    user = f"ARTICLE: {article_text[:6000]}\nSOURCE: {url}"
+    user = f"ARTICLE: {article_text[:8000]}\nSOURCE: {url}"
 
     for attempt in range(1, 4):
         log(f"   LLM attempt {attempt}/3...")
@@ -404,7 +410,7 @@ Indonesian articles: keep names original, write in English.{extra}"""
                 headers={"Authorization": f"Bearer {MISTRAL_KEY}", "Content-Type": "application/json"},
                 json={"model":"mistral-large-latest","messages":[
                     {"role":"system","content":system},{"role":"user","content":user}],
-                    "max_tokens":8000,"temperature":0.5,"stream":True},
+                    "max_tokens":4000,"temperature":0.3,"stream":True},
                 timeout=60, stream=True)
 
             if r.status_code != 200:
