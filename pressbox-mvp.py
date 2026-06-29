@@ -631,13 +631,21 @@ def main():
         sys.exit(0)
     log(f"   🏆 Best: {best['title']} (score={best['_score']}, type={best.get('_topic_type','')})")
 
-    # 3. Fetch article
+    # 3. Fetch article — try top 3 topics
     url = best["url"]
     log(f"   Fetching: {url}")
     article_text, image_url = fetch_article(url)
+    fetch_tries = 1
+    while (not article_text or len(article_text) < 100) and fetch_tries < len(ranked[:3]):
+        log(f"   ❌ Article too short on '{best['title']}' — trying next")
+        best = ranked[fetch_tries]
+        url = best["url"]
+        log(f"   Fetching next: {url}")
+        article_text, image_url = fetch_article(url)
+        fetch_tries += 1
     if not article_text or len(article_text) < 100:
-        log("❌ Article text too short")
-        print("❌ Pipeline: article too short", flush=True)
+        log("❌ All top articles too short")
+        print("❌ Pipeline: all articles too short", flush=True)
         sys.exit(1)
     log(f"   Article: {len(article_text)} chars, image: {'yes' if image_url else 'no'}")
 
