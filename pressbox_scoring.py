@@ -9,8 +9,9 @@ Components:
   3. Recency         : 15 (<6h) / 10 (6-24h) / 5 (24-48h) / 0 (>48h)
   4. Data/Konkret    : 15 (specific: score, fee, %) / 7 (vague digits) / 0
   5. Sumber Tier     : 10 (Tier 1) / 5 (Tier 2) / 0 (unknown)
-  6. Audience Reach  : +5 per big team/nation/star mentioned (max 20)
-  7. Drama Signal    : +5 per drama word in title (max 10)
+  6. Audience Reach  : +10 per big team/nation/star mentioned (max 40)
+  7. Drama Signal    : +5 per drama word in title (max 15)
+  Dynamic Boost      : +15 proven hook (analytics), -20 worst topic (analytics)
   Penalti            : -1 hard reject if exclude keyword matched
 
 Threshold: score >= 60 for pipeline.
@@ -179,6 +180,10 @@ DRAMA_WORDS = [
     "risk", "warning", "fears", "anger", "rage", "hit back",
     "under fire", "disastrous", "catastrophic", "collapse",
     "betrayal", "backlash", "fury", "rowing", "tensions",
+    "exclusive", "breaking", "confirmed", "revealed", "drops bombshell",
+    "responds", "admits", "hints", "teases", "sends message",
+    "breaks silence", "sets record straight", "makes decision",
+    "takes swipe", "calls out", "fires back", "double down",
 ]
 
 
@@ -266,6 +271,8 @@ def score_topic(t):
       3. Recency        : 15 (<6h) / 10 (6-24h) / 5 (24-48h) / 0 (>48h)
       4. Data/Konkret   : 15 (specific: score, fee, %) / 7 (vague digits) / 0
       5. Sumber Tier    : 10 (Tier 1) / 5 (Tier 2) / 0 (unknown)
+      6. Audience Reach : +10 per big team/nation/star (max 40)
+      7. Drama Signal   : +5 per drama word in title (max 15)
       Penalti           : -1 hard reject if exclude keyword matched
 
     Returns:
@@ -327,7 +334,7 @@ def score_topic(t):
     for pat in BIG_TEAMS_RE:
         if pat.search(combined.lower()):
             audience_pts += 10
-    audience_pts = min(audience_pts, 30)  # cap at 30
+    audience_pts = min(audience_pts, 40)  # cap at 40 (3 big-name mentions max, boosted)
 
     # 7. Drama/Engagement Signal in title (max 15 pts)
     drama_pts = 0
