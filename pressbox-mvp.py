@@ -536,7 +536,8 @@ def post_to_threads(slides, image_url=None):
             log("❌ No posts returned")
             return None, None
         root_id = results[0].post_id
-        permalink = f"https://www.threads.com/@parkthebus.football/post/{root_id}"
+        short_link = poster.get_permalink(root_id)
+        permalink = short_link or f"https://www.threads.com/@parkthebus.football/post/{root_id}"
         log(f"   ✅ Posted {len(results)} slides, root={root_id}")
         return root_id, permalink
     except Exception as e:

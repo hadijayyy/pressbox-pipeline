@@ -159,6 +159,17 @@ class ThreadsPoster:
         logger.info("Published post %s", post_id)
         return post_id
 
+    def get_permalink(self, post_id: str) -> str:
+        """Fetch short permalink for a post via the API."""
+        url = f"{GRAPH_API_BASE}/{post_id}"
+        params = {"fields": "permalink", "access_token": self.access_token}
+        try:
+            resp = self.session.get(url, params=params, timeout=DEFAULT_TIMEOUT)
+            data = resp.json()
+            return data.get("permalink", "")
+        except Exception:
+            return ""
+
     @staticmethod
     def _parse_response(resp: requests.Response) -> dict:
         try:
