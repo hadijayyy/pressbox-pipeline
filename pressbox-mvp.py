@@ -295,7 +295,10 @@ def fetch_article(url):
     try:
         r = requests.get(url, headers={"User-Agent": UA}, timeout=10, allow_redirects=True)
         if r.status_code != 200: return "", ""
-        return extract_article(r.text), extract_image(r.text)
+        text = extract_article(r.text)
+        # Strip inline commercial/promo mentions
+        text = re.sub(r'(?i)(amazon\s+prime|bet365|sky\s+bet|betfair|paddy\s+power|william\s+hill|ladbrokes|betway|unibet|betting|odds|stream\s+live|watch\s+live\s+on|sign\s+up|subscribe|newsletter|affiliate|sponsored)', '', text)
+        return text.strip(), extract_image(r.text)
     except: return "", ""
 
 # ── 4. LLM GENERATE ────────────────────────────────────────────────
