@@ -1,5 +1,5 @@
 #!/bin/bash
-cd "$(dirname "$0")"
+cd ~/.hermes/pressbox-pipeline
 STATUS_FILE="/tmp/pressbox-last-status"
 
 # First attempt
