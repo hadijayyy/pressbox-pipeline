@@ -7,12 +7,17 @@ Automated football content pipeline for [@parkthebus.football](https://www.threa
 ## Architecture
 
 ```
-run-mvp.sh            ← Cron entry point (with retry)
-watchdog.sh           ← Auto-retry watchdog (checks status, retries on failure)
-pressbox-mvp.py       ← Main pipeline (scrape, score, LLM generate, post)
-threads_poster.py     ← Threads Graph API wrapper
-pressbox_common.py    ← Shared utils (paths, logging, dedup, classification)
-pressbox_scoring.py   ← 7-component analytics-driven scoring (0-120 pts)
+~/.hermes/scripts/
+  run-mvp.sh              ← Cron entry point (with retry)
+  watchdog-pressbox.sh    ← Auto-retry watchdog
+
+~/.hermes/pressbox-pipeline/
+  pressbox-mvp.py         ← Main pipeline (scrape, score, LLM generate, post)
+  threads_poster.py       ← Threads Graph API wrapper
+  pressbox_common.py      ← Shared utils (paths, logging, dedup, classification)
+  pressbox_scoring.py     ← 7-component analytics-driven scoring (0-120 pts)
+  run-mvp.sh              ← Repo-local entry point
+  watchdog.sh             ← Repo-local watchdog
 ```
 
 ## Flow
@@ -29,24 +34,31 @@ pressbox_scoring.py   ← 7-component analytics-driven scoring (0-120 pts)
 ## Setup
 
 ```bash
+# Clone repo
+git clone https://github.com/hadijayyy/pressbox-pipeline.git ~/.hermes/pressbox-pipeline
+cd ~/.hermes/pressbox-pipeline
 pip install -r requirements.txt
 
 # LLM API key
-echo 'MISTRAL_API_KEY=*** >> ~/.hermes/.env
+echo 'MISTRAL_API_KEY=your_key' >> ~/.hermes/.env
 
 # Threads token
-echo '{"access_token": "***", "user_id": "26778473708441722"}' > ~/.hermes/threads_token.json
+echo '{"access_token": "your_token", "user_id": "26778473708441722"}' > ~/.hermes/threads_token.json
 
 # Data dirs
 mkdir -p ~/.hermes/pressbox
 echo '{"topics": []}' > ~/.hermes/pressbox/posted_topics.json
+
+# Copy cron scripts
+cp run-mvp.sh ~/.hermes/scripts/
+cp watchdog.sh ~/.hermes/scripts/watchdog-pressbox.sh
 ```
 
 ## Usage
 
 ```bash
 # Dry run (scrape + generate, no post)
-bash run-mvp.sh --dry-run
+python3 -u pressbox-mvp.py --dry-run
 
 # Live run
 bash run-mvp.sh
@@ -54,18 +66,18 @@ bash run-mvp.sh
 
 ## Cron Setup (Hermes — no_agent)
 
-Runs via `no_agent: true` cron jobs (zero token cost, direct script execution).
+Runs via `no_agent: true` cron jobs — zero token cost, direct script execution on host.
 
-**Repo location:** `~/.hermes/pressbox-pipeline/` (symlinked from `/home/ubuntu/pressbox-pipeline`).
+| Job | Schedule | Script | Deliver | Behavior |
+|-----|----------|--------|---------|----------|
+| Pressbox MVP | `0,30 * * * *` | `run-mvp.sh` | topic 20467 | Scrape → score → generate → post |
+| Pressbox Watchdog | `15,45 * * * *` | `watchdog-pressbox.sh` | topic 20467 | Silent if OK, auto-retry if fail/stale |
 
-**Cron scripts:** `~/.hermes/scripts/run-mvp.sh` and `~/.hermes/scripts/watchdog-pressbox.sh`.
+**Cron scripts live in `~/.hermes/scripts/`** (host-visible path). Repo at `~/.hermes/pressbox-pipeline/`.
 
-| Job | Schedule | Script | Behavior |
-|-----|----------|--------|----------|
-| Pressbox MVP | `*/30 * * * *` | `run-mvp.sh` | Scrape → score → generate → post |
-| Pressbox Watchdog | `10,40 * * * *` | `watchdog-pressbox.sh` | Silent if OK, auto-retry if fail/stale |
+Built-in **15-minute cooldown** prevents duplicate posts.
 
-Built-in **30-minute cooldown** prevents duplicate posts — effective rate is ~1 post per 30-60 minutes.
+**Container vs Host:** Scripts, repo, credentials, and data all live on the host filesystem (`/home/ubuntu/.hermes/`). Container overlay (`/root/.hermes/`) is separate — don't write pressbox files there.
 
 ## Scoring (0-120 pts)
 
@@ -79,27 +91,25 @@ Built-in **30-minute cooldown** prevents duplicate posts — effective rate is ~
 | Audience Reach | 30 | +10 per big team/nation/star mentioned |
 | Drama Signal | 15 | +5 per drama word in title |
 
-Threshold: score >= 60 to publish. Analytics feedback adjusts boosts/skips dynamically.
+Threshold: score >= 30 to publish. Analytics feedback adjusts boosts/skips dynamically.
 
 ## Grounding Validator
 
 Post-generation check that catches hallucinated content:
-- **Proper nouns**: Extracts multi-word capitalized names from generated slides, flags any not in the original article
-- **Football stages**: Normalizes stage references (round of 16, R16, etc.), flags stages mentioned in slides but not article
-
-Warnings are logged but don't block posting (soft gate).
+- **Football stages**: Stages mentioned in slides but not article → BLOCKS posting
+- **Proper nouns**: Names in slides but not article → soft warn (logged, doesn't block)
 
 ## Sources
 
 | Source | Method | Image | Notes |
 |--------|--------|-------|-------|
 | Mirror | HTML scrape | og:image (HD) | Per-article fetch |
-| SkySports | RSS | media:content | 6h freshness |
+| SkySports | RSS | media:content | 12h freshness |
 | Goal.com | HTML scrape | og:image (4K) | Per-article fetch |
 
 ## Requirements
 
 - Python 3.8+
-- `requests`, `httpx`, `beautifulsoup4`, `python-dotenv`, `feedparser`
-- Mistral API key
-- Threads long-lived access token
+- `requests`, `beautifulsoup4`, `python-dotenv`, `feedparser`
+- Mistral API key (`~/.hermes/.env`)
+- Threads long-lived access token (`~/.hermes/threads_token.json`)
