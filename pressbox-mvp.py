@@ -258,26 +258,37 @@ def filter_and_score(topics, posted_urls, posted_ws, boosts, skips):
 # ── 3. EXTRACT ARTICLE ─────────────────────────────────────────────
 
 def extract_article(raw_html):
-    """Extract clean article text from HTML."""
+    """Extract clean article text from HTML — only <p> tags from article body."""
     soup = BeautifulSoup(raw_html, 'html.parser')
+    # Find article body container
     body = (soup.find('article')
             or soup.find('div', class_='sdc-article-body')
             or next((d for d in soup.find_all('div', class_=True)
                      if any(k in ' '.join(d.get('class',[])).lower()
-                            for k in ['article-body','article_content','story-body'])), None))
+                            for k in ['article-body','article_content','story-body','ArticleBody_article'])), None))
     if not body:
         text = re.sub(r'<(style|script)[^>]*>.*?</\1>', ' ', raw_html, flags=re.DOTALL|re.I)
         return html_mod.unescape(re.sub(r'<[^>]+>', ' ', text))
+    # Remove noise tags
     for tag in body.find_all(['nav','aside','footer','script','style','form']):
         tag.decompose()
     for div in body.find_all(['div','section'], class_=True):
         try:
             cls = ' '.join(div.get('class',[])).lower()
-            if any(p in cls for p in ['ad-','advert','related','recommend','newsletter','subscribe','promo','sponsor']):
+            if any(p in cls for p in ['ad-','advert','related','recommend','newsletter','subscribe','promo','sponsor',
+                                       'caption','share','social','comment','byline','author','timestamp']):
                 div.decompose()
         except (AttributeError, TypeError):
             continue
-    return re.sub(r'\s+', ' ', body.get_text(separator=' ', strip=True))
+    # Extract only <p> tags — filter short/noise paragraphs
+    paragraphs = []
+    noise_re = re.compile(r'(?i)(follow\s+our|join\s+our|sign\s+up|subscribe|newsletter|facebook\s+page|amazon\s+prime|betting|odds|stream\s+live)')
+    for p in body.find_all('p'):
+        txt = p.get_text(separator=' ', strip=True)
+        if len(txt) < 20: continue
+        if noise_re.search(txt): continue
+        paragraphs.append(txt)
+    return ' '.join(paragraphs)
 
 def extract_image(raw_html):
     """Extract best og:image from HTML."""
