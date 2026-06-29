@@ -612,6 +612,10 @@ def main():
         sys.exit(1)
 
     best = ranked[0]
+    if best["_score"] < 50:
+        log(f"   ⏸️ Best score {best['_score']} < 50 threshold — skipping")
+        print(f"⏸️ Skip — best topic score {best['_score']} below threshold", flush=True)
+        sys.exit(0)
     log(f"   🏆 Best: {best['title']} (score={best['_score']}, type={best.get('_topic_type','')})")
 
     # 3. Fetch article
@@ -632,13 +636,19 @@ def main():
         sys.exit(1)
     llm_time = time.time() - t0
 
-    # 5. Grounding check
+    # 5. Grounding check — block on hallucinated stages, warn on names
     slides_text = " ".join(s["content"] for s in slides)
     art_names = _extract_proper_nouns(article_text)
     art_stages = _extract_stages(article_text)
     warnings = grounding_check(slides_text, article_text, art_names, art_stages)
-    if warnings:
-        log(f"   ⚠️ Grounding warnings: {'; '.join(warnings)}")
+    hallucinated_stages = [w for w in warnings if "HALLUCINATED_STAGE" in w]
+    hallucinated_names = [w for w in warnings if "HALLUCINATED_NAME" in w]
+    if hallucinated_names:
+        log(f"   ⚠️ Name warnings (soft): {'; '.join(hallucinated_names)}")
+    if hallucinated_stages:
+        log(f"   ❌ Stage hallucination: {'; '.join(hallucinated_stages)}")
+        print(f"❌ Grounding: {'; '.join(hallucinated_stages)}", flush=True)
+        sys.exit(1)
 
     # 6. DRY RUN or POST
     total = time.time() - START
