@@ -283,7 +283,7 @@ def extract_article(raw_html):
             continue
     # Extract only <p> tags — filter short/noise paragraphs
     paragraphs = []
-    noise_re = re.compile(r'(?i)(follow\s+our|join\s+our|sign\s+up|subscribe|newsletter|facebook\s+page|amazon\s+prime|betting|odds|stream\s+live)')
+    noise_re = re.compile(r'(?i)(follow\s+our|join\s+our|sign\s+up|subscribe|newsletter|facebook\s+page|amazon\s+prime|betting|odds|stream\s+live|add\s+goal\.com|preferred\s+source)')
     for p in body.find_all('p'):
         txt = p.get_text(separator=' ', strip=True)
         if len(txt) < 20: continue
