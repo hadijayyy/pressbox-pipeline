@@ -3,7 +3,7 @@ STATUS_FILE="/tmp/pressbox-last-status"
 MAX_AGE=7200
 
 if [ ! -f "$STATUS_FILE" ]; then
-    echo "No status file — running pipeline"
+    echo "⚠️ No status file — running pipeline"
     cd ~/.hermes/pressbox-pipeline && bash run-mvp.sh
     exit $?
 fi
@@ -20,5 +20,5 @@ if [[ "$LABEL" == "ok"* ]] && [ "$AGE" -lt "$MAX_AGE" ]; then
     exit 0
 fi
 
-echo "Watchdog: status=$LABEL age=${AGE}s — retrying pipeline"
+echo "⚠️ Watchdog: status=$LABEL age=${AGE}s — retrying pipeline"
 cd ~/.hermes/pressbox-pipeline && bash run-mvp.sh

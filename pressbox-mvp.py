@@ -16,7 +16,7 @@ from bs4 import BeautifulSoup
 
 # ── Config ──────────────────────────────────────────────────────────
 DRY_RUN = "--dry-run" in sys.argv
-SOURCES = ["mirror", "skysports", "goal"]
+SOURCES = ["skysports", "goal"]
 MAX_CHARS = 500  # Threads per-slide limit
 SENTENCE_COUNTS = {1:(1,3), 2:(2,4), 3:(2,4), 4:(1,4), 5:(2,4), 6:(2,4)}
 os.makedirs(f"{HOME}/.hermes/pressbox", exist_ok=True)
@@ -55,6 +55,8 @@ def scrape_rss(url, source, base_score=9):
             title = html_mod.unescape(title)
             if not title or len(title) < 20: continue
             link = (le.text or "").strip().split("?")[0]
+            # Skip live blogs — they're noise, not articles
+            if '/live/' in link or '/liveblog/' in link: continue
             de = item.find('description')
             desc = re.sub(r'<[^>]+>', ' ', (de.text or "")).strip()[:500] if de is not None else ""
             desc = html_mod.unescape(desc)
@@ -64,96 +66,53 @@ def scrape_rss(url, source, base_score=9):
                 try: ts = parsedate_to_datetime(pe.text.strip()).timestamp()
                 except: pass
             if ts and (time.time() - ts) > 43200: continue  # 12h freshness
-            # Image from media:content
+            # Image: media:content first, fallback to enclosure
             img = ""
             for ns in ["http://search.yahoo.com/mrss/", "http://search.yahoo.com/mrss"]:
                 for mc in item.findall(f'.//{{{ns}}}content'):
                     w = int(mc.get("width", 0))
                     if w > 0: img = mc.get("url", "")
+            if not img:
+                enc = item.find('enclosure')
+                if enc is not None and 'image' in (enc.get('type', '')):
+                    img = enc.get('url', '')
             topics.append(dict(title=title, source=source, url=link, score=base_score,
                                description=desc, published_ts=ts, image_url=img))
     except: pass
     return topics
 
-def scrape_mirror():
-    """Mirror scraper."""
-    topics = []
-    try:
-        code, text = _http("https://www.mirror.co.uk/sport/football/news/")
-        if code != 200: return topics
-        seen = set()
-        for link in re.findall(r'href="(https?://www\.mirror\.co\.uk/sport/football/[^"]*-?\d+)"', text)[:12]:
-            if link in seen or 'pageNumber' in link: continue
-            seen.add(link)
-            try:
-                c2, t2 = _http(link, timeout=6)
-                if c2 != 200: continue
-                m = re.search(r'og:title[^>]*content="([^"]*)"', t2)
-                if not m: continue
-                title = html_mod.unescape(m.group(1))
-                if title.lower().startswith(("the mirror", "mirror", "uk news")): continue
-                dp = None
-                dm = re.search(r'"datePublished"\s*:\s*"([^"]*)"', t2)
-                if dm:
-                    try: dp = datetime.fromisoformat(dm.group(1).replace("Z","+00:00")).timestamp()
-                    except: pass
-                if dp and (time.time() - dp) > 43200: continue
-                od = re.search(r'og:description[^>]*content="([^"]*)"', t2)
-                desc = html_mod.unescape(od.group(1)) if od else ""
-                # og:image
-                oi = re.search(r'og:image[^>]*content="([^"]*)"', t2)
-                img = oi.group(1) if oi else ""
-                topics.append(dict(title=title, source="mirror", url=link, score=10,
-                                   description=desc[:500], published_ts=dp, image_url=img))
-            except: pass
-    except: pass
-    return topics
 
 def scrape_goal():
-    """Goal.com scraper."""
+    """Goal.com scraper — direct homepage scrape (RSS broken)."""
     topics = []
     try:
-        code, text = _http("https://www.goal.com/en", timeout=10)
+        code, text = _http("https://www.goal.com/en")
         if code != 200: return topics
-        soup = BeautifulSoup(text, 'html.parser')
-        for art in soup.find_all('article')[:15]:
-            try:
-                h3 = art.find('h3')
-                if not h3: continue
-                title = h3.get_text(strip=True)
-                if len(title) < 10: continue
-                a = art.find('a', href=True)
-                if not a: continue
-                url = a['href']
-                if url.startswith('//'): url = 'https:' + url
-                elif not url.startswith('http'): url = 'https://www.goal.com' + url
-                # Fetch article for og:image + timestamp
-                c2, t2 = _http(url, timeout=10)
-                if c2 != 200: continue
-                oi = re.search(r'og:image[^>]*content="([^"]*)"', t2)
-                img = oi.group(1) if oi else ""
-                ts = None
-                tm = re.search(r'"datePublished"\s*:\s*"([^"]*)"', t2)
-                if tm:
-                    try: ts = datetime.fromisoformat(tm.group(1).replace("Z","+00:00")).timestamp()
-                    except: pass
-                if ts and (time.time() - ts) > 43200: continue
-                od = re.search(r'og:description[^>]*content="([^"]*)"', t2)
-                desc = html_mod.unescape(od.group(1)) if od else ""
-                topics.append(dict(title=title, source="goal", url=url, score=10,
-                                   description=desc[:500], published_ts=ts, image_url=img))
-            except: pass
+        seen = set()
+        for m in re.finditer(r'href="(/en/(?:news|lists|transfers|features)/[^"]+)"', text):
+            href = m.group(1)
+            if href in seen: continue
+            seen.add(href)
+            link = "https://www.goal.com" + href
+            # Extract title from surrounding context
+            idx = m.start()
+            chunk = text[max(0,idx-200):idx+200]
+            tm = re.search(r'>([^<]{25,})<', chunk)
+            if not tm: continue
+            title = html_mod.unescape(tm.group(1).strip())
+            topics.append(dict(title=title, source="goal", url=link, score=10,
+                               description="", published_ts=None, image_url=""))
+            if len(topics) >= 10: break
     except: pass
     return topics
 
 def scrape_all():
     """Scrape all sources in parallel."""
-    log("Scraping 3 sources...")
+    log("Scraping 2 sources...")
     t0 = time.time()
     all_t = []
-    with ThreadPoolExecutor(max_workers=3) as ex:
+    with ThreadPoolExecutor(max_workers=2) as ex:
         futs = {
-            "mirror": ex.submit(scrape_mirror),
             "skysports": ex.submit(scrape_rss, "https://www.skysports.com/rss/11095", "skysports", 12),
             "goal": ex.submit(scrape_goal),
         }
@@ -362,6 +321,8 @@ def filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_su
         if any(kw in tl or kw in desc for kw in _WOMEN): continue
         # TV guides
         if any(kw in tl for kw in _TV_GUIDE): continue
+        # Filter out live commentary pages (skysports.com/.../live/...)
+        if '/live/' in url: continue
         # Sensitive content
         if any(kw in tl or kw in desc for kw in _SENSITIVE): continue
         # Dedup
@@ -405,6 +366,18 @@ def filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_su
         t["_topic_type"] = tt
         results.append(t)
     results.sort(key=lambda x: -x["_score"])
+    # Source diversity cap: no single source > 50% of ranked pool
+    if results:
+        from collections import Counter
+        max_per_source = max(1, len(results) // 2)
+        source_count = Counter()
+        capped = []
+        for t in results:
+            src = t.get("source", "")
+            if source_count[src] < max_per_source:
+                capped.append(t)
+                source_count[src] += 1
+        results = capped
     return results
 
 # ── 3. EXTRACT ARTICLE ─────────────────────────────────────────────
@@ -540,15 +513,18 @@ Every post is a 6-slide storytelling journey. Not a listicle. Not a recap. A nar
 [SLIDE STRUCTURE -- RCTOR FRAMEWORK]
 
 Slide 1 -- R: REALITY (The Hook)
-Open with a single electric sentence that forces a scroll-stop.
-Bold, specific, slightly provocative -- a fact, a moment, or a question that creates instant tension.
-The reader should feel: "Wait. What?"
-Do NOT start with generic openers like "Football is..." or "Did you know..."
-Hook formats to rotate:
-- Contrast hook: "[Club/Player] won everything -- except what actually mattered."
+ONE sentence. Scroll-stop. No warmup. Must feel controversial or like a hot take.
+Reader should think: "That's not right... is it?" or "Oh shit."
+Do NOT start with "Football is...", "Did you know...", "This is..."
+Hook formats -- default to accusation or hot take:
+- Accusation hook: "[Big name] just destroyed [club/player]'s World Cup -- and nobody's talking about it."
+- Hot take hook: "[Player] is overrated. The numbers finally prove it."
+- Betrayal hook: "[Club] paid £[X]m for [player] and threw him away like trash."
+- Verdict hook: "This is the worst [decision/transfer/call] of the 2026 World Cup. No debate."
+- Contrast hook: "[Player/Club] won everything -- except what actually mattered."
 - Number hook: "13 seconds. That's all it took to end his career."
-- Question hook: "What if the greatest assist in Champions League history never happened?"
 - Statement hook: "He scored 40 goals that season. Nobody remembers his name."
+RULE: If article has any controversy/blame/drama, use accusation or betrayal. Only use contrast/number for pure results stories.
 
 Proven hook example (62.9K views):
 "Thomas Tuchel just locked England's most lethal weapon out of the World Cup -- and now he's repeating Gareth Southgate's fatal mistake. The problem? There's no way out this time."
