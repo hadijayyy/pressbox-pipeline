@@ -685,9 +685,14 @@ Output strict JSON, no markdown fences:
                 # Enforce blank line after every sentence
                 s["content"] = re.sub(r'([.!?])(\s+)([A-Z"])', r'\1\n\n\3', s["content"])
 
-            # Guarantee source URL on last slide
-            if url not in slides[-1]["content"]:
-                slides[-1]["content"] = slides[-1]["content"].rstrip() + "\n\n" + url
+            # Guarantee source URL on last slide (deduplicate if LLM already included it)
+            last = slides[-1]["content"]
+            url_base = url.split("?")[0].rstrip("/")  # normalize for fuzzy match
+            if url_base not in last and url not in last:
+                slides[-1]["content"] = last.rstrip() + "\n\n" + url
+            elif last.count(url) > 1:
+                # LLM repeated URL — remove duplicates
+                slides[-1]["content"] = last.replace(url, "", last.count(url) - 1).strip()
 
             return slides
 
