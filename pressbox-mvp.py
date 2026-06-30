@@ -892,8 +892,27 @@ def main():
 
     log(f"✅ {best['title']} → {permalink}")
     log(f"⏱️ Total: {total:.1f}s (LLM: {llm_time:.1f}s)")
-    print(f"✅ {best['title'][:70]}", flush=True)
-    print(f"   {permalink}", flush=True)
+
+    # Summary report (stdout → delivered to Telegram topic 20467)
+    score = best.get("_score", 0)
+    hook_type = best.get("_hook_type", "unknown")
+    src = best.get("source", "unknown")
+    slide_count = len(slides)
+    slide_preview = slides[0]["content"][:120] if slides else "N/A"
+    import datetime
+    now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=7)))
+    wib = now.strftime("%H:%M WIB, %d %b %Y")
+    post_count = len(json.load(open(POSTED)).get("topics", []))
+    print(f"""📰 **Pressbox MVP — Posted**
+━━━━━━━━━━━━━━━━
+**Title:** {best['title'][:100]}
+**Source:** {src} | **Score:** {score} | **Hook:** {hook_type}
+**Slides:** {slide_count}
+**Hook preview:** {slide_preview}...
+**Link:** {permalink}
+━━━━━━━━━━━━━━━━
+📊 Posts: {post_count} total | ⏱️ {total:.1f}s (LLM: {llm_time:.1f}s)
+⏰ {wib}""", flush=True)
 
 if __name__ == "__main__":
     main()
