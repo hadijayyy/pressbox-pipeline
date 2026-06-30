@@ -16,7 +16,7 @@ from bs4 import BeautifulSoup
 
 # ── Config ──────────────────────────────────────────────────────────
 DRY_RUN = "--dry-run" in sys.argv
-SOURCES = ["skysports", "goal"]
+SOURCES = ["skysports", "goal", "bbc", "fourfourtwo"]
 MAX_CHARS = 500  # Threads per-slide limit
 SENTENCE_COUNTS = {1:(1,3), 2:(2,4), 3:(2,4), 4:(1,4), 5:(2,4), 6:(2,4)}
 os.makedirs(f"{HOME}/.hermes/pressbox", exist_ok=True)
@@ -57,6 +57,8 @@ def scrape_rss(url, source, base_score=9):
             link = (le.text or "").strip().split("?")[0]
             # Skip live blogs — they're noise, not articles
             if '/live/' in link or '/liveblog/' in link: continue
+            # Skip BBC video pages (short content)
+            if '/videos/' in link: continue
             de = item.find('description')
             desc = re.sub(r'<[^>]+>', ' ', (de.text or "")).strip()[:500] if de is not None else ""
             desc = html_mod.unescape(desc)
@@ -65,7 +67,7 @@ def scrape_rss(url, source, base_score=9):
             if pe is not None and pe.text:
                 try: ts = parsedate_to_datetime(pe.text.strip()).timestamp()
                 except: pass
-            if ts and (time.time() - ts) > 43200: continue  # 12h freshness
+            if ts and (time.time() - ts) > 86400: continue  # 24h freshness
             # Image: media:content first, fallback to enclosure
             img = ""
             for ns in ["http://search.yahoo.com/mrss/", "http://search.yahoo.com/mrss"]:
@@ -102,19 +104,21 @@ def scrape_goal():
             link = href if href.startswith('http') else "https://www.goal.com" + href
             topics.append(dict(title=title, source="goal", url=link, score=10,
                                description="", published_ts=None, image_url=""))
-            if len(topics) >= 10: break
+            if len(topics) >= 20: break
     except: pass
     return topics
 
 def scrape_all():
     """Scrape all sources in parallel."""
-    log("Scraping 2 sources...")
+    log("Scraping 4 sources...")
     t0 = time.time()
     all_t = []
-    with ThreadPoolExecutor(max_workers=2) as ex:
+    with ThreadPoolExecutor(max_workers=4) as ex:
         futs = {
             "skysports": ex.submit(scrape_rss, "https://www.skysports.com/rss/11095", "skysports", 12),
             "goal": ex.submit(scrape_goal),
+            "bbc": ex.submit(scrape_rss, "https://feeds.bbci.co.uk/sport/football/rss.xml", "bbc", 10),
+            "fourfourtwo": ex.submit(scrape_rss, "https://www.fourfourtwo.com/rss", "fourfourtwo", 8),
         }
         for name, f in futs.items():
             try:
@@ -418,7 +422,9 @@ def extract_article(raw_html):
 def extract_image(raw_html):
     """Extract best og:image from HTML."""
     for pat in [r'<meta\s+property="og:image"\s+content="([^"]+)"',
-                r'<meta\s+name="twitter:image"\s+content="([^"]+)"']:
+                r'<meta\s+content="([^"]+)"\s+property="og:image"',
+                r'<meta\s+name="twitter:image"\s+content="([^"]+)"',
+                r'<meta\s+content="([^"]+)"\s+name="twitter:image"']:
         m = re.search(pat, raw_html, re.I)
         if m:
             url = m.group(1)

@@ -16,7 +16,7 @@ if run_pipeline; then
     echo "━━━━━━━━━━━━━━━━"
     echo "📊 Pressbox MVP ✅"
     echo "⏰ $(date '+%H:%M WIB, %d %b %Y')"
-    echo "📁 Sources: skysports, goal"
+    echo "📁 Sources: skysports, goal, bbc, fourfourtwo"
     exit 0
 fi
 
