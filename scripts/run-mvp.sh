@@ -1,6 +1,18 @@
 #!/bin/bash
 cd ~/.hermes/pressbox-pipeline
 
+# Load bot token for @Szejay_bot notifications
+set -a; source ~/.hermes/.env 2>/dev/null; set +a
+SZEJAY_CHAT="1022032312"
+
+notify() {
+    # Send status to @Szejay_bot. $1=message text
+    [ -z "$SZEJAY_BOT_TOKEN" ] && return
+    curl -s -X POST "https://api.telegram.org/bot${SZEJAY_BOT_TOKEN}/sendMessage" \
+        --data-urlencode "chat_id=$SZEJAY_CHAT" \
+        --data-urlencode "text=$1" > /dev/null 2>&1 &
+}
+
 # Anti-bot: 2-layer randomization
 # Layer 1: Random gap check (50-90 min since last POST, not last run)
 # Layer 2: Random sleep 0-20 min (breaks exact :00/:30 pattern)
@@ -28,7 +40,7 @@ if [ -f "$STATUS_FILE" ]; then
 fi
 
 # Layer 2: Random sleep to break exact minute pattern
-SLEEP_SEC=$((RANDOM % 1201))  # 0-20 min
+SLEEP_SEC=$((RANDOM % 121))  # 0-2 min (was 0-20 min, caused 300s timeout)
 sleep "$SLEEP_SEC"
 
 OUTPUT=""
@@ -50,11 +62,17 @@ if [ $EXIT_CODE -eq 0 ] && [ -n "$OUTPUT" ]; then
 fi
 
 # Output → stdout (delivered to Telegram topic 20467 by Hermes cron)
+# + send to @Szejay_bot
+NOW_WIB=$(TZ=Asia/Jakarta date '+%H:%M WIB')
 if [ -n "$OUTPUT" ]; then
     echo "$OUTPUT"
+    notify "✅ Posted @ $NOW_WIB
+$OUTPUT"
 elif [ $EXIT_CODE -ne 0 ]; then
-    echo "❌ Pressbox MVP failed at $(TZ=Asia/Jakarta date '+%H:%M WIB')"
+    MSG="❌ Pressbox MVP failed @ $NOW_WIB"
+    echo "$MSG"
     echo "📁 Log: ~/.hermes/pressbox-pipeline/"
+    notify "$MSG"
 fi
 
 exit $EXIT_CODE
