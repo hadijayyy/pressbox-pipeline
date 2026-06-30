@@ -88,18 +88,18 @@ def scrape_goal():
     try:
         code, text = _http("https://www.goal.com/en")
         if code != 200: return topics
+        soup = BeautifulSoup(text, 'html.parser')
         seen = set()
-        for m in re.finditer(r'href="(/en/(?:news|lists|transfers|features)/[^"]+)"', text):
-            href = m.group(1)
+        for a in soup.find_all('a', href=True):
+            href = a['href']
+            if not re.search(r'/en/(?:news|lists|transfers|features)/', href): continue
             if href in seen: continue
             seen.add(href)
-            link = "https://www.goal.com" + href
-            # Extract title from surrounding context
-            idx = m.start()
-            chunk = text[max(0,idx-200):idx+200]
-            tm = re.search(r'>([^<]{25,})<', chunk)
-            if not tm: continue
-            title = html_mod.unescape(tm.group(1).strip())
+            title = a.get_text(strip=True)
+            # Strip time prefix from breaking news ("5 hours agoDeschamps...")
+            title = re.sub(r'^\d+\s+hours?\s+ago', '', title).strip()
+            if not title or len(title) < 20: continue
+            link = href if href.startswith('http') else "https://www.goal.com" + href
             topics.append(dict(title=title, source="goal", url=link, score=10,
                                description="", published_ts=None, image_url=""))
             if len(topics) >= 10: break
@@ -500,89 +500,52 @@ def generate_slides(article_text, url, hooks="", cta_pattern="", tone=""):
     if cta_pattern: extra += f"\n- CTA PATTERN: {cta_pattern}"
     if tone: extra += f"\n- TONE: {tone}"
 
-    system = f"""You are a world-class football storyteller writing carousel-style posts for an international football account on Threads. Your audience is passionate football fans aged 18-35 who scroll fast and stop only for content that feels electric, real, and worth their time.
+    system = f"""You are a world-class football storyteller writing carousel-style posts for Threads. Audience: passionate football fans 18-35 who scroll fast. Stop only for content that feels electric and real.
 
-Every post is a 6-slide storytelling journey. Not a listicle. Not a recap. A narrative arc -- with tension, revelation, and a payoff -- written so the reader feels something by slide 6 they didn't feel at slide 1.
+6-slide narrative arc. Not a listicle. Not a recap. Tension → revelation → payoff.
 
-[FORMAT RULES -- NON-NEGOTIABLE]
-- Exactly 6 slides per post
-- Maximum 4 sentences per slide
-- Prose only. No bullet points. No numbered lists.
-- Language: English (conversational, punchy, global)
+[FORMAT]
+- Exactly 6 slides
+- Max 4 sentences per slide
+- Prose only, no bullets/lists
+- English (conversational, punchy, global)
 
-[SLIDE STRUCTURE -- RCTOR FRAMEWORK]
+SLIDE 1 — REALITY (Hook, max 3 sentences)
+Pick ONE style:
+- accusation: "X failed because of Y"
+- hot take: unpopular opinion stated as fact
+- betrayal: trust broken by player/club/manager
+- verdict: judgment delivered, no hedging
+- contrast: "Everyone said X. Then Y happened."
+- number: stat that reframes the story
+- statement: blunt declarative fact
+Priority: CONTROVERSY > CONFLICT > CURIOSITY GAP
 
-Slide 1 -- R: REALITY (The Hook)
-ONE sentence. Scroll-stop. No warmup. Must feel controversial or like a hot take.
-Reader should think: "That's not right... is it?" or "Oh shit."
-Do NOT start with "Football is...", "Did you know...", "This is..."
-Hook formats -- default to accusation or hot take:
-- Accusation hook: "[Big name] just destroyed [club/player]'s World Cup -- and nobody's talking about it."
-- Hot take hook: "[Player] is overrated. The numbers finally prove it."
-- Betrayal hook: "[Club] paid £[X]m for [player] and threw him away like trash."
-- Verdict hook: "This is the worst [decision/transfer/call] of the 2026 World Cup. No debate."
-- Contrast hook: "[Player/Club] won everything -- except what actually mattered."
-- Number hook: "13 seconds. That's all it took to end his career."
-- Statement hook: "He scored 40 goals that season. Nobody remembers his name."
-RULE: If article has any controversy/blame/drama, use accusation or betrayal. Only use contrast/number for pure results stories.
+SLIDE 2 — CONTEXT (40-60 words)
+Backstory: who, what's at stake, why now.
 
-Proven hook example (62.9K views):
-"Thomas Tuchel just locked England's most lethal weapon out of the World Cup -- and now he's repeating Gareth Southgate's fatal mistake. The problem? There's no way out this time."
-This works because: named figures everyone knows, drama language, contrast structure, short escalating paragraphs.
+SLIDE 3 — TENSION (40-60 words)
+Conflict/turning point. End on unresolved question.
 
-Slide 2 -- C: CONTEXT (Build the World)
-Give just enough backstory to care. Who, what situation, what's at stake.
-Set the scene without drowning in detail. Earn their trust as a storyteller.
+SLIDE 4 — OUTCOME (40-60 words)
+Facts first, no editorializing. What actually happened.
 
-Slide 3 -- T: TENSION (Raise the Stakes)
-Introduce the conflict, turning point, or impossible odds.
-Something must be at risk -- a title, a legacy, a career, a relationship with fans.
-End on a moment of uncertainty. Never resolve it here.
+SLIDE 5 — REFLECTION (30-50 words)
+One universal theme (pressure/loyalty/identity) tied directly to a fact from slides 2-4. No generic platitudes.
 
-Slide 4 -- O: OUTCOME (The Turning Point)
-The pivot. Reveal what actually happened -- the result, the decision, the moment.
-Cinematic detail: scorelines, timestamps, exact quotes if relevant.
-Do NOT editorialize yet -- let the facts hit first.
+SLIDE 6 — CTA (30-40 words)
+Open question + URL on last line.
 
-Slide 5 -- R: REFLECTION (The Deeper Truth)
-Pull back and reveal what it means beyond the pitch.
-Interpret motivations, stakes, and consequences. Connect to something universal -- pressure, loyalty, identity, legacy, redemption.
-This is where casual fans become followers.
+[GROUNDING — STRICT]
+Names/scores/dates/quotes: verbatim from article only. Never invent quotes or attribute unstated emotions.
+REJECT only if article has zero usable facts.
 
-Slide 6 -- CALL TO ACTION (Invite the Conversation)
-End with an open question or provocation that invites comments.
-Natural conversation starter, not a marketing ask. Give the reader a side to pick.
-Last line: {url}
+[ANALYTICS OVERRIDES]
+PREFERRED_HOOKS, CTA_PATTERN, TONE override style choice in Slide 1 and Slide 6 when present.
 
-[HOOK PRIORITY]
-(a) CONTROVERSY -- drama, scandal, big names clashing
-(b) CONFLICT -- direct confrontation between named parties
-(c) CURIOSITY GAP -- intrigue without clickbait
-Skip to (b) or (c) if no controversy. Never force drama from unrelated facts.
-Must read like something you'd say to a friend at a pub.
-
-[TONE]
-- Confident but not arrogant. Passionate but not hyperbolic.
-- Specific names, dates, clubs, tournaments -- vagueness kills football content.
-- Short sentences hit harder than long ones.
-- Avoid cliches: "against all odds", "nothing short of", "at the end of the day"
-- Indonesian articles: keep names original, write in English.
-
-[FORMAT -- JSON only, no fences]
-{{"slide_1":{{"title":"REALITY","content":"..."}},"slide_2":{{"title":"CONTEXT","content":"..."}},"slide_3":{{"title":"TENSION","content":"..."}},"slide_4":{{"title":"OUTCOME","content":"..."}},"slide_5":{{"title":"REFLECTION","content":"..."}},"slide_6":{{"title":"CTA","content":"..."}}}}
-
-[QUALITY CHECK]
-- At least one slide must contain a specific fact, stat, or quote from the article.
-- Story must have clear arc: tension -> resolution -> meaning.
-
-[GROUNDING -- STRICT]
-Names, scores, dates, quotes: verbatim from article. No outside knowledge.
-Missing detail = omit. Never invent quotes or attribute emotions directly to individuals.
-Slide 5 interpretation allowed: motivations, stakes, consequences -- grounded in stated facts only.
-
-[REJECTION]
-ONLY reject if article has NO usable facts. Articles with concrete facts are VALID.
-Output: {{"error":"insufficient_source","reason":"..."}}{extra}"""
+Output strict JSON, no markdown fences:
+{{"slide_1":"","slide_2":"","slide_3":"","slide_4":"","slide_5":"","slide_6":""}}
+{extra}"""
 
 
 
@@ -654,6 +617,8 @@ Output: {{"error":"insufficient_source","reason":"..."}}{extra}"""
                     s = data.get(f"slide_{i}", {})
                     if isinstance(s, dict) and s.get("content","").strip():
                         slides.append({"title":s.get("title",f"S{i}"), "content":s["content"].strip()})
+                    elif isinstance(s, str) and s.strip():
+                        slides.append({"title":f"S{i}", "content":s.strip()})
 
             if len(slides) < 3:
                 log(f"   ❌ Only {len(slides)} usable slides")
@@ -818,8 +783,8 @@ def main():
         sys.exit(1)
 
     best = ranked[0]
-    if best["_score"] < 50:
-        log(f"   ⏸️ Best score {best['_score']} < 50 threshold — skipping")
+    if best["_score"] < 30:
+        log(f"   ⏸️ Best score {best['_score']} < 30 threshold — skipping")
         print(f"⏸️ Skip — best topic score {best['_score']} below threshold", flush=True)
         sys.exit(0)
     log(f"   🏆 Best: {best['title']} (score={best['_score']}, type={best.get('_topic_type','')})")
