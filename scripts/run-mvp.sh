@@ -2,7 +2,7 @@
 cd ~/.hermes/pressbox-pipeline
 
 # Anti-bot: 2-layer randomization
-# Layer 1: Random gap check (60-90 min since last post)
+# Layer 1: Random gap check (50-90 min since last POST, not last run)
 # Layer 2: Random sleep 0-20 min (breaks exact :00/:30 pattern)
 # Lockfile prevents concurrent runs
 
@@ -10,7 +10,7 @@ LOCKFILE="/tmp/pressbox-mvp.lock"
 exec 200>"$LOCKFILE"
 flock -n 200 || exit 0  # Another instance running, skip silently
 
-STATUS_FILE="/tmp/pressbox-last-status"
+STATUS_FILE="/tmp/pressbox-last-post"
 MIN_GAP=$((3000 + RANDOM % 2401))   # 50-90 min
 
 if [ -f "$STATUS_FILE" ]; then
@@ -21,7 +21,7 @@ if [ -f "$STATUS_FILE" ]; then
         if [ -n "$LAST_EPOCH" ]; then
             ELAPSED=$((NOW_EPOCH - LAST_EPOCH))
             if [ $ELAPSED -lt $MIN_GAP ]; then
-                exit 0  # Silent skip
+                exit 0  # Silent skip — not enough time since last POST
             fi
         fi
     fi
@@ -39,12 +39,13 @@ OUTPUT=$(python3 -u pressbox-mvp.py 2>/dev/null) || {
     echo "[watchdog] First attempt failed, retrying in 60s..." >&2
     sleep 60
     OUTPUT=$(python3 -u pressbox-mvp.py 2>/dev/null) || {
-        echo "fail $(date -Iseconds)" > "$STATUS_FILE"
         EXIT_CODE=1
     }
 }
 
-if [ $EXIT_CODE -eq 0 ]; then
+# Only mark "posted" when OUTPUT is non-empty (post actually happened)
+# This allows re-try at next :30 if no good content was found
+if [ $EXIT_CODE -eq 0 ] && [ -n "$OUTPUT" ]; then
     echo "ok $(date -Iseconds)" > "$STATUS_FILE"
 fi
 
