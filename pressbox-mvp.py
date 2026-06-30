@@ -891,4 +891,9 @@ def main():
 ⏰ {wib}""", flush=True)
 
 if __name__ == "__main__":
+    import random as _rnd
+    if "--with-jitter" in sys.argv:
+        _jitter = _rnd.randint(0, 30)
+        log(f"⏳ Jitter sleep: {_jitter}s")
+        time.sleep(_jitter)
     main()

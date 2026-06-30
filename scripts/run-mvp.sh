@@ -12,11 +12,7 @@ notify() {
         --data-urlencode "text=$1" > /dev/null 2>&1 &
 }
 
-# Anti-bot: 2-layer randomization
-# Layer 1: Random gap check (50-90 min since last POST)
-# Layer 2: Random sleep 0-30s (breaks exact :00/:30 pattern)
 # Lockfile prevents concurrent runs
-
 LOCKFILE="/tmp/pressbox-mvp.lock"
 exec 200>"$LOCKFILE"
 flock -n 200 || exit 0
@@ -38,17 +34,10 @@ if [ -f "$STATUS_FILE" ]; then
     fi
 fi
 
-# Layer 2: small random sleep to break exact minute pattern
-SLEEP_SEC=$((RANDOM % 31))  # 0-30s
-sleep "$SLEEP_SEC"
-
-OUTPUT=""
-EXIT_CODE=0
-
-# Single attempt (no retry — keeps under 300s cron timeout)
-OUTPUT=$(timeout 240 python3 -u pressbox-mvp.py 2>/dev/null) || {
-    EXIT_CODE=$?
-}
+# Pipeline: jitter (0-30s) + scrape + LLM all inside Python
+# Budget: 30s jitter + 60s LLM × 3 retries + 30s article + 24s scrape = 264s max
+OUTPUT=$(python3 -u pressbox-mvp.py --with-jitter 2>/dev/null)
+EXIT_CODE=$?
 
 # Mark posted only when OUTPUT non-empty
 if [ $EXIT_CODE -eq 0 ] && [ -n "$OUTPUT" ]; then
