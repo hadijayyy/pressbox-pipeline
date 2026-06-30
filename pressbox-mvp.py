@@ -150,25 +150,8 @@ def load_posted():
     return posted_urls, posted_ws
 
 def load_analytics():
-    """Load analytics feedback for topic boosts + skip list."""
-    boosts, skips, hooks, cta, tone = {}, [], [], [], ""
-    fb_path = f"{HOME}/.hermes/pressbox/analytics_feedback.json"
-    rec_path = f"{HOME}/.hermes/pressbox/analytics_recommendations.json"
-    try:
-        with open(fb_path) as f:
-            fb = json.load(f)
-        boosts = fb.get("topic_boosts", {})
-        skips = [s.get("pattern","") for s in fb.get("skip_topics",[])]
-    except: pass
-    try:
-        with open(rec_path) as f:
-            recs = json.load(f)
-        gen = recs.get("analysis",{}).get("generate_tweaks",{})
-        hooks = gen.get("preferred_hooks",[])
-        cta = gen.get("cta_pattern","")
-        tone = gen.get("tone_adjustment","")
-    except: pass
-    return boosts, skips, hooks, cta, tone
+    """DEPRECATED: static feedback files are dead. Live system (get_analytics_summary) handles all scoring."""
+    return {}, [], [], "", ""  # ponytail: all boosts/skicks from get_analytics_summary now
 
 def pull_engagement(poster):
     """Pull metrics for posts > 12h that haven't been tracked yet. Max 10 per run."""
@@ -348,9 +331,7 @@ def filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_su
         # Pipeline bonuses
         if t.get("wc_related") or t.get("wc_boost"): s += 40
         if t.get("transfer_related"): s += 10
-        # Analytics topic boost (legacy)
-        if tt in boosts:
-            s = int(s * boosts[tt])
+        # ponytail: legacy topic boost multiplier removed — stale data inflated match_result 3x
         # Dynamic analytics boost (data-driven)
         if analytics_summary and median_views > 0:
             hook = _classify_hook(tl)
