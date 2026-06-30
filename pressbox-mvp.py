@@ -547,11 +547,15 @@ Pick ONE style:
 - number: stat that reframes the story
 - scandal: "and nobody's talking about the real reason" / "and it's not even the worst part"
 - statement: blunt declarative fact
-Priority: CURIOSITY GAP > CONTROVERSY > CONFLICT
+Priority (context-dependent):
+- Big names/events (WC, CL, big clubs): CURIOSITY GAP > CONTROVERSY > CONFLICT
+- Niche/unknown topics (lower leagues, retired players, small nations): CONFLICT > CONTROVERSY > hot take
+- NEVER use "nobody's talking about" unless the topic involves a name/event that 90% of fans would recognize
 
 WINNING PATTERN (75K views proven):
 "X just became the first Y to do Z after [specific stat] - and nobody's talking about [scandal/real reason]."
 Key ingredients: (1) specific stat/number (2) "first ever" framing (3) "nobody's talking about" creates reply bait
+WARNING: "nobody's talking about" ONLY works with big names (WC, CL, Premier League, Messi, etc). For niche topics, use direct conflict or hot take instead.
 Hook must provoke REPLIES (opinions, debates) not just views. Questions like "Is this the worst decision?" drive 3x more comments than factual statements.
 
 SLIDE 2 — CONTEXT (40-60 words)
