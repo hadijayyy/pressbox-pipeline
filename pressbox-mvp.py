@@ -567,7 +567,7 @@ SLIDE 5 — CLIMAX (30-50 words)
 Biggest revelation or consequence. What nobody expected. The twist that changes everything. NOT philosophical — cinematic. End on impact, not sentiment.
 
 SLIDE 6 — CTA (30-40 words)
-Debate question that forces a side. Not "What do you think?" — force opinion: "Is this the worst decision?", "Was he right?", "Can they survive this?". End with URL on last line.
+Debate question that forces a side. Not "What do you think?" — force opinion: "Is this the worst decision?", "Was he right?", "Can they survive this?". Do NOT add any URLs or links — the source URL is appended automatically.
 
 [GROUNDING — STRICT]
 Names/scores/dates/quotes: verbatim from article only. Never invent quotes or attribute unstated emotions.
