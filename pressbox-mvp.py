@@ -377,6 +377,18 @@ def filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_su
             except: pass
         results.append(t)
     results.sort(key=lambda x: -x["_score"])
+    # Cannibalization filter — skip lower-scored duplicate topics
+    seen_sigs = set()
+    deduped = []
+    skip_words = {"the","a","an","in","on","at","to","for","of","and","or","but","is","was","just","not"}
+    for t in results:
+        words = set(t.get("title","").lower().split()) - skip_words
+        sig = " ".join(sorted(words)[:4])
+        if sig in seen_sigs:
+            continue
+        seen_sigs.add(sig)
+        deduped.append(t)
+    results = deduped
     # Source diversity cap: no single source > 50% of ranked pool
     if results:
         from collections import Counter
@@ -531,8 +543,14 @@ Pick ONE style:
 - verdict: judgment delivered, no hedging
 - contrast: "Everyone said X. Then Y happened."
 - number: stat that reframes the story
+- scandal: "and nobody's talking about the real reason" / "and it's not even the worst part"
 - statement: blunt declarative fact
-Priority: CONTROVERSY > CONFLICT > CURIOSITY GAP
+Priority: CURIOSITY GAP > CONTROVERSY > CONFLICT
+
+WINNING PATTERN (75K views proven):
+"X just became the first Y to do Z after [specific stat] - and nobody's talking about [scandal/real reason]."
+Key ingredients: (1) specific stat/number (2) "first ever" framing (3) "nobody's talking about" creates reply bait
+Hook must provoke REPLIES (opinions, debates) not just views. Questions like "Is this the worst decision?" drive 3x more comments than factual statements.
 
 SLIDE 2 — CONTEXT (40-60 words)
 Backstory: who, what's at stake, why now.

@@ -274,6 +274,8 @@ def score_topic(t):
       5. Sumber Tier    : 10 (Tier 1) / 5 (Tier 2) / 0 (unknown)
       6. Audience Reach : +10 per big team/nation/star (max 40)
       7. Drama Signal   : +5 per drama word in title (max 15)
+      8. First Ever     : +20 (first ever + stat) / +10 (first ever only)
+      9. Niche Nation   : -15 (niche nation without big team in title)
       Penalti           : -1 hard reject if exclude keyword matched
 
     Returns:
@@ -344,7 +346,36 @@ def score_topic(t):
             drama_pts += 5
     drama_pts = min(drama_pts, 15)
 
-    total = keyword_pts + cat_pts + recency_pts + data_pts + source_pts + audience_pts + drama_pts
+    # 8. "First Ever" + Stat Boost (max 20 pts) — proven 75K views pattern
+    # Matches: "first team", "first player", "first ever", "in history" + any number
+    first_ever_pts = 0
+    first_ever_patterns = [
+        r'first\s+(?:team|player|manager|nation|club)',
+        r'first\s+ever',
+        r'in\s+(?:world\s+cup|football|tournament)\s+history',
+    ]
+    title_lower_combined = combined.lower()
+    has_first_ever = any(re.search(p, title_lower_combined) for p in first_ever_patterns)
+    has_number_in_title = bool(re.search(r'\d+', title))
+    if has_first_ever and has_number_in_title:
+        first_ever_pts = 20
+    elif has_first_ever:
+        first_ever_pts = 10
+
+    # 9. Niche Nations Penalty (-15) — low reach, proven <200 views
+    NICHE_NATIONS = [
+        "hong kong", "dr congo", "congo", "madagascar", "comoros",
+        "papua new guinea", "guam", "lesotho", "eritrea", "djibouti",
+        "brunei", "laos", "cambodia", "myanmar", "bhutan", "maldives",
+        "macau", "mongolia", "nepal", "sri lanka", "bangladesh",
+    ]
+    niche_pts = 0
+    has_niche = any(n in title_lower for n in NICHE_NATIONS)
+    has_big = any(pat.search(title_lower) for pat in BIG_TEAMS_RE)
+    if has_niche and not has_big:
+        niche_pts = -15
+
+    total = keyword_pts + cat_pts + recency_pts + data_pts + source_pts + audience_pts + drama_pts + first_ever_pts + niche_pts
     return total
 
 
