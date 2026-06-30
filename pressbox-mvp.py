@@ -79,7 +79,8 @@ def scrape_rss(url, source, base_score=9):
                 if enc is not None and 'image' in (enc.get('type', '')):
                     img = enc.get('url', '')
             topics.append(dict(title=title, source=source, url=link, score=base_score,
-                               description=desc, published_ts=ts, image_url=img))
+                               description=desc, published_ts=ts, image_url=img,
+                               _needs_image_fallback=not bool(img)))
     except: pass
     return topics
 
@@ -101,6 +102,7 @@ def scrape_goal():
             # Strip time prefix from breaking news ("5 hours agoDeschamps...")
             title = re.sub(r'^\d+\s+hours?\s+ago', '', title).strip()
             if not title or len(title) < 20: continue
+            if title.startswith('🎥'): continue  # video-only content
             link = href if href.startswith('http') else "https://www.goal.com" + href
             topics.append(dict(title=title, source="goal", url=link, score=10,
                                description="", published_ts=None, image_url=""))
@@ -249,16 +251,7 @@ def get_analytics_summary():
         title = (t.get("title") or "").lower()
         source = (t.get("source") or "").lower()
         
-        # Classify hook type (heuristic based on title patterns)
-        hook = "statement"
-        if any(w in title for w in ["slams", "blasts", "hits out", "furious", "outraged", "scandal", "controversy", "row", "rift", "bust-up", "war of words"]):
-            hook = "controversy"
-        elif any(w in title for w in ["vs", "against", "clash", "rival", "battle", "face off", "showdown"]):
-            hook = "conflict"
-        elif any(w in title for w in ["?", "how", "why", "what if", "can", "will", "could"]):
-            hook = "curiosity"
-        elif any(w in title for w in ["just", "dropped", "lost", "won", "banned", "sacked", "arrested", "injured", "denied"]):
-            hook = "event"  # Concrete event (proven high-engagement)
+        hook = _classify_hook(title)
         
         topic_type = classify_topic_type(title)
         by_hook[hook].append(views)
@@ -299,6 +292,19 @@ _SENSITIVE = [
 _TV_GUIDE = ["tv channel","live stream","kick-off time","kickoff time",
              "how to watch","where to watch","what channel","start time","stream online"]
 _WOMEN = ["women","women's","womens","female","lionaesses","nwsl","wsl"]
+
+
+def _classify_hook(title_lower):
+    """Classify hook type for analytics boost. Returns: controversy/conflict/curiosity/event/statement."""
+    if any(w in title_lower for w in ["slams", "blasts", "hits out", "furious", "outraged", "scandal", "controversy", "row", "rift", "bust-up", "war of words"]):
+        return "controversy"
+    if any(w in title_lower for w in ["vs", "against", "clash", "rival", "battle", "face off", "showdown"]):
+        return "conflict"
+    if any(w in title_lower for w in ["?", "how", "why", "what if", "can", "will", "could"]):
+        return "curiosity"
+    if any(w in title_lower for w in ["just", "dropped", "lost", "won", "banned", "sacked", "arrested", "injured", "denied"]):
+        return "event"
+    return "statement"
 
 def filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_summary=None):
     """Filter duplicates, sensitive content, score and rank."""
@@ -347,16 +353,7 @@ def filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_su
             s = int(s * boosts[tt])
         # Dynamic analytics boost (data-driven)
         if analytics_summary and median_views > 0:
-            # Classify hook type (same heuristic as get_analytics_summary)
-            hook = "statement"
-            if any(w in tl for w in ["slams", "blasts", "hits out", "furious", "outraged", "scandal", "controversy", "row", "rift", "bust-up", "war of words"]):
-                hook = "controversy"
-            elif any(w in tl for w in ["vs", "against", "clash", "rival", "battle", "face off", "showdown"]):
-                hook = "conflict"
-            elif any(w in tl for w in ["?", "how", "why", "what if", "can", "will", "could"]):
-                hook = "curiosity"
-            elif any(w in tl for w in ["just", "dropped", "lost", "won", "banned", "sacked", "arrested", "injured", "denied"]):
-                hook = "event"
+            hook = _classify_hook(tl)
             if hook in best_hooks[:2]:
                 s += 15
                 log(f"   📈 Hook boost: {hook} +15 for '{title[:50]}'")
@@ -368,6 +365,16 @@ def filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_su
         
         t["_score"] = s
         t["_topic_type"] = tt
+        # Image fallback: fetch og:image for RSS topics without image
+        if t.get("_needs_image_fallback") and t.get("url"):
+            try:
+                code, html = _http(t["url"])
+                if code == 200:
+                    fallback_img = extract_image(html)
+                    if fallback_img:
+                        t["image_url"] = fallback_img
+                        log(f"   🖼️ Image fallback: {fallback_img[:60]}...")
+            except: pass
         results.append(t)
     results.sort(key=lambda x: -x["_score"])
     # Source diversity cap: no single source > 50% of ranked pool

@@ -112,6 +112,7 @@ SOURCE_TIER_1 = [
     "bbc sport", "sky sports", "the athletic", "guardian football",
     "espn fc", "football italia", "90min", "fabrizio romano",
     "transfermarkt", "goal.com",
+    "fourfourtwo",
 ]
 
 SOURCE_TIER_2 = [
@@ -175,7 +176,7 @@ DRAMA_WORDS = [
     "war of words", "bust-up", "rift", "scandal", "controversy",
     "refuses", "walks out", "storms off", "under pressure",
     "collapsed", "disaster", "nightmare", "crisis",
-    "fate confirmed", "forced", "denied", "banned", "disagrees",
+    "fate confirmed", "forced", "denied", "disagrees",
     "repeating", "mistake", "problem", "rivals", "statement",
     "risk", "warning", "fears", "anger", "rage", "hit back",
     "under fire", "disastrous", "catastrophic", "collapse",
@@ -347,16 +348,3 @@ def score_topic(t):
     return total
 
 
-def select_best_candidate(articles, top_n=1):
-    """Select top N articles by score. Returns list of (score, article) tuples."""
-    scored = []
-    for article in articles:
-        if not article or not isinstance(article, dict):
-            continue
-        if not article.get("title"):
-            continue
-        score = score_topic(article)
-        if score >= 60:
-            scored.append((score, article))
-    scored.sort(key=lambda x: -x[0])
-    return scored[:top_n]
