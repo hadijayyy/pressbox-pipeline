@@ -420,7 +420,7 @@ def extract_article(raw_html):
     return ' '.join(paragraphs)
 
 def extract_image(raw_html):
-    """Extract best og:image from HTML."""
+    """Extract best og:image from HTML, upscale BBC images."""
     for pat in [r'<meta\s+property="og:image"\s+content="([^"]+)"',
                 r'<meta\s+content="([^"]+)"\s+property="og:image"',
                 r'<meta\s+name="twitter:image"\s+content="([^"]+)"',
@@ -429,6 +429,9 @@ def extract_image(raw_html):
         if m:
             url = m.group(1)
             if "guim.co.uk" not in url:  # Guardian CDN blocks VPS
+                # BBC: upscale from 480/624px → 1024px
+                if "ichef.bbci.co.uk" in url:
+                    url = re.sub(r'/\d{3,4}/', '/1024/', url)
                 return url
     return ""
 
