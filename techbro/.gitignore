@@ -1,7 +1,0 @@
-__pycache__/
-*.db
-*.sqlite
-*.pyc
-.env
-output/
-*.log
