@@ -14,7 +14,7 @@ Components:
   Dynamic Boost      : +15 proven hook (analytics), -20 worst topic (analytics)
   Penalti            : -1 hard reject if exclude keyword matched
 
-Threshold: score >= 60 for pipeline.
+Threshold: score >= 40 for pipeline (set in pressbox-mvp.py).
 Big-audience topics (England, big clubs, drama) score 80-120 → auto-preferred.
 """
 
@@ -277,7 +277,7 @@ def score_topic(t):
 
     Returns:
       -1   → hard reject (posted URL or exclude match)
-      0-100 → score (threshold ≥60 untuk pipeline)
+      0-100 → score (threshold ≥40 untuk pipeline)
     """
     title = t.get("title", "")
     desc = t.get("description", "")
