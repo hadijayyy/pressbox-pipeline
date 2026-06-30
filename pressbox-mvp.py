@@ -531,11 +531,13 @@ def generate_slides(article_text, url, hooks="", cta_pattern="", tone=""):
 
 [FORMAT]
 - Exactly 6 slides
-- Max 4 sentences per slide
+- Max 4 sentences per slide, but vary: 1-sentence slides are powerful — use them
 - Prose only, no bullets/lists
 - English (conversational, punchy, global)
+- Use em-dash (—) for drama and emphasis. Example: "He scored 40 goals — nobody remembers his name."
+- Short punchy sentences mixed with longer ones. Never same rhythm every slide.
 
-SLIDE 1 — REALITY (Hook, max 3 sentences)
+SLIDE 1 — REALITY (Hook, 1-2 sentences MAX)
 Pick ONE style:
 - accusation: "X failed because of Y"
 - hot take: unpopular opinion stated as fact
@@ -561,11 +563,11 @@ Conflict/turning point. End on unresolved question.
 SLIDE 4 — OUTCOME (40-60 words)
 Facts first, no editorializing. What actually happened.
 
-SLIDE 5 — REFLECTION (30-50 words)
-One universal theme (pressure/loyalty/identity) tied directly to a fact from slides 2-4. No generic platitudes.
+SLIDE 5 — CLIMAX (30-50 words)
+Biggest revelation or consequence. What nobody expected. The twist that changes everything. NOT philosophical — cinematic. End on impact, not sentiment.
 
 SLIDE 6 — CTA (30-40 words)
-Open question + URL on last line.
+Debate question that forces a side. Not "What do you think?" — force opinion: "Is this the worst decision?", "Was he right?", "Can they survive this?". End with URL on last line.
 
 [GROUNDING — STRICT]
 Names/scores/dates/quotes: verbatim from article only. Never invent quotes or attribute unstated emotions.
