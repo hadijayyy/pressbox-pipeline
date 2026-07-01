@@ -137,6 +137,137 @@ def scrape_all():
     log(f"   Total: {len(all_t)} in {time.time()-t0:.1f}s")
     return all_t
 
+# ── 1.5 HOT TOPIC DETECTION ──────────────────────────────────────────
+
+def _extract_entities(title):
+    """Extract football entities (teams, players, managers) from title. Returns set of lowercase names."""
+    tl = title.lower()
+    found = set()
+    # Check all known entities (BIG_TEAMS from scoring module is too large; use fast substring)
+    from pressbox_scoring import BIG_TEAMS
+    for entity in BIG_TEAMS:
+        if entity in tl:
+            found.add(entity)
+    return found
+
+def detect_hot_topics(topics, window_hours=4):
+    """Cluster topics by entity overlap. Returns dict: topic_url → hotness_score.
+
+    Algorithm:
+    1. Filter to articles within window_hours (from published_ts or assume fresh)
+    2. Extract entities from each title
+    3. Build clusters: articles sharing 2+ entities → same cluster
+    4. Score cluster: count × source_tier_diversity × recency
+    5. Map each article_url to its cluster's hotness score
+    """
+    now = time.time()
+    cutoff = now - (window_hours * 3600)
+
+    # 1. Fresh articles only
+    fresh = []
+    for t in topics:
+        ts = t.get("published_ts") or now  # no timestamp = assume fresh
+        if ts >= cutoff:
+            fresh.append(t)
+
+    if len(fresh) < 2:
+        return {}
+
+    # 2. Extract entities per article
+    article_entities = []
+    for t in fresh:
+        ents = _extract_entities(t.get("title", ""))
+        article_entities.append((t, ents))
+
+    # 3. Cluster by entity overlap (Union-Find style)
+    n = len(article_entities)
+    parent = list(range(n))
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[rb] = ra
+
+    # Two articles in same cluster if they share 2+ entities
+    for i in range(n):
+        for j in range(i + 1, n):
+            shared = article_entities[i][1] & article_entities[j][1]
+            if len(shared) >= 2:
+                union(i, j)
+
+    # Also cluster if they share 1 entity AND title words are very similar (same story, different phrasing)
+    skip_words = {"the","a","an","in","on","at","to","for","of","and","or","but","is","was","just","not","has","had","are","were","be","being","been","will","would","could","should","may","might","can","do","does","did","with","from","by","as","its","his","her","their","this","that","these","those","it"}
+    def _title_sig(title):
+        return set(title.lower().split()) - skip_words
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            shared_ents = article_entities[i][1] & article_entities[j][1]
+            if len(shared_ents) >= 1:
+                sig_i = _title_sig(article_entities[i][0].get("title", ""))
+                sig_j = _title_sig(article_entities[j][0].get("title", ""))
+                overlap = sig_i & sig_j
+                # 4+ words in common → likely same story
+                if len(overlap) >= 4:
+                    union(i, j)
+
+    # 4. Build clusters and score them
+    from collections import defaultdict
+    clusters = defaultdict(list)
+    for i in range(n):
+        root = find(i)
+        clusters[root].append(article_entities[i])
+
+    hotness = {}  # url → score
+    for root, members in clusters.items():
+        if len(members) < 2:
+            continue  # single-source = not hot
+
+        # Count unique sources
+        sources = set(m[0].get("source", "") for m in members)
+        count = len(members)
+
+        # Source tier diversity bonus
+        from pressbox_scoring import source_tier as _stier
+        has_t1 = any(_stier(m[0].get("source","")) == 1 for m in members)
+        tier_bonus = 1.5 if has_t1 else 1.0
+
+        # Recency: articles from last 1h count more than 4h
+        recency_sum = 0
+        for m, _ in members:
+            ts = m.get("published_ts") or now
+            age_h = max(0.01, (now - ts) / 3600)
+            recency_sum += 1.0 / age_h  # inverse age — fresh = high
+        recency_avg = recency_sum / count
+
+        # Final hotness: count × tier × recency
+        # 3 sources from last 1h with Tier 1 = ~3 × 1.5 × 1.0 = 4.5
+        # 2 sources from 3h ago, no T1     = ~2 × 1.0 × 0.33 = 0.66
+        hot = count * tier_bonus * recency_avg
+
+        # Map to all members
+        for m, _ in members:
+            url = m.get("url", "")
+            if url:
+                hotness[url] = max(hotness.get(url, 0), hot)
+
+    if hotness:
+        hot_count = len(hotness)
+        top_hot = sorted(hotness.items(), key=lambda x: -x[1])[:3]
+        log(f"🔥 Hot detection: {hot_count} articles in {sum(1 for c in clusters.values() if len(c)>=2)} clusters")
+        for url, score in top_hot:
+            # Find title for this URL
+            title = next((t.get("title","")[:50] for t in topics if t.get("url") == url), "?")
+            log(f"   🔥 {title}... (hotness={score:.1f})")
+
+    return hotness
+
 # ── 2. FILTER + SCORE ──────────────────────────────────────────────
 
 def load_posted():
@@ -294,10 +425,11 @@ def _classify_hook(title_lower):
         return "event"
     return "statement"
 
-def filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_summary=None):
+def filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_summary=None, hotness=None):
     """Filter duplicates, sensitive content, score and rank."""
     results = []
     relaxed = len(topics) < 10
+    hotness = hotness or {}
     
     # Extract analytics data for dynamic boost
     best_hooks = []
@@ -348,7 +480,16 @@ def filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_su
             if tt in worst_topics:
                 s -= 20
                 log(f"   📉 Topic penalty: {tt} -20 for '{title[:50]}'")
-        
+
+        # Hot topic boost (multi-source coverage = viral)
+        hot = hotness.get(url, 0)
+        if hot >= 3.0:
+            s += 25
+            log(f"   🔥 Hot boost: +25 for '{title[:50]}' (hotness={hot:.1f})")
+        elif hot >= 1.5:
+            s += 15
+            log(f"   🔥 Warm boost: +15 for '{title[:50]}' (hotness={hot:.1f})")
+
         t["_score"] = s
         t["_topic_type"] = tt
         # Image fallback: fetch og:image for RSS topics without image
@@ -812,7 +953,8 @@ def main():
     # 2. Filter + Score
     posted_urls, posted_ws = load_posted()
     boosts, skips, hooks, cta_pattern, tone = load_analytics()
-    ranked = filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_summary)
+    hotness = detect_hot_topics(topics, window_hours=4)
+    ranked = filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_summary, hotness)
     if not ranked:
         log("❌ No topics after filter")
         print("❌ Pipeline: all topics filtered out", flush=True)
