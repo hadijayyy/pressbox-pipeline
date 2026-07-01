@@ -86,7 +86,7 @@ INCLUDE_KEYWORDS = {
         "family", "mother", "father", "wife", "children",
         "tears", "cried", "emotional", "heartbreaking",
         "sacrifice", "suffering", "struggle", "ordeal",
-        "fee", "cost", "price", "fine", "penalty",
+        "fee", "cost", "price", "fine",
         "unfair", "injustice", "outrage", "disgrace",
         "human cost", "human toll", "price tag",
     ],
