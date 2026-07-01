@@ -76,6 +76,20 @@ INCLUDE_KEYWORDS = {
         "broadcasting rights", "sponsorship", "kit deal",
         "stadium", "new ground", "expansion", "attendance record",
     ],
+    # Human interest / Financial outrage / Real-world intersection
+    # Proven 500K+ views: FIFA payout, visa denial, immigration blocks
+    "human_interest": [
+        "visa", "denied entry", "refused entry", "blocked entry",
+        "banned from", "barred from", "turned away", "deport",
+        "immigration", "border", "customs", "passport",
+        "payout", "compensation", "insurance", "claim",
+        "family", "mother", "father", "wife", "children",
+        "tears", "cried", "emotional", "heartbreaking",
+        "sacrifice", "suffering", "struggle", "ordeal",
+        "fee", "cost", "price", "fine", "penalty",
+        "unfair", "injustice", "outrage", "disgrace",
+        "human cost", "human toll", "price tag",
+    ],
 }
 
 
@@ -381,7 +395,13 @@ def score_topic(t):
     niche_pts = 0
     has_niche = any(n in title_lower for n in NICHE_NATIONS)
     has_big = any(pat.search(title_lower) for pat in BIG_TEAMS_RE)
-    if has_niche and not has_big:
+    # Skip niche penalty if article has human_interest signals (visa, family, tears, etc.)
+    _human_interest = ["visa", "denied entry", "refused entry", "family", "mother", "father",
+                       "tears", "cried", "emotional", "heartbreaking", "sacrifice", "payout",
+                       "compensation", "immigration", "unfair", "injustice", "disgrace",
+                       "fee", "cost", "price tag", "human cost"]
+    has_human = any(kw in title_lower for kw in _human_interest)
+    if has_niche and not has_big and not has_human:
         niche_pts = -15
 
     # 10. Paradox Bonus (+12) — "while [counter-intuitive]" drives curiosity
