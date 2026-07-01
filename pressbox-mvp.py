@@ -1055,10 +1055,11 @@ Priority (context-dependent):
 - NEVER use "nobody's talking about" unless the topic involves a name/event that 90% of fans would recognize
 
 WINNING PATTERNS (proven 60-75K views):
-Pattern A — "Nobody's talking about" (75K):
-"X just became the first Y to do Z after [specific stat] — and nobody's talking about [scandal/real reason]."
-Key ingredients: (1) specific stat/number (2) "first ever" framing (3) "nobody's talking about" creates reply bait
-WARNING: "nobody's talking about" ONLY works with big names (WC, CL, Premier League, etc). For niche topics, use direct conflict or hot take instead.
+Pattern A — "Nobody's Talking About" (51K):
+Only use when article contains a genuinely hidden angle or lesser-known fact. If no hidden angle exists, use Pattern B or C instead.
+"X just became the first Y to do Z after [specific stat] — and the real reason is [fact from article]."
+Key ingredients: (1) specific stat/number (2) "the real reason" = something actually IN the article, never invented
+WARNING: NEVER say "nobody's talking about" if you can't point to a specific hidden fact in the article. If no hidden angle exists, skip Pattern A entirely.
 
 Pattern B — "While + Warning" (61K):
 "X just became the first Y in [tournament] history to [achievement] — while [counter-intuitive paradox]. [Big team], watch out."
@@ -1094,8 +1095,12 @@ Casual, open-ended question that triggers heated debate. Not "What do you think?
 
 [GROUNDING — STRICT]
 ALL data, stats, transfer rumors: 100% accurate to the provided text. ZERO hallucination.
-Football metaphors/fan banter allowed ONLY to simplify jargon or feel organic — never to invent facts.
-Names/scores/dates/quotes: verbatim from article only. Never invent quotes or attribute unstated emotions.
+- Ages, numbers, dates: verbatim from article. If age not stated, do NOT guess.
+- Descriptions: match article tone. "Late challenge" ≠ "premeditated lunge". Don't exaggerate.
+- Scenarios: only discuss outcomes mentioned in article. Don't invent future scenarios (suspensions, transfers, etc).
+- Slide 5 verdict: must be supported by facts in article. No pure editorializing or invented narratives.
+- Slide 6 question: must relate to what article actually discusses. Don't ask about topics not in article.
+- Names/scores/dates/quotes: verbatim from article only. Never invent quotes or attribute unstated emotions.
 REJECT only if article has zero usable facts.
 
 [ANALYTICS OVERRIDES]
