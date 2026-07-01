@@ -681,6 +681,13 @@ def filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_su
         # Pipeline bonuses
         if t.get("wc_related") or t.get("wc_boost"): s += 40
         if t.get("transfer_related"): s += 10
+        # Niche topic penalty — low engagement content that happens to mention big teams
+        _niche_kw = ["kit launch","kit reveal","jersey","boots","pink boots","kit deal",
+                     "boot deal","stadium rules","ticket prices","travel guide",
+                     "how to watch","tv channel","broadcast","kit manufacturer","shirt sponsor"]
+        if any(kw in tl for kw in _niche_kw):
+            s -= 30
+            log(f"   📉 Niche topic: -30 for '{title[:50]}'")
         # ponytail: legacy topic boost multiplier removed — stale data inflated match_result 3x
         # Dynamic analytics boost (data-driven)
         if analytics_summary and median_views > 0:
@@ -695,6 +702,8 @@ def filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_su
                 log(f"   📉 Topic penalty: {tt} -20 for '{title[:50]}'")
 
         # Hot topic boost (multi-source coverage = viral)
+        # Skip hot boost for niche topics — they ride trending entity clusters without being newsworthy
+        _is_niche = any(kw in tl for kw in _niche_kw) if '_niche_kw' in dir() else False
         hot = hotness.get(url, 0)
         hot_adjust = analytics_summary.get("hot_boost_adjust", 0) if analytics_summary else 0
         # Peak-hour boost: hot stories get extra boost during high-engagement hours
@@ -702,11 +711,11 @@ def filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_su
         hour = datetime.datetime.now().hour
         peak_hours = {10, 11, 12, 17, 18, 19, 20, 21}  # WIB peak engagement windows
         peak_boost = 10 if (hour in peak_hours and hot >= 1.5) else 0
-        if hot >= 3.0:
+        if hot >= 3.0 and not _is_niche:
             boost = 25 + hot_adjust + peak_boost
             s += boost
             log(f"   🔥 Hot boost: +{boost} for '{title[:50]}' (hotness={hot:.1f}, adjust={hot_adjust:+d}, peak={hour in peak_hours})")
-        elif hot >= 1.5:
+        elif hot >= 1.5 and not _is_niche:
             boost = 15 + hot_adjust + peak_boost
             s += boost
             log(f"   🔥 Warm boost: +{boost} for '{title[:50]}' (hotness={hot:.1f}, adjust={hot_adjust:+d}, peak={hour in peak_hours})")
