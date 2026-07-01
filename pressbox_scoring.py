@@ -276,6 +276,8 @@ def score_topic(t):
       7. Drama Signal   : +5 per drama word in title (max 15)
       8. First Ever     : +20 (first ever + stat) / +10 (first ever only)
       9. Niche Nation   : -15 (niche nation without big team in title)
+     10. Paradox Bonus  : +12 (while/despite + counter-intuitive)
+     11. Warning Bonus  : +8 ("you've been warned" / threat to big team)
       Penalti           : -1 hard reject if exclude keyword matched
 
     Returns:
@@ -375,7 +377,30 @@ def score_topic(t):
     if has_niche and not has_big:
         niche_pts = -15
 
-    total = keyword_pts + cat_pts + recency_pts + data_pts + source_pts + audience_pts + drama_pts + first_ever_pts + niche_pts
+    # 10. Paradox Bonus (+12) — "while [counter-intuitive]" drives curiosity
+    PARADOX_PATTERNS = [
+        r'while\s+(?:barely|hardly|only|never|not|without)',
+        r'despite\s+(?:only|never|not|barely|having)',
+        r'without\s+(?:even|ever|a|the)',
+        r'only\s+\d+\s*touch',  # "only 11 touches"
+    ]
+    paradox_pts = 0
+    if any(re.search(p, title_lower_combined) for p in PARADOX_PATTERNS):
+        paradox_pts = 12
+
+    # 11. Warning/Threat Bonus (+8) — "[Big team], you've been warned" = debate bait
+    WARNING_PATTERNS = [
+        r"you'?ve\s+been\s+warned",
+        r"watch\s+out",
+        r"be\s+afraid",
+        r"better\s+be\s+(?:worried|scared|ready)",
+        r"they'?re\s+coming\s+for",
+    ]
+    warning_pts = 0
+    if any(re.search(p, title_lower_combined) for p in WARNING_PATTERNS):
+        warning_pts = 8
+
+    total = keyword_pts + cat_pts + recency_pts + data_pts + source_pts + audience_pts + drama_pts + first_ever_pts + niche_pts + paradox_pts + warning_pts
     return total
 
 

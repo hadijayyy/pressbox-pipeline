@@ -529,10 +529,18 @@ Priority (context-dependent):
 - Niche/unknown topics (lower leagues, retired players, small nations): CONFLICT > CONTROVERSY > hot take
 - NEVER use "nobody's talking about" unless the topic involves a name/event that 90% of fans would recognize
 
-WINNING PATTERN (75K views proven):
+WINNING PATTERNS (proven 60-75K views):
+Pattern A — "Nobody's talking about" (75K):
 "X just became the first Y to do Z after [specific stat] — and nobody's talking about [scandal/real reason]."
 Key ingredients: (1) specific stat/number (2) "first ever" framing (3) "nobody's talking about" creates reply bait
 WARNING: "nobody's talking about" ONLY works with big names (WC, CL, Premier League, etc). For niche topics, use direct conflict or hot take instead.
+
+Pattern B — "While + Warning" (61K):
+"X just became the first Y in [tournament] history to [achievement] — while [counter-intuitive paradox]. [Big team], you've been warned."
+Key ingredients: (1) "just became the first in history" (2) "while [paradox]" = counter-intuitive curiosity (3) direct threat to a giant team = debate bait
+Example: "Haaland just became the first striker in World Cup history to score in his first three games — while barely touching the ball. Brazil, you've been warned."
+
+PICK THE PATTERN that fits the data. Pattern A when there's a hidden scandal/reason. Pattern B when there's a paradox + big team opponent/threat.
 Hook must provoke REPLIES (opinions, debates) not just views. Questions like "Is this the worst decision?" drive 3x more comments than factual statements.
 
 SLIDE 2 — THE CONTEXT (40-60 words)
