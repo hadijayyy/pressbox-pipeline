@@ -1265,13 +1265,34 @@ def main():
         sys.exit(0)
     log(f"   🏆 Best: {best['title']} (score={best['_score']}, type={best.get('_topic_type','')})")
 
-    # 3. Fetch article — try top 3 topics
+    # 3. Fetch article — try top 3 topics, verify body is football news
     url = best["url"]
     log(f"   Fetching: {url}")
     article_text, image_url = fetch_article(url)
     fetch_tries = 1
-    while (not article_text or len(article_text) < 100) and fetch_tries < len(ranked[:3]):
-        log(f"   ❌ Article too short on '{best['title']}' — trying next")
+
+    def _is_commercial_body(text):
+        """Check if article body is commercial/shopping, not football news."""
+        bl = text[:3000].lower()
+        football = sum(1 for kw in ["goal","match","score","league","cup","transfer",
+            "manager","player","team","club","stadium","referee","penalty",
+            "red card","yellow card","world cup","champions league",
+            "premier league","tournament","qualifier","fixture","midfielder",
+            "striker","defender","goalkeeper","captain","substitute"] if kw in bl)
+        commercial = sum(1 for kw in ["price","buy now","shop now","discount",
+            "sale","voucher","coupon","basket","checkout","delivery",
+            "add to basket","purchase","save £","save $","% off","free shipping",
+            "snap up","bargain","order now","next day delivery"] if kw in bl)
+        return football < 2 and commercial >= 2
+
+    while fetch_tries < len(ranked[:3]):
+        # Check length
+        if not article_text or len(article_text) < 100:
+            log(f"   ❌ Article too short on '{best['title']}' — trying next")
+        elif _is_commercial_body(article_text):
+            log(f"   🛒 Body is commercial, not football — trying next")
+        else:
+            break  # Article is valid
         best = ranked[fetch_tries]
         url = best["url"]
         log(f"   Fetching next: {url}")
@@ -1280,6 +1301,10 @@ def main():
     if not article_text or len(article_text) < 100:
         log("❌ All top articles too short")
         print("❌ Pipeline: all articles too short", flush=True)
+        sys.exit(1)
+    if _is_commercial_body(article_text):
+        log("❌ All top articles are commercial/shopping")
+        print("❌ Pipeline: all articles are commercial, not football news", flush=True)
         sys.exit(1)
     log(f"   Article: {len(article_text)} chars, image: {'yes' if image_url else 'no'}")
 
