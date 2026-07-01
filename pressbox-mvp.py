@@ -999,17 +999,11 @@ def _select_viral_pattern(topic, article_text):
                       "bayern", "psg", "juventus", "inter milan", "arsenal"]
     has_big_team = any(bt in combined for bt in big_teams_warn)
     
-    # Decision: scandal wins if higher, else paradox, else detail. Tie-break by big team presence.
-    if scandal_score > paradox_score and scandal_score > detail_score:
+    # Decision: scandal wins if higher, else detail. No more Pattern B.
+    if scandal_score > detail_score:
         return "a"
-    elif paradox_score > scandal_score and paradox_score > detail_score:
-        return "b"
-    elif detail_score > scandal_score and detail_score > paradox_score:
-        return "c"
-    elif has_big_team:
-        return "b"  # paradox + big team = Pattern B gold
     else:
-        return "a"  # default to Pattern A (more versatile)
+        return "c"  # default to Pattern C (proven 500K+ views)
 
 def generate_slides(article_text, url, hooks="", cta_pattern="", tone="", pattern="a"):
     """Call LLM to generate 6-slide thread. Returns parsed slides or None."""
@@ -1027,9 +1021,6 @@ def generate_slides(article_text, url, hooks="", cta_pattern="", tone="", patter
     if pattern == "a":
         extra += "\n- MANDATORY PATTERN: Use Pattern A (\"Nobody's talking about\"). Find a hidden scandal, real reason, or controversy in the article. If no scandal exists, create tension by contrasting public perception vs reality."
         pattern_hint = "Pattern A"
-    elif pattern == "b":
-        extra += "\n- MANDATORY PATTERN: Use Pattern B (\"While + Warning\"). Find a statistical paradox or counter-intuitive fact. End with a DIRECT THREAT to a big team — but vary the ending. NEVER repeat the same ending twice. Use one of: \"[Team], watch out.\", \"[Team] should be scared.\", \"[Team], this is your problem now.\", \"Good luck, [Team].\", \"[Team], you're next.\", \"[Team] just got exposed.\"\nExample: \"X just became the first in history to [achievement] — while [paradox]. Good luck, [Big team].\""
-        pattern_hint = "Pattern B"
     else:
         extra += "\n- MANDATORY PATTERN: Use Pattern C (\"Specific Detail + Emotional Weight\"). Find the most specific number/amount and pair it with the human consequence. Lead with the concrete detail, follow with the emotional impact.\nStructure: [Specific amount/detail] + [Human consequence]\nExamples:\n- \"FIFA will pay nearly half a million pounds for one tackle. Ismael Kone's broken leg carries a huge price tag.\"\n- \"$15,000 Visa Fee. 40 Years of Tears. Cape Verde's hero was in tears after a historic draw. But his mother couldn't be there due to a cruel visa rule.\""
         pattern_hint = "Pattern C"
@@ -1056,17 +1047,12 @@ Priority (context-dependent):
 
 WINNING PATTERNS (proven 60-75K views):
 Pattern A — "Nobody's Talking About" (51K):
-Only use when article contains a genuinely hidden angle or lesser-known fact. If no hidden angle exists, use Pattern B or C instead.
+Only use when article contains a genuinely hidden angle or lesser-known fact. If no hidden angle exists, use Pattern C instead.
 "X just became the first Y to do Z after [specific stat] — and the real reason is [fact from article]."
 Key ingredients: (1) specific stat/number (2) "the real reason" = something actually IN the article, never invented
 WARNING: NEVER say "nobody's talking about" if you can't point to a specific hidden fact in the article. If no hidden angle exists, skip Pattern A entirely.
 
-Pattern B — "While + Warning" (61K):
-"X just became the first Y in [tournament] history to [achievement] — while [counter-intuitive paradox]. [Big team], watch out."
-Key ingredients: (1) "just became the first in history" (2) "while [paradox]" = counter-intuitive curiosity (3) direct threat to a giant team = debate bait. VARY the ending — never repeat the same phrase.
-Example: "Haaland just became the first striker in World Cup history to score in his first three games — while barely touching the ball. Good luck, Brazil."
-
-PICK THE PATTERN that fits the data. Pattern A when there's a hidden scandal/reason. Pattern B when there's a paradox + big team opponent/threat. Pattern C when there's a human story with specific numbers or emotional weight.
+PICK THE PATTERN that fits the data. Pattern A when there's a hidden scandal/reason. Pattern C when there's a human story with specific numbers or emotional weight.
 Hook must provoke REPLIES (opinions, debates) not just views. Questions like "Is this the worst decision?" drive 3x more comments than factual statements.
 
 Pattern C — "Specific Detail + Emotional Weight" (500K+ views):
