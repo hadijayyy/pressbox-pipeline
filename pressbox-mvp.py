@@ -329,15 +329,21 @@ def detect_hot_topics(topics, window_hours=4):
         # 2 sources from 3h ago, no T1     = ~2 × 1.0 × 0.33 = 0.66
         hot = count * tier_bonus * recency_avg
 
+        # Collect cluster entities for topic relevance check
+        cluster_entities = set()
+        for m, ents in members:
+            cluster_entities |= ents
+
         # Map to all members
         for m, _ in members:
             url = m.get("url", "")
             if url:
                 hotness[url] = max(hotness.get(url, 0), hot)
+                hotness[url + "_entities"] = list(cluster_entities)
 
     if hotness:
         hot_count = len(hotness)
-        top_hot = sorted(hotness.items(), key=lambda x: -x[1])[:3]
+        top_hot = sorted([(k,v) for k,v in hotness.items() if isinstance(v, (int,float))], key=lambda x: -x[1])[:3]
         log(f"🔥 Hot detection: {hot_count} articles in {sum(1 for c in clusters.values() if len(c)>=2)} clusters")
         for url, score in top_hot:
             # Find title for this URL
@@ -679,7 +685,18 @@ def filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_su
             if audience_mult != 1.0 and t.get("wc_boost"):
                 s = int(s + 10 * (audience_mult - 1.0))
         # Pipeline bonuses
-        if t.get("wc_related") or t.get("wc_boost"): s += 40
+        # wc_related: +40 only if title has football context, +10 if just mentions team
+        _wc_context = ["match","beat","win","loss","draw","score","goal","goals",
+                       "qualify","eliminate","starter","lineup","injury","injured",
+                       "transfer","sign","fee","contract","manager","sack","appointed",
+                       "red card","yellow card","penalty","var","offside","suspended",
+                       "captain","debut","hat-trick","brace","comeback","upset"]
+        if t.get("wc_related") or t.get("wc_boost"):
+            if any(kw in tl for kw in _wc_context):
+                s += 40
+            else:
+                s += 10  # just mentions team name, not football context
+                log(f"   ⚠️ wc_related reduced: +10 (no football context) for '{title[:50]}'")
         if t.get("transfer_related"): s += 10
         # Niche topic penalty — low engagement content that happens to mention big teams
         _niche_kw = ["kit launch","kit reveal","jersey","boots","pink boots","kit deal",
@@ -705,21 +722,33 @@ def filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_su
         # Skip hot boost for niche topics — they ride trending entity clusters without being newsworthy
         _is_niche = any(kw in tl for kw in _niche_kw) if '_niche_kw' in dir() else False
         hot = hotness.get(url, 0)
+        # Topic relevance: title must be ABOUT the entity (in first half), not just mention it
+        _hot_relevant = True
+        if hot >= 1.5:
+            cluster_ents = hotness.get(url + "_entities", [])
+            if cluster_ents:
+                first_half = tl[:len(tl)//2]
+                _hot_relevant = any(e.lower() in first_half for e in cluster_ents)
+                if not _hot_relevant:
+                    log(f"   ⚠️ Hot boost skipped: entity not in title first half for '{title[:50]}'")
         hot_adjust = analytics_summary.get("hot_boost_adjust", 0) if analytics_summary else 0
         # Peak-hour boost: hot stories get extra boost during high-engagement hours
         import datetime
         hour = datetime.datetime.now().hour
         peak_hours = {10, 11, 12, 17, 18, 19, 20, 21}  # WIB peak engagement windows
         peak_boost = 10 if (hour in peak_hours and hot >= 1.5) else 0
-        if hot >= 3.0 and not _is_niche:
+        if hot >= 3.0 and not _is_niche and _hot_relevant:
             boost = 25 + hot_adjust + peak_boost
             s += boost
             log(f"   🔥 Hot boost: +{boost} for '{title[:50]}' (hotness={hot:.1f}, adjust={hot_adjust:+d}, peak={hour in peak_hours})")
-        elif hot >= 1.5 and not _is_niche:
+        elif hot >= 1.5 and not _is_niche and _hot_relevant:
             boost = 15 + hot_adjust + peak_boost
             s += boost
             log(f"   🔥 Warm boost: +{boost} for '{title[:50]}' (hotness={hot:.1f}, adjust={hot_adjust:+d}, peak={hour in peak_hours})")
 
+        # Soft cap: above 100, diminishing returns (prevents runaway scores)
+        if s > 100:
+            s = int(100 + (s - 100) * 0.3)
         t["_score"] = s
         t["_topic_type"] = tt
         # Image fallback: fetch og:image for RSS topics without image
