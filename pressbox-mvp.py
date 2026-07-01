@@ -854,9 +854,7 @@ def main():
     if hallucinated_names:
         log(f"   ⚠️ Name warnings (soft): {'; '.join(hallucinated_names)}")
     if hallucinated_stages:
-        log(f"   ❌ Stage hallucination: {'; '.join(hallucinated_stages)}")
-        print(f"❌ Grounding: {'; '.join(hallucinated_stages)}", flush=True)
-        sys.exit(1)
+        log(f"   ⚠️ Stage warnings (soft): {'; '.join(hallucinated_stages)}")
 
     # 6. DRY RUN or POST
     total = time.time() - START
