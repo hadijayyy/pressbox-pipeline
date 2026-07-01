@@ -606,6 +606,9 @@ _SENSITIVE = [
 ]
 _TV_GUIDE = ["tv channel","live stream","kick-off time","kickoff time",
              "how to watch","where to watch","what channel","start time","stream online"]
+_COMMERCIAL = ["snap up","buy now","deal","discount","shop","price drop","sale","coupon","voucher",
+               "bargain","save £","save $","off rrp","% off","for £","for $","amazon","ebay",
+               "where to buy","get yours","order now","delivery","free shipping","stock up"]
 _WOMEN = ["women","women's","womens","female","lionaesses","nwsl","wsl"]
 
 
@@ -647,6 +650,8 @@ def filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_su
         if any(kw in tl or kw in desc for kw in _WOMEN): continue
         # TV guides
         if any(kw in tl for kw in _TV_GUIDE): continue
+        # Commercial/shopping articles — not football news
+        if any(kw in tl for kw in _COMMERCIAL): continue
         # Filter out live commentary pages (skysports.com/.../live/...)
         if '/live/' in url: continue
         # Sensitive content
