@@ -498,7 +498,103 @@ def get_analytics_summary():
                 summary["hot_boost_adjust"] = 0
             log(f"📊 Hot A/B: hot={hot_avg:.0f} avg ({len(hot_posts)} posts) vs cold={cold_avg:.0f} avg ({len(cold_posts)}) → ratio={ratio:.2f}")
 
+    # Score auto-tuning: compute weight adjustments from engagement data
+    if len(with_metrics) >= 20:
+        summary["score_tuning"] = _compute_score_tuning(with_metrics, median_views)
+
     return summary
+
+def _compute_score_tuning(posts, median_views):
+    """Analyze engagement data and compute scoring weight adjustments.
+    
+    Returns dict of component → multiplier (1.0 = no change, >1.0 = boost, <1.0 = penalize).
+    Only activates after 20+ posts with metrics.
+    """
+    from pressbox_scoring import INCLUDE_KEYWORDS as SCORING_KEYWORDS, BIG_TEAMS
+    import datetime
+    
+    high = [p for p in posts if p.get("views", 0) >= median_views * 1.3]
+    low = [p for p in posts if p.get("views", 0) < median_views * 0.7]
+    
+    if len(high) < 3 or len(low) < 3:
+        return {}
+    
+    tuning = {}
+    
+    # 1. Keyword effectiveness: which keywords appear more in high-performing posts?
+    high_text = " ".join((p.get("title", "") or "").lower() for p in high)
+    low_text = " ".join((p.get("title", "") or "").lower() for p in low)
+    
+    keyword_hits_high = sum(1 for kw in SCORING_KEYWORDS if kw in high_text)
+    keyword_hits_low = sum(1 for kw in SCORING_KEYWORDS if kw in low_text)
+    if keyword_hits_low > 0:
+        kw_ratio = keyword_hits_high / keyword_hits_low
+        tuning["keyword_multiplier"] = round(min(1.5, max(0.7, kw_ratio)), 2)
+    
+    # 2. Audience reach effectiveness: do big team mentions correlate with views?
+    team_hits_high = sum(1 for t in BIG_TEAMS if t in high_text)
+    team_hits_low = sum(1 for t in BIG_TEAMS if t in low_text)
+    if team_hits_low > 0:
+        team_ratio = team_hits_high / team_hits_low
+        tuning["audience_reach_multiplier"] = round(min(1.5, max(0.7, team_ratio)), 2)
+    
+    # 3. Drama effectiveness: do drama words correlate with views?
+    drama_words = ["slam", "blast", "fury", "rage", "furious", "shock", "breaking", "exclusive", 
+                   "revealed", "secret", "controversy", "row", "rift", "feud", "war"]
+    drama_high = sum(1 for w in drama_words if w in high_text)
+    drama_low = sum(1 for w in drama_words if w in low_text)
+    if drama_low > 0:
+        drama_ratio = drama_high / drama_low
+        tuning["drama_multiplier"] = round(min(1.5, max(0.7, drama_ratio)), 2)
+    
+    # 4. Recency effectiveness: do newer posts perform better?
+    now = time.time()
+    high_ages = []
+    low_ages = []
+    for p in high:
+        ts = p.get("published_ts") or p.get("posted_at", "")
+        if isinstance(ts, str):
+            try: ts = datetime.datetime.fromisoformat(ts).timestamp()
+            except: ts = now
+        high_ages.append((now - ts) / 3600)
+    for p in low:
+        ts = p.get("published_ts") or p.get("posted_at", "")
+        if isinstance(ts, str):
+            try: ts = datetime.datetime.fromisoformat(ts).timestamp()
+            except: ts = now
+        low_ages.append((now - ts) / 3600)
+    if high_ages and low_ages:
+        avg_high_age = sum(high_ages) / len(high_ages)
+        avg_low_age = sum(low_ages) / len(low_ages)
+        if avg_low_age > 0:
+            recency_ratio = avg_low_age / avg_high_age  # higher = newer posts do better
+            tuning["recency_multiplier"] = round(min(1.3, max(0.8, recency_ratio)), 2)
+    
+    # 5. First-ever effectiveness
+    first_ever_high = sum(1 for p in high if "first" in (p.get("title", "") or "").lower())
+    first_ever_low = sum(1 for p in low if "first" in (p.get("title", "") or "").lower())
+    if first_ever_low > 0:
+        fe_ratio = first_ever_high / first_ever_low
+        tuning["first_ever_multiplier"] = round(min(1.5, max(0.7, fe_ratio)), 2)
+    
+    if tuning:
+        # Save tuning to file for persistence
+        tuning_file = f"{HOME}/.hermes/pressbox/score-tuning.json"
+        tuning_data = {
+            "computed_at": datetime.datetime.now().isoformat(),
+            "posts_analyzed": len(posts),
+            "median_views": median_views,
+            "high_posts": len(high),
+            "low_posts": len(low),
+            "weights": tuning
+        }
+        try:
+            with open(tuning_file, "w") as f:
+                json.dump(tuning_data, f, indent=2)
+        except: pass
+        log(f"🎯 Score tuning: {tuning} (from {len(posts)} posts, median={median_views:.0f})")
+    
+    return tuning
 
 # Sensitive content filter
 _SENSITIVE = [
@@ -565,6 +661,18 @@ def filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_su
         # Score: base v17 + pipeline bonuses
         s = base_score_topic(t)
         if s == -1: continue  # excluded by keywords
+        
+        # Score auto-tuning: apply learned multipliers
+        tuning = analytics_summary.get("score_tuning", {}) if analytics_summary else {}
+        if tuning:
+            # Boost/penalize based on what actually gets views
+            kw_mult = tuning.get("keyword_multiplier", 1.0)
+            if kw_mult != 1.0:
+                keyword_bonus = min(s * 0.3, 15)  # cap adjustment to 15 pts
+                s = int(s + keyword_bonus * (kw_mult - 1.0))
+            audience_mult = tuning.get("audience_reach_multiplier", 1.0)
+            if audience_mult != 1.0 and t.get("wc_boost"):
+                s = int(s + 10 * (audience_mult - 1.0))
         # Pipeline bonuses
         if t.get("wc_related") or t.get("wc_boost"): s += 40
         if t.get("transfer_related"): s += 10
@@ -584,14 +692,19 @@ def filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_su
         # Hot topic boost (multi-source coverage = viral)
         hot = hotness.get(url, 0)
         hot_adjust = analytics_summary.get("hot_boost_adjust", 0) if analytics_summary else 0
+        # Peak-hour boost: hot stories get extra boost during high-engagement hours
+        import datetime
+        hour = datetime.datetime.now().hour
+        peak_hours = {10, 11, 12, 17, 18, 19, 20, 21}  # WIB peak engagement windows
+        peak_boost = 10 if (hour in peak_hours and hot >= 1.5) else 0
         if hot >= 3.0:
-            boost = 25 + hot_adjust
+            boost = 25 + hot_adjust + peak_boost
             s += boost
-            log(f"   🔥 Hot boost: +{boost} for '{title[:50]}' (hotness={hot:.1f}, adjust={hot_adjust:+d})")
+            log(f"   🔥 Hot boost: +{boost} for '{title[:50]}' (hotness={hot:.1f}, adjust={hot_adjust:+d}, peak={hour in peak_hours})")
         elif hot >= 1.5:
-            boost = 15 + hot_adjust
+            boost = 15 + hot_adjust + peak_boost
             s += boost
-            log(f"   🔥 Warm boost: +{boost} for '{title[:50]}' (hotness={hot:.1f}, adjust={hot_adjust:+d})")
+            log(f"   🔥 Warm boost: +{boost} for '{title[:50]}' (hotness={hot:.1f}, adjust={hot_adjust:+d}, peak={hour in peak_hours})")
 
         t["_score"] = s
         t["_topic_type"] = tt
