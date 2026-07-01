@@ -68,12 +68,17 @@ def scrape_rss(url, source, base_score=9):
                 try: ts = parsedate_to_datetime(pe.text.strip()).timestamp()
                 except: pass
             if ts and (time.time() - ts) > 86400: continue  # 24h freshness
-            # Image: media:content first, fallback to enclosure
+            # Image: media:content > media:thumbnail > enclosure
             img = ""
             for ns in ["http://search.yahoo.com/mrss/", "http://search.yahoo.com/mrss"]:
+                # media:content (SkySports, Goal)
                 for mc in item.findall(f'.//{{{ns}}}content'):
                     w = int(mc.get("width", 0))
                     if w > 0: img = mc.get("url", "")
+                # media:thumbnail (BBC — lower res but still useful)
+                if not img:
+                    for mt in item.findall(f'.//{{{ns}}}thumbnail'):
+                        img = mt.get("url", "")
             if not img:
                 enc = item.find('enclosure')
                 if enc is not None and 'image' in (enc.get('type', '')):
@@ -421,17 +426,19 @@ def extract_article(raw_html):
 
 def extract_image(raw_html):
     """Extract best og:image from HTML, upscale BBC images."""
-    for pat in [r'<meta\s+property="og:image"\s+content="([^"]+)"',
-                r'<meta\s+content="([^"]+)"\s+property="og:image"',
-                r'<meta\s+name="twitter:image"\s+content="([^"]+)"',
-                r'<meta\s+content="([^"]+)"\s+name="twitter:image"']:
+    for pat in [r'<meta[^>]+property="og:image"[^>]+content="([^"]+)"',
+                r'<meta[^>]+content="([^"]+)"[^>]+property="og:image"',
+                r'<meta[^>]+name="twitter:image"[^>]+content="([^"]+)"',
+                r'<meta[^>]+content="([^"]+)"[^>]+name="twitter:image"']:
         m = re.search(pat, raw_html, re.I)
         if m:
             url = m.group(1)
             if "guim.co.uk" not in url:  # Guardian CDN blocks VPS
-                # BBC: upscale from 480/624px → 1024px
+                # BBC: upscale low-res (480/624) → 1024px, keep high-res as-is
                 if "ichef.bbci.co.uk" in url:
-                    url = re.sub(r'/\d{3,4}/', '/1024/', url)
+                    w = re.search(r'/(\d{3,4})/', url)
+                    if w and int(w.group(1)) < 1024:
+                        url = re.sub(r'/\d{3,4}/', '/1024/', url)
                 return url
     return ""
 
