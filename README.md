@@ -2,141 +2,155 @@
 
 Automated football content pipeline for [@parkthebus.football](https://www.threads.net/@parkthebus.football) on Threads.
 
-Scrapes football news from 3 sources, scores topics using a 9-component analytics engine, generates viral 6-slide threads via LLM, and posts to Threads — fully automated with anti-bot randomization and self-improving feedback loop.
+Scrapes football news from 5 sources, detects hot/viral topics via entity clustering, scores with a 12-component engine, generates 6-slide carousels via LLM, and posts hourly — fully automated with engagement feedback loop.
 
 ## How It Works
 
 ```
-┌────────────────────────────────────────────────────────────┐
-│                    PRESSBOX PIPELINE                        │
-│           (fires every 30 min, posts ~every 50-90 min)     │
-│                                                            │
-│  0. ANTI-BOT CHECK   Random gap 50-90 min + random sleep   │
-│       ↓                                                    │
-│  1. SCRAPE           SkySports (RSS) + Goal.com + FFT      │
-│       ↓                                                    │
-│  2. PULL METRICS     Posts >12h old → views/likes/replies   │
-│       ↓                                                    │
-│  3. ANALYZE          Best hooks, topics, sources from data  │
-│       ↓                                                    │
-│  4. SCORE            9-component engine (threshold ≥40)     │
-│       ↓                                                    │
-│  5. CANNIBALIZE      Skip duplicate topics (keep highest)   │
-│       ↓                                                    │
-│  6. GENERATE         Mistral LLM → 6-slide thread           │
-│       ↓                                                    │
-│  7. GROUND CHECK     Verify names + stages against article  │
-│       ↓                                                    │
-│  8. POST             Threads API (chained thread)           │
-│       ↓                                                    │
-│  9. TRACK            posted_topics.json + summary report    │
-│       ↓                                                    │
-│  ────────── loop back to step 0 ──────────                 │
-└────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│  1. SCRAPE          5 sources (skysports, goal, bbc,         │
+│                     fourfourtwo, mirror) — parallel          │
+│       ↓                                                      │
+│  2. HOT DETECT      4h persistent cache + entity clustering  │
+│                     (Union-Find). Multi-source = +25 boost   │
+│       ↓                                                      │
+│  3. SCORE           12-component engine + analytics boost    │
+│                     Threshold: ≥40                            │
+│       ↓                                                      │
+│  4. FETCH           Extract article text + image             │
+│       ↓                                                      │
+│  5. GENERATE        Mistral LLM → 6-slide carousel          │
+│       ↓                                                      │
+│  6. POST            Threads API (chained thread)             │
+│       ↓                                                      │
+│  7. TRACK           posted_topics.json + hotness for A/B     │
+│       ↓                                                      │
+│  8. NOTIFY          @Szejay_bot (4-line format)              │
+└──────────────────────────────────────────────────────────────┘
+
+Cron: every hour (0 * * * *), watchdog at :15 re-runs if stale.
 ```
 
-### Anti-Bot Randomization
+## Hot Topic Detection
 
-Two-layer system prevents predictable posting patterns:
+4h rolling window with persistent article cache. Articles accumulate across runs (~80-120 over 4h vs ~20 per run).
 
-1. **Layer 1 — Random gap check:** Each run rolls a random gap (50-90 min). If elapsed time since last post < gap, skip silently.
-2. **Layer 2 — Random sleep:** When gap check passes, sleep 0-20 min before posting. Breaks exact `:00`/`:30` cron grid.
-
-**Result:** ~15 posts/day, intervals range 50-130 min, never same pattern. 11 unique intervals per 13 posts (human-like).
-
-### Feedback Loop
-
-1. **Pull Metrics** — Each run fetches engagement data (views, likes, replies, shares) from Threads Insights API for posts older than 12 hours
-2. **Analyze Patterns** — Calculates average views per hook type and topic type
-3. **Dynamic Scoring** — Proven high-engagement hook types get +15 points. Worst-performing topic types get -20 points
-
-**Feedback delay: ~12-24 hours** (post → collect metrics → next run uses real data)
-
-## Scoring System (0–145 points)
-
-Nine additive components, each independently capped:
-
-| # | Component | Max | Description |
-|---|-----------|-----|-------------|
-| 1 | Keyword Match | 40 | +8 per unique football keyword |
-| 2 | Category Relevance | 20 | transfer/match/drama = 20, international = 10 |
-| 3 | Recency | 15 | <6h = 15, 6–24h = 10, 24–48h = 5 |
-| 4 | Data/Specificity | 15 | Concrete data (score 3-1, fee £50m) = 15 |
-| 5 | Source Tier | 10 | SkySports/Goal/FFT = 10 |
-| 6 | Audience Reach | 40 | +10 per big team/nation/star (cap 40) |
-| 7 | Drama Signal | 15 | +5 per drama word (slams, blasts, breaking, etc.) |
-| 8 | **"First ever" + Stat Boost** | +20 | "first player/team to..." + specific number |
-| 9 | **Niche Nation Penalty** | -15 | Hong Kong, DR Congo, etc. (low audience ceiling) |
-| — | Dynamic Hook Boost | +15 | Hook type proven high-engagement from analytics |
-| — | Dynamic Topic Penalty | -20 | Worst-performing topic type from analytics |
-
-**Threshold:** score ≥ 40 to publish.
-
-## Content Format
-
-Each post is a 6-slide Threads carousel. Style: conversational, witty, die-hard football fan tone with slang/banter ("cooked", "benched", "baller").
-
-| Slide | Role | Purpose |
-|-------|------|---------|
-| 1 | **THE HOOK** | 1-2 sentence opener. Curiosity gap > controversy > conflict (gated on topic size) |
-| 2 | **THE CONTEXT** | Connect hook to news. Why fans should care. 40-60 words |
-| 3 | **THE CORE FACT/STAT** | Most shocking stat broken down simply. 40-60 words |
-| 4 | **THE IMPACT** | Ripple effect on team/league/season. 40-60 words |
-| 5 | **THE VERDICT** | Sharp, definitive, cinematic. Leaves room for debate. 30-50 words |
-| 6 | **THE CTA** | Debate question that forces a side. URL appended automatically. 30-40 words |
-
-### Winning Hook Pattern (75K views proven)
+**Algorithm:** Union-Find clustering by entity overlap:
+- 2+ shared entities (teams, players, managers) → same cluster
+- 1 entity + 4+ title words overlap → same cluster
+- Score: `article_count × source_tier × recency`
+- Boost: +25 (hotness ≥ 3.0) or +15 (≥ 1.5)
 
 ```
-"X just became the first Y to do Z after [specific stat] — and nobody's talking about [scandal]."
+Example: "Mbappé hat-trick" appears in BBC + SkySports + Goal
+  → 3 sources × 1.5 tier × 1.0 recency = 4.5 → +25 boost
+  → Auto-selected as best topic
 ```
 
-- **"Nobody's talking about"** only for big names (WC, CL, Premier League)
-- **Niche topics** forced to direct conflict/hot take instead
-- **Em-dash (—)** used for drama and emphasis
+Accent normalization: `Mbappé` → `mbappe` via `unicodedata` so French/Spanish/Portuguese names cluster correctly.
 
-### Grounding Validator
+## Scoring System (12 components, 0–157 pts)
 
-Post-generation safety check:
-
-- **Football stages** mentioned in slides but not in article → **blocks posting**
-- **Proper nouns** in slides but not in article → soft warning (logged)
+| # | Component | Points |
+|---|-----------|--------|
+| 1 | Keyword Match | +8/keyword (max 5 = 40) |
+| 2 | Category | 20/10/0 |
+| 3 | Recency | 15/10/5/0 |
+| 4 | Data/Konkret | 15/7/0 |
+| 5 | Source Tier | 10/5/0 |
+| 6 | Audience Reach | +10/big name (max 40) |
+| 7 | Drama Signal | +5/word (max 15) |
+| 8 | First Ever | +20/+10 |
+| 9 | Niche Nation | -15 |
+| 10 | Paradox Bonus | +12 |
+| 11 | Warning Bonus | +8 |
+| 12 | **Hot Topic** | +25/+15 |
+| — | Analytics Boost | +15 (top hooks), -20 (worst topics) |
 
 ## Sources
 
-| Source | Method | Image | Notes |
-|--------|--------|-------|-------|
-| SkySports | RSS | media:content | 24h freshness filter |
-| Goal.com | HTML scrape | og:image (4K) | Direct scrape |
-| FourFourTwo | RSS | og:image (HD) | Tier 1 source |
+| Source | Method | Tier | Image | Notes |
+|--------|--------|------|-------|-------|
+| SkySports | RSS | 1 | media:content | 24h freshness |
+| Goal.com | HTML scrape | 1 | og:image | Direct homepage scrape |
+| BBC | RSS | 1 | media:thumbnail → upscale 1024px | og:image fallback |
+| FourFourTwo | RSS | 1 | og:image | |
+| Mirror | RSS | 2 | media:content | Fresh 0-1h |
+
+## Content Format
+
+6-slide Threads carousel. Conversational football fan tone.
+
+| Slide | Role |
+|-------|------|
+| 1 | **THE HOOK** — curiosity gap > controversy > conflict |
+| 2 | **THE CONTEXT** — why fans should care |
+| 3 | **THE CORE FACT/STAT** — most shocking stat |
+| 4 | **THE IMPACT** — ripple effect on team/league |
+| 5 | **THE VERDICT** — sharp, definitive take |
+| 6 | **THE CTA** — debate question + URL |
+
+### Viral Hook Patterns (75K views proven)
+
+**Pattern A** — "Nobody's talking about":
+```
+X just became the first Y to do Z after [stat] — and nobody's talking about [scandal].
+```
+
+**Pattern B** — "While + Warning":
+```
+X just became the first Y in [tournament] history to [achievement] — while [paradox]. [Big team], you've been warned.
+```
+
+## Engagement Feedback Loop
+
+```
+Every run:
+  1. pull_engagement() — update metrics for posts >12h old
+  2. get_analytics_summary() — classify hooks/topics, compute boosts
+  3. Score with analytics + hot topic boosts
+  4. Post new content
+  5. Track hotness_score for A/B comparison
+```
+
+Feedback delay: ~12-24 hours (post → collect metrics → next run uses real data).
 
 ## Architecture
 
 ```
 ~/.hermes/scripts/
-  run-mvp.sh              ← Cron entry point (anti-bot + retry + delivery)
-  watchdog-pressbox.sh    ← Health monitor
+  run-mvp.sh                 ← Cron entry point
+  watchdog-pressbox.sh       ← Health monitor (re-runs if stale)
+  pressbox-engagement-report.sh ← Daily report
 
 ~/.hermes/pressbox-pipeline/
-  pressbox-mvp.py         ← Main pipeline (scrape, analytics, score, LLM, post)
-  threads_poster.py       ← Threads Graph API wrapper + engagement metrics
-  pressbox_common.py      ← Shared utilities (paths, logging, dedup, classification)
-  pressbox_scoring.py     ← 9-component analytics-driven scoring engine
+  pressbox-mvp.py            ← Main pipeline (~1070 lines)
+  pressbox_scoring.py        ← 12-component scoring engine
+  threads_poster.py          ← Threads Graph API wrapper
+  pressbox_common.py         ← Shared utilities
 
 ~/.hermes/pressbox/
-  posted_topics.json      ← Post history + engagement metrics
+  posted_topics.json         ← Post history + engagement + hotness
+  article-cache.json         ← 4h article cache for hot detection
 ```
+
+## Cron
+
+| Job | Schedule | Behavior |
+|-----|----------|----------|
+| Pressbox MVP | `0 * * * *` | Scrape → score → generate → post |
+| Pressbox Watchdog | `15 * * * *` | Re-runs pipeline if stale |
+| Daily Report | `0 8 * * *` | Engagement summary → @Szejay_bot |
 
 ## Setup
 
 ```bash
-# Clone repo
 git clone https://github.com/hadijayyy/pressbox-pipeline.git ~/.hermes/pressbox-pipeline
 cd ~/.hermes/pressbox-pipeline
-pip install -r requirements.txt
+pip install requests beautifulsoup4 python-dotenv httpx
 
-# Mistral API key
-echo 'MISTRAL_API_KEY=your_key' >> ~/.hermes/.env
+# API keys
+echo 'MISTRAL_API_KEY=***' >> ~/.hermes/.env
 
 # Threads token (requires threads_manage_insights scope)
 echo '{"access_token": "***", "user_id": "your_user_id"}' > ~/.hermes/threads_token.json
@@ -144,11 +158,6 @@ echo '{"access_token": "***", "user_id": "your_user_id"}' > ~/.hermes/threads_to
 # Data directories
 mkdir -p ~/.hermes/pressbox
 echo '{"topics": []}' > ~/.hermes/pressbox/posted_topics.json
-mkdir -p ~/.hermes/content-pipeline/drafts/football
-
-# Copy cron scripts
-cp scripts/run-mvp.sh ~/.hermes/scripts/
-cp scripts/watchdog-pressbox.sh ~/.hermes/scripts/
 ```
 
 ## Usage
@@ -161,20 +170,7 @@ python3 -u pressbox-mvp.py --dry-run
 bash ~/.hermes/scripts/run-mvp.sh
 ```
 
-## Cron Setup
-
-Runs via Hermes `no_agent: true` cron jobs — zero token cost, direct script execution.
-
-| Job | Schedule | Script | Behavior |
-|-----|----------|--------|----------|
-| Pressbox MVP | `0,30 * * * *` | `run-mvp.sh` | Anti-bot check → scrape → score → generate → post |
-| Pressbox Watchdog | `15,45 * * * *` | `watchdog-pressbox.sh` | Health monitor, silent if OK |
-
-**Anti-bot timing:** Cron fires every 30 min, but actual posting is ~50-90 min apart (randomized). ~15 posts/day.
-
-**Cooldown:** 15-minute floor in Python prevents duplicate posts.
-
-## Threads API Requirements
+## Threads API Scopes
 
 | Scope | Purpose |
 |-------|---------|
@@ -182,11 +178,9 @@ Runs via Hermes `no_agent: true` cron jobs — zero token cost, direct script ex
 | `threads_content_publish` | Create and publish posts |
 | `threads_manage_insights` | Pull engagement metrics |
 
-Token stored at `~/.hermes/threads_token.json`.
-
 ## Requirements
 
 - Python 3.8+
-- `requests`, `beautifulsoup4`, `python-dotenv`
-- Mistral API key (`~/.hermes/.env`)
+- `requests`, `beautifulsoup4`, `python-dotenv`, `httpx`
+- Mistral API key
 - Threads long-lived access token with `threads_manage_insights` scope
