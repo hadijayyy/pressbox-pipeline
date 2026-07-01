@@ -2,7 +2,7 @@
 
 Automated football content pipeline for [@parkthebus.football](https://www.threads.net/@parkthebus.football) on Threads.
 
-Scrapes football news from 5 sources, detects hot/viral topics via entity clustering, scores with a 12-component engine, generates 6-slide carousels via LLM, and posts hourly — fully automated with engagement feedback loop.
+Scrapes football news from 5 sources, detects hot/viral topics via entity clustering, scores with a multi-layered engine (keyword + context-aware bonuses + soft cap), verifies article body quality, generates 6-slide carousels via LLM, and posts hourly with HD images — fully automated with engagement feedback loop.
 
 ## How It Works
 
@@ -11,45 +11,46 @@ Scrapes football news from 5 sources, detects hot/viral topics via entity cluste
 │  1. SCRAPE          5 sources (skysports, goal, bbc,         │
 │                     fourfourtwo, mirror) — parallel          │
 │       ↓                                                      │
-│  2. HOT DETECT      4h persistent cache + entity clustering  │
-│                     (Union-Find). Multi-source = +25 boost   │
+│  2. FILTER          Commercial/TV/sensitive/women blocked    │
+│                     + dedup + similarity + analytics penalty  │
 │       ↓                                                      │
-│  3. SCORE           12-component engine + analytics boost    │
-│                     Threshold: ≥40                            │
+│  3. HOT DETECT      4h persistent cache + entity clustering  │
+│                     (Union-Find). Multi-source = viral boost │
 │       ↓                                                      │
-│  4. FETCH           Extract article text + image             │
+│  4. SCORE           12-component engine + context-aware      │
+│                     bonuses + soft cap + auto-tuning         │
 │       ↓                                                      │
-│  5. GENERATE        Mistral LLM → 6-slide carousel          │
+│  5. VERIFY          Body check: football signals ≥ 2,       │
+│                     commercial signals < 2. Tries top 3.    │
 │       ↓                                                      │
-│  6. POST            Threads API (chained thread)             │
+│  6. FETCH           Extract full article text + og:image HD  │
 │       ↓                                                      │
-│  7. TRACK           posted_topics.json + hotness for A/B     │
+│  7. GENERATE        Mistral LLM → 6-slide carousel          │
 │       ↓                                                      │
-│  8. NOTIFY          @Szejay_bot (4-line format)              │
+│  8. POST            Threads API (chained thread + image)     │
+│       ↓                                                      │
+│  9. TRACK           posted_topics.json + hotness for A/B     │
+│       ↓                                                      │
+│ 10. NOTIFY          @Szejay_bot (4-line format)              │
 └──────────────────────────────────────────────────────────────┘
 
 Cron: every hour (0 * * * *), watchdog at :15 re-runs if stale.
 ```
 
-## Hot Topic Detection
+## Content Filters
 
-4h rolling window with persistent article cache. Articles accumulate across runs (~80-120 over 4h vs ~20 per run).
+| Filter | What it blocks |
+|--------|---------------|
+| `_COMMERCIAL` | Shopping/deals: "snap up", "buy now", "% off", Amazon/eBay |
+| `_TV_GUIDE` | "How to watch", "TV channel", "live stream" |
+| `_SENSITIVE` | "charged with murder", "arrested", "domestic violence" |
+| `_WOMEN` | Lionesses, NWLS, women's football |
+| `/live/` URLs | Live commentary pages (not articles) |
+| Body verification | Article must have football signals (≥2) and no commercial intent (<2) |
 
-**Algorithm:** Union-Find clustering by entity overlap:
-- 2+ shared entities (teams, players, managers) → same cluster
-- 1 entity + 4+ title words overlap → same cluster
-- Score: `article_count × source_tier × recency`
-- Boost: +25 (hotness ≥ 3.0) or +15 (≥ 1.5)
+## Scoring System
 
-```
-Example: "Mbappé hat-trick" appears in BBC + SkySports + Goal
-  → 3 sources × 1.5 tier × 1.0 recency = 4.5 → +25 boost
-  → Auto-selected as best topic
-```
-
-Accent normalization: `Mbappé` → `mbappe` via `unicodedata` so French/Spanish/Portuguese names cluster correctly.
-
-## Scoring System (12 components, 0–157 pts)
+### Base Components (0–120 pts)
 
 | # | Component | Points |
 |---|-----------|--------|
@@ -64,18 +65,71 @@ Accent normalization: `Mbappé` → `mbappe` via `unicodedata` so French/Spanish
 | 9 | Niche Nation | -15 |
 | 10 | Paradox Bonus | +12 |
 | 11 | Warning Bonus | +8 |
-| 12 | **Hot Topic** | +25/+15 |
-| — | Analytics Boost | +15 (top hooks), -20 (worst topics) |
+| 12 | Exclude Keywords | -1 (hard reject) |
+
+### Pipeline Bonuses (context-aware)
+
+| Bonus | Trigger | Points |
+|-------|---------|--------|
+| WC Related | Title has football context (match/goal/win) | +40 |
+| WC Related (weak) | Only mentions team name | +10 |
+| Transfer Related | Transfer keywords | +10 |
+| Hot Topic | Multi-source cluster (hotness ≥ 3.0) | +25 |
+| Warm Topic | Multi-source cluster (hotness ≥ 1.5) | +15 |
+| Peak Hour | 17–21 WIB + hot topic | +10 |
+| Hook Boost | Best performing hooks (from analytics) | +15 |
+| Topic Penalty | Worst performing topics (from analytics) | -20 |
+| Niche Topic | boots/kit/jersey/stadium rules | -30 |
+| Auto-Tuning | ML-adjusted multipliers | ±15 |
+
+### Guards & Caps
+
+| Guard | What it does |
+|-------|-------------|
+| WC context check | +40 only if title has football keywords (match/beat/win/goal), else +10 |
+| Hot relevance check | Entity must appear in title first half (prevents cluster pollution) |
+| Niche penalty | -30 for boots/kit/jersey/stadium/ticket keywords |
+| Soft cap | Above 100: `100 + (score - 100) × 0.3` — prevents runaway scores |
+
+**Effective score range:**
+```
+Low-quality (boots/kit)   : 30–50
+Average (preview/quiz)    : 50–70
+Good (match result)       : 70–90
+Hot drama (controversy)   : 90–110 (capped)
+```
+
+## Hot Topic Detection
+
+4h rolling window with persistent article cache. Articles accumulate across runs (~80–120 over 4h vs ~20 per run).
+
+**Algorithm:** Union-Find clustering by entity overlap:
+- 2+ shared entities (teams, players, managers) → same cluster
+- 1 entity + 4+ title words overlap → same cluster
+- Score: `article_count × source_tier × recency`
+- Cluster entities stored per URL for relevance checking
+
+Accent normalization: `Mbappé` → `mbappe` via `unicodedata` so French/Spanish/Portuguese names cluster correctly.
+
+## Image Handling
+
+| Layer | Source | Quality |
+|-------|--------|---------|
+| Primary | `og:image` from article HTML | 1200px (HD) ✅ |
+| Fallback | RSS `<media:thumbnail>` / `<enclosure>` | 240–480px |
+| BBC upscale | `ichef.bbci.co.uk/480/` → `/1024/` | 1024px ✅ |
+
+**Always prefers og:image (HD) over RSS thumbnail.** Cache stores and returns cached_image on reuse.
 
 ## Sources
 
-| Source | Method | Tier | Image | Notes |
-|--------|--------|------|-------|-------|
-| SkySports | RSS | 1 | media:content | 24h freshness |
-| Goal.com | HTML scrape | 1 | og:image | Direct homepage scrape |
-| BBC | RSS | 1 | media:thumbnail → upscale 1024px | og:image fallback |
-| FourFourTwo | RSS | 1 | og:image | |
-| Mirror | RSS | 2 | media:content | Fresh 0-1h |
+| Source | Method | Tier | Notes |
+|--------|--------|------|-------|
+| SkySports | RSS | 1 | 24h freshness |
+| Goal.com | HTML scrape | 1 | Direct homepage scrape |
+| BBC | RSS | 1 | Image upscale to 1024px |
+| FourFourTwo | RSS | 1 | |
+| Mirror | RSS | 2 | Fresh 0–1h |
 
 ## Content Format
 
@@ -83,14 +137,14 @@ Accent normalization: `Mbappé` → `mbappe` via `unicodedata` so French/Spanish
 
 | Slide | Role |
 |-------|------|
-| 1 | **THE HOOK** — curiosity gap > controversy > conflict |
+| 1 | **THE HOOK** — curiosity gap > controversy > conflict (with HD image) |
 | 2 | **THE CONTEXT** — why fans should care |
 | 3 | **THE CORE FACT/STAT** — most shocking stat |
 | 4 | **THE IMPACT** — ripple effect on team/league |
 | 5 | **THE VERDICT** — sharp, definitive take |
-| 6 | **THE CTA** — debate question + URL |
+| 6 | **THE CTA** — debate question + source URL (auto-appended) |
 
-### Viral Hook Patterns (75K views proven)
+### Viral Hook Patterns (75K+ views proven)
 
 **Pattern A** — "Nobody's talking about":
 ```
@@ -113,7 +167,7 @@ Every run:
   5. Track hotness_score for A/B comparison
 ```
 
-Feedback delay: ~12-24 hours (post → collect metrics → next run uses real data).
+Feedback delay: ~12–24 hours (post → collect metrics → next run uses real data).
 
 ## Architecture
 
@@ -124,7 +178,7 @@ Feedback delay: ~12-24 hours (post → collect metrics → next run uses real da
   pressbox-engagement-report.sh ← Daily report
 
 ~/.hermes/pressbox-pipeline/
-  pressbox-mvp.py            ← Main pipeline (~1070 lines)
+  pressbox-mvp.py            ← Main pipeline
   pressbox_scoring.py        ← 12-component scoring engine
   threads_poster.py          ← Threads Graph API wrapper
   pressbox_common.py         ← Shared utilities
@@ -138,9 +192,11 @@ Feedback delay: ~12-24 hours (post → collect metrics → next run uses real da
 
 | Job | Schedule | Behavior |
 |-----|----------|----------|
-| Pressbox MVP | `0 * * * *` | Scrape → score → generate → post |
+| Pressbox MVP | `0 * * * *` | Scrape → score → verify → generate → post |
 | Pressbox Watchdog | `15 * * * *` | Re-runs pipeline if stale |
 | Daily Report | `0 8 * * *` | Engagement summary → @Szejay_bot |
+| Clean Cache | `0 5 * * *` | Purge expired entries |
+| Auto-Tuning | Per-run | ML adjusts multipliers from 181+ posts |
 
 ## Setup
 
