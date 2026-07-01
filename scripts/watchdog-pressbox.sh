@@ -1,5 +1,16 @@
 #!/bin/bash
-STATUS_FILE="/tmp/pressbox-last-status"
+STATUS_FILE="/tmp/pressbox-last-post"
+
+# Load @Szejay_bot token
+set -a; source ~/.hermes/.env 2>/dev/null; set +a
+SZEJAY_CHAT="1022032312"
+
+notify() {
+    [ -z "$SZEJAY_BOT_TOKEN" ] && return
+    curl -s -X POST "https://api.telegram.org/bot${SZEJAY_BOT_TOKEN}/sendMessage" \
+        --data-urlencode "chat_id=$SZEJAY_CHAT" \
+        --data-urlencode "text=$1" > /dev/null 2>&1 &
+}
 
 # Check if last run was ok and recent
 if [ -f "$STATUS_FILE" ]; then
@@ -23,18 +34,15 @@ if [ $EXIT_CODE -eq 0 ]; then
     echo "ok $(date -Iseconds)" > "$STATUS_FILE"
 fi
 
-# Send to Telegram topic directly
+NOW_WIB=$(TZ=Asia/Jakarta date '+%H:%M WIB')
 if [ -n "$OUTPUT" ]; then
-    set -a
-    source ~/.hermes/.env
-    set +a
-    CHAT_ID="${TELEGRAM_HOME_CHANNEL:-1022032312}"
-    THREAD_ID="${TELEGRAM_HOME_CHANNEL_THREAD_ID:-57540}"
-    MSG=$(echo "$OUTPUT" | tail -c 4000)
-    curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-        -d chat_id="$CHAT_ID" \
-        -d message_thread_id="$THREAD_ID" \
-        --data-urlencode text="$MSG" > /dev/null 2>&1
+    echo "$OUTPUT"
+    notify "🔄 Watchdog re-post @ $NOW_WIB
+$OUTPUT"
+elif [ $EXIT_CODE -ne 0 ]; then
+    MSG="❌ Watchdog failed @ $NOW_WIB"
+    echo "$MSG"
+    notify "$MSG"
 fi
 
 exit $EXIT_CODE
