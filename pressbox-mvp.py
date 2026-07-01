@@ -16,7 +16,8 @@ from bs4 import BeautifulSoup
 
 # ── Config ──────────────────────────────────────────────────────────
 DRY_RUN = "--dry-run" in sys.argv
-SOURCES = ["skysports", "goal", "bbc", "fourfourtwo"]
+SOURCES = ["skysports", "goal", "bbc", "fourfourtwo", "mirror"]
+ARTICLE_CACHE = f"{HOME}/.hermes/pressbox/article-cache.json"
 MAX_CHARS = 500  # Threads per-slide limit
 SENTENCE_COUNTS = {1:(1,3), 2:(2,4), 3:(2,4), 4:(1,4), 5:(2,4), 6:(2,4)}
 os.makedirs(f"{HOME}/.hermes/pressbox", exist_ok=True)
@@ -117,15 +118,16 @@ def scrape_goal():
 
 def scrape_all():
     """Scrape all sources in parallel."""
-    log("Scraping 4 sources...")
+    log("Scraping 5 sources...")
     t0 = time.time()
     all_t = []
-    with ThreadPoolExecutor(max_workers=4) as ex:
+    with ThreadPoolExecutor(max_workers=5) as ex:
         futs = {
             "skysports": ex.submit(scrape_rss, "https://www.skysports.com/rss/11095", "skysports", 12),
             "goal": ex.submit(scrape_goal),
             "bbc": ex.submit(scrape_rss, "https://feeds.bbci.co.uk/sport/football/rss.xml", "bbc", 10),
             "fourfourtwo": ex.submit(scrape_rss, "https://www.fourfourtwo.com/rss", "fourfourtwo", 8),
+            "mirror": ex.submit(scrape_rss, "https://www.mirror.co.uk/sport/football/rss.xml", "mirror", 7),
         }
         for name, f in futs.items():
             try:
@@ -155,22 +157,39 @@ def _extract_entities(title):
 def detect_hot_topics(topics, window_hours=4):
     """Cluster topics by entity overlap. Returns dict: topic_url → hotness_score.
 
-    Algorithm:
-    1. Filter to articles within window_hours (from published_ts or assume fresh)
-    2. Extract entities from each title
-    3. Build clusters: articles sharing 2+ entities → same cluster
-    4. Score cluster: count × source_tier_diversity × recency
-    5. Map each article_url to its cluster's hotness score
+    Uses persistent article cache across runs for better 4h window coverage.
     """
     now = time.time()
     cutoff = now - (window_hours * 3600)
 
-    # 1. Fresh articles only
+    # 1. Load persistent cache + merge current articles
+    cached = []
+    try:
+        if os.path.exists(ARTICLE_CACHE):
+            with open(ARTICLE_CACHE) as f:
+                cached = json.load(f)
+    except: pass
+
+    # Merge: cache + current (dedup by URL)
+    seen_urls = set()
+    merged = []
+    for t in cached + topics:
+        url = t.get("url", "")
+        if url and url not in seen_urls:
+            seen_urls.add(url)
+            merged.append(t)
+
+    # 2. Prune > 4h old + save cache
     fresh = []
-    for t in topics:
-        ts = t.get("published_ts") or now  # no timestamp = assume fresh
+    for t in merged:
+        ts = t.get("published_ts") or now
         if ts >= cutoff:
             fresh.append(t)
+
+    try:
+        with open(ARTICLE_CACHE, "w") as f:
+            json.dump(fresh, f)
+    except: pass
 
     if len(fresh) < 2:
         return {}
@@ -882,18 +901,21 @@ def post_to_threads(slides, image_url=None):
 
 # ── 6. TRACK ───────────────────────────────────────────────────────
 
-def track_post(title, url, source, root_id, permalink):
+def track_post(title, url, source, root_id, permalink, hotness_score=0):
     """Append to posted_topics.json."""
     try:
         with open(POSTED) as f:
             data = json.load(f)
     except: data = {"topics":[]}
     if "topics" not in data: data["topics"] = []
-    data["topics"].append({
+    entry = {
         "title": title, "url": url, "source": source,
         "post_id": root_id, "permalink": permalink,
         "posted_at": datetime.now(WIB).isoformat(),
-    })
+    }
+    if hotness_score:
+        entry["hotness_score"] = round(hotness_score, 2)
+    data["topics"].append(entry)
     # Keep last 200 entries
     data["topics"] = data["topics"][-200:]
     with open(POSTED, "w") as f:
@@ -1024,7 +1046,8 @@ def main():
         sys.exit(1)
 
     # Track
-    track_post(best["title"], url, best.get("source",""), root_id, permalink)
+    track_post(best["title"], url, best.get("source",""), root_id, permalink,
+               hotness_score=hotness.get(url, 0))
 
     log(f"✅ {best['title']} → {permalink}")
     log(f"⏱️ Total: {total:.1f}s (LLM: {llm_time:.1f}s)")
