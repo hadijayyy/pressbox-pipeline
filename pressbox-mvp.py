@@ -141,12 +141,14 @@ def scrape_all():
 
 def _extract_entities(title):
     """Extract football entities (teams, players, managers) from title. Returns set of lowercase names."""
-    tl = title.lower()
+    import unicodedata
+    def strip_accents(s):
+        return ''.join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn')
+    tl = strip_accents(title.lower())
     found = set()
-    # Check all known entities (BIG_TEAMS from scoring module is too large; use fast substring)
     from pressbox_scoring import BIG_TEAMS
     for entity in BIG_TEAMS:
-        if entity in tl:
+        if strip_accents(entity) in tl:
             found.add(entity)
     return found
 
