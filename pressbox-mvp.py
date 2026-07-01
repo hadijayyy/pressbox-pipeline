@@ -18,6 +18,7 @@ from bs4 import BeautifulSoup
 DRY_RUN = "--dry-run" in sys.argv
 SOURCES = ["skysports", "goal", "bbc", "fourfourtwo", "mirror"]
 ARTICLE_CACHE = f"{HOME}/.hermes/pressbox/article-cache.json"
+SOURCE_FINGERPRINTS = f"{HOME}/.hermes/pressbox/source-fingerprints.json"
 MAX_CHARS = 500  # Threads per-slide limit
 SENTENCE_COUNTS = {1:(1,3), 2:(2,4), 3:(2,4), 4:(1,4), 5:(2,4), 6:(2,4)}
 os.makedirs(f"{HOME}/.hermes/pressbox", exist_ok=True)
@@ -116,26 +117,82 @@ def scrape_goal():
     except: pass
     return topics
 
+def _load_fingerprints():
+    """Load source fingerprints (last-seen article title per source)."""
+    try:
+        with open(SOURCE_FINGERPRINTS) as f:
+            return json.load(f)
+    except:
+        return {}
+
+def _save_fingerprints(fps):
+    """Save source fingerprints."""
+    with open(SOURCE_FINGERPRINTS, "w") as f:
+        json.dump(fps, f)
+
 def scrape_all():
-    """Scrape all sources in parallel."""
+    """Scrape all sources in parallel. Skip sources with unchanged RSS."""
     log("Scraping 5 sources...")
     t0 = time.time()
+    fingerprints = _load_fingerprints()
+    new_fingerprints = {}
     all_t = []
+    skipped = []
+
+    def scrape_with_fingerprint(name, fn, *args):
+        """Run scrape, check if feed changed. Returns (topics, changed)."""
+        topics = fn(*args) if args else fn()
+        if not topics:
+            return [], False
+        # First topic title = fingerprint (newest article)
+        fp = topics[0].get("title", "")[:80]
+        old_fp = fingerprints.get(name, "")
+        if fp == old_fp:
+            return [], False  # unchanged
+        return topics, True
+
     with ThreadPoolExecutor(max_workers=5) as ex:
         futs = {
-            "skysports": ex.submit(scrape_rss, "https://www.skysports.com/rss/11095", "skysports", 12),
-            "goal": ex.submit(scrape_goal),
-            "bbc": ex.submit(scrape_rss, "https://feeds.bbci.co.uk/sport/football/rss.xml", "bbc", 10),
-            "fourfourtwo": ex.submit(scrape_rss, "https://www.fourfourtwo.com/rss", "fourfourtwo", 8),
-            "mirror": ex.submit(scrape_rss, "https://www.mirror.co.uk/sport/football/rss.xml", "mirror", 7),
+            "skysports": ex.submit(scrape_with_fingerprint, "skysports", scrape_rss, "https://www.skysports.com/rss/11095", "skysports", 12),
+            "goal": ex.submit(scrape_with_fingerprint, "goal", scrape_goal),
+            "bbc": ex.submit(scrape_with_fingerprint, "bbc", scrape_rss, "https://feeds.bbci.co.uk/sport/football/rss.xml", "bbc", 10),
+            "fourfourtwo": ex.submit(scrape_with_fingerprint, "fourfourtwo", scrape_rss, "https://www.fourfourtwo.com/rss", "fourfourtwo", 8),
+            "mirror": ex.submit(scrape_with_fingerprint, "mirror", scrape_rss, "https://www.mirror.co.uk/sport/football/rss.xml", "mirror", 7),
         }
         for name, f in futs.items():
             try:
-                r = f.result(timeout=15)
-                log(f"   {name}: {len(r)} topics")
-                all_t.extend(r)
+                topics, changed = f.result(timeout=15)
+                if changed:
+                    new_fingerprints[name] = topics[0].get("title", "")[:80]
+                    log(f"   {name}: {len(topics)} topics (new)")
+                    all_t.extend(topics)
+                else:
+                    skipped.append(name)
+                    log(f"   {name}: unchanged (skipped)")
             except Exception as e:
                 log(f"   ⚠️ {name}: {e}")
+
+    # Merge fingerprints (keep old ones for skipped sources)
+    fingerprints.update(new_fingerprints)
+    _save_fingerprints(fingerprints)
+
+    # If ALL sources unchanged, force a full scrape (prevent stale pipeline)
+    if not all_t and skipped:
+        log("   ⚠️ All sources unchanged — forcing full scrape")
+        with ThreadPoolExecutor(max_workers=5) as ex:
+            futs = {
+                "skysports": ex.submit(scrape_rss, "https://www.skysports.com/rss/11095", "skysports", 12),
+                "goal": ex.submit(scrape_goal),
+                "bbc": ex.submit(scrape_rss, "https://feeds.bbci.co.uk/sport/football/rss.xml", "bbc", 10),
+                "fourfourtwo": ex.submit(scrape_rss, "https://www.fourfourtwo.com/rss", "fourfourtwo", 8),
+                "mirror": ex.submit(scrape_rss, "https://www.mirror.co.uk/sport/football/rss.xml", "mirror", 7),
+            }
+            for name, f in futs.items():
+                try:
+                    r = f.result(timeout=15)
+                    all_t.extend(r)
+                except: pass
+
     log(f"   Total: {len(all_t)} in {time.time()-t0:.1f}s")
     return all_t
 
@@ -418,7 +475,29 @@ def get_analytics_summary():
         "best_sources": [(s, avg(v)) for s, v in best_sources],
         "worst_topics": [(t, avg(v)) for t, v in best_topics[-3:] if avg(v) < median_views * 0.5],
     }
-    
+
+    # Hotness A/B comparison — hot vs non-hot engagement
+    hot_posts = [t for t in with_metrics if t.get("hotness_score", 0) > 0]
+    cold_posts = [t for t in with_metrics if not t.get("hotness_score")]
+    if hot_posts and cold_posts:
+        hot_avg = avg([t.get("views", 0) for t in hot_posts])
+        cold_avg = avg([t.get("views", 0) for t in cold_posts])
+        summary["hot_avg_views"] = hot_avg
+        summary["cold_avg_views"] = cold_avg
+        summary["hot_count"] = len(hot_posts)
+        summary["cold_count"] = len(cold_posts)
+        if cold_avg > 0:
+            ratio = hot_avg / cold_avg
+            summary["hot_cold_ratio"] = round(ratio, 2)
+            # Auto-boost: if hot posts get 50%+ more views, increase hot boost
+            if ratio >= 1.5:
+                summary["hot_boost_adjust"] = min(10, int((ratio - 1.0) * 10))
+            elif ratio < 0.8:
+                summary["hot_boost_adjust"] = max(-10, int((ratio - 1.0) * 10))
+            else:
+                summary["hot_boost_adjust"] = 0
+            log(f"📊 Hot A/B: hot={hot_avg:.0f} avg ({len(hot_posts)} posts) vs cold={cold_avg:.0f} avg ({len(cold_posts)}) → ratio={ratio:.2f}")
+
     return summary
 
 # Sensitive content filter
@@ -504,12 +583,15 @@ def filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_su
 
         # Hot topic boost (multi-source coverage = viral)
         hot = hotness.get(url, 0)
+        hot_adjust = analytics_summary.get("hot_boost_adjust", 0) if analytics_summary else 0
         if hot >= 3.0:
-            s += 25
-            log(f"   🔥 Hot boost: +25 for '{title[:50]}' (hotness={hot:.1f})")
+            boost = 25 + hot_adjust
+            s += boost
+            log(f"   🔥 Hot boost: +{boost} for '{title[:50]}' (hotness={hot:.1f}, adjust={hot_adjust:+d})")
         elif hot >= 1.5:
-            s += 15
-            log(f"   🔥 Warm boost: +15 for '{title[:50]}' (hotness={hot:.1f})")
+            boost = 15 + hot_adjust
+            s += boost
+            log(f"   🔥 Warm boost: +{boost} for '{title[:50]}' (hotness={hot:.1f}, adjust={hot_adjust:+d})")
 
         t["_score"] = s
         t["_topic_type"] = tt
@@ -604,13 +686,45 @@ def extract_image(raw_html):
                 return url
     return ""
 
+def _load_article_text_cache():
+    """Load cached article texts (URL → text) from article-cache.json."""
+    try:
+        with open(ARTICLE_CACHE) as f:
+            cache = json.load(f)
+        return {a["url"]: a.get("text", "") for a in cache if a.get("text")}
+    except:
+        return {}
+
+def _save_article_text_to_cache(url, text, image_url=""):
+    """Store fetched article text in cache for reuse."""
+    try:
+        with open(ARTICLE_CACHE) as f:
+            cache = json.load(f)
+        for a in cache:
+            if a.get("url") == url:
+                a["text"] = text[:5000]  # cap to prevent bloat
+                a["cached_image"] = image_url
+                break
+        with open(ARTICLE_CACHE, "w") as f:
+            json.dump(cache, f)
+    except: pass
+
 def fetch_article(url):
-    """Fetch article page, extract text + image."""
+    """Fetch article page, extract text + image. Checks cache first."""
+    # Check cache
+    text_cache = _load_article_text_cache()
+    if url in text_cache and len(text_cache[url]) > 100:
+        log(f"   📦 Cached article: {url[:60]}")
+        return text_cache[url], ""
     try:
         r = requests.get(url, headers={"User-Agent": UA}, timeout=10, allow_redirects=True)
         if r.status_code != 200: return "", ""
-        text = extract_article(r.text)
-        return text.strip(), extract_image(r.text)
+        text = extract_article(r.text).strip()
+        image = extract_image(r.text)
+        # Store in cache for future retries
+        if text and len(text) > 100:
+            _save_article_text_to_cache(url, text, image)
+        return text, image
     except: return "", ""
 
 # ── 4. LLM GENERATE ────────────────────────────────────────────────
@@ -666,7 +780,41 @@ def grounding_check(slides_text, article_text, article_names, article_stages):
 def _count_sentences(text):
     return len([s for s in re.split(r'(?<=[.!?])\s+', text.strip()) if len(s.strip()) > 5])
 
-def generate_slides(article_text, url, hooks="", cta_pattern="", tone=""):
+def _select_viral_pattern(topic, article_text):
+    """Select Pattern A (scandal/nobody's talking) or B (paradox/warning) based on article content."""
+    title = (topic.get("title") or "").lower()
+    text = article_text.lower()[:2000]
+    combined = title + " " + text
+    
+    # Pattern A signals: scandal, controversy, hidden reason, money, behind-scenes
+    scandal_words = ["scandal", "controversy", "behind the scenes", "secret", "real reason",
+                     "nobody talks", "ugly truth", "shocking", "betray", "refuse", "clash",
+                     "furious", "rage", "slam", "blast", "row", "rift", "feud"]
+    scandal_score = sum(1 for w in scandal_words if w in combined)
+    
+    # Pattern B signals: paradox, statistical anomaly, "despite"/"while", big team threat
+    paradox_words = ["despite", "while barely", "yet somehow", "paradox", "irony",
+                     "without", "only touched", "minimal", "fewest", "least",
+                     "but only", "first in history", "record-breaking"]
+    paradox_score = sum(1 for w in paradox_words if w in combined)
+    
+    # Has big team target for "you've been warned"?
+    big_teams_warn = ["brazil", "argentina", "germany", "france", "spain", "england",
+                      "real madrid", "barcelona", "manchester", "liverpool", "chelsea",
+                      "bayern", "psg", "juventus", "inter milan", "arsenal"]
+    has_big_team = any(bt in combined for bt in big_teams_warn)
+    
+    # Decision: scandal wins if higher, else paradox. Tie-break by big team presence.
+    if scandal_score > paradox_score:
+        return "a"
+    elif paradox_score > scandal_score:
+        return "b"
+    elif has_big_team:
+        return "b"  # paradox + big team = Pattern B gold
+    else:
+        return "a"  # default to Pattern A (more versatile)
+
+def generate_slides(article_text, url, hooks="", cta_pattern="", tone="", pattern="a"):
     """Call LLM to generate 6-slide thread. Returns parsed slides or None."""
     if not MISTRAL_KEY:
         log("❌ No MISTRAL_API_KEY — cannot generate")
@@ -677,6 +825,14 @@ def generate_slides(article_text, url, hooks="", cta_pattern="", tone=""):
     if hooks: extra += f"\n- PREFERRED HOOKS: {', '.join(hooks[:3])}"
     if cta_pattern: extra += f"\n- CTA PATTERN: {cta_pattern}"
     if tone: extra += f"\n- TONE: {tone}"
+
+    # Force the selected pattern — explicit instruction
+    if pattern == "a":
+        extra += "\n- MANDATORY PATTERN: Use Pattern A (\"Nobody's talking about\"). Find a hidden scandal, real reason, or controversy in the article. If no scandal exists, create tension by contrasting public perception vs reality."
+        pattern_hint = "Pattern A"
+    else:
+        extra += "\n- MANDATORY PATTERN: Use Pattern B (\"While + Warning\"). Find a statistical paradox or counter-intuitive fact. End with a direct threat/warning to a big team. Example structure: \"X just became the first in history to [achievement] — while [paradox]. [Big team], you've been warned.\""
+        pattern_hint = "Pattern B"
 
     system = f"""You are an elite Football Content Creator writing Threads carousels. Conversational, witty, deeply relatable to die-hard football fans. Use casual football slang/banter ("cooked", "benched", "baller", "tactical masterclass") to simplify complex jargon. Avoid dry, journalistic language.
 
@@ -1009,9 +1165,11 @@ def main():
         sys.exit(1)
     log(f"   Article: {len(article_text)} chars, image: {'yes' if image_url else 'no'}")
 
-    # 4. Generate slides
+    # 4. Generate slides — select viral pattern based on article content
     t0 = time.time()
-    slides = generate_slides(article_text, url, hooks, cta_pattern, tone)
+    pattern = _select_viral_pattern(best, article_text)
+    log(f"   🎯 Viral pattern: {'A (scandal)' if pattern == 'a' else 'B (paradox)'}")
+    slides = generate_slides(article_text, url, hooks, cta_pattern, tone, pattern=pattern)
     if not slides:
         print("❌ Pipeline: LLM generation failed", flush=True)
         sys.exit(1)
