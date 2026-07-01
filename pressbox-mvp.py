@@ -1006,8 +1006,8 @@ def generate_slides(article_text, url, hooks="", cta_pattern="", tone="", patter
 - Use em-dash (—) for drama and emphasis. Example: "He scored 40 goals — nobody remembers his name."
 - Short punchy sentences mixed with longer ones. Never same rhythm every slide.
 
-SLIDE 1 — THE HOOK (1-2 sentences MAX)
-Create a "Hot Take", "POV", or controversial/mind-blowing statement that stops the scroll instantly.
+SLIDE 1 — THE HOOK (MAX 30 WORDS — hard limit)
+Create a "Hot Take", "POV", or controversial/mind-blowing statement that stops the scroll instantly. Short, sharp, punchy. Under 30 words — no exceptions.
 Pick ONE style: accusation, hot take, betrayal, verdict, contrast, number, scandal, statement, POV
 Priority (context-dependent):
 - Big names/events (WC, CL, big clubs): CURIOSITY GAP > CONTROVERSY > CONFLICT
