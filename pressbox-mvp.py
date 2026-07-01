@@ -584,6 +584,19 @@ def _compute_score_tuning(posts, median_views):
         fe_ratio = first_ever_high / first_ever_low
         tuning["first_ever_multiplier"] = round(min(1.5, max(0.7, fe_ratio)), 2)
     
+    # 6. Human interest effectiveness: do HI posts perform better?
+    hi_keywords = ["visa", "denied entry", "refused entry", "family", "mother", "father",
+                   "tears", "cried", "emotional", "heartbreaking", "sacrifice", "payout",
+                   "compensation", "immigration", "unfair", "injustice", "disgrace",
+                   "fee", "cost", "price tag", "human cost", "barred from", "banned from"]
+    hi_high = sum(1 for p in high if any(kw in (p.get("title", "") or "").lower() for kw in hi_keywords))
+    hi_low = sum(1 for p in low if any(kw in (p.get("title", "") or "").lower() for kw in hi_keywords))
+    if hi_low > 0:
+        hi_ratio = hi_high / hi_low
+        tuning["human_interest_multiplier"] = round(min(1.5, max(0.7, hi_ratio)), 2)
+    elif hi_high > 0:
+        tuning["human_interest_multiplier"] = 1.3  # HI posts in high but none in low = boost
+    
     if tuning:
         # Save tuning to file for persistence
         tuning_file = f"{HOME}/.hermes/pressbox/score-tuning.json"
@@ -685,6 +698,15 @@ def filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_su
             audience_mult = tuning.get("audience_reach_multiplier", 1.0)
             if audience_mult != 1.0 and t.get("wc_boost"):
                 s = int(s + 10 * (audience_mult - 1.0))
+            # Human interest boost from auto-tuning
+            hi_mult = tuning.get("human_interest_multiplier", 1.0)
+            if hi_mult != 1.0:
+                hi_keywords = ["visa", "denied entry", "family", "mother", "tears", "emotional",
+                               "heartbreaking", "payout", "immigration", "unfair", "injustice",
+                               "fee", "cost", "price tag", "human cost", "barred from"]
+                if any(kw in tl for kw in hi_keywords):
+                    s = int(s + 10 * (hi_mult - 1.0))
+                    log(f"   💔 Human interest boost: ×{hi_mult} for '{title[:50]}'")
         # Pipeline bonuses
         # wc_related: +40 only if title has football context, +10 if just mentions team
         _wc_context = ["match","beat","win","loss","draw","score","goal","goals",
@@ -1065,7 +1087,7 @@ SLIDE 4 — THE IMPACT (40-60 words)
 How this affects the team's lineup, rival clubs, or the upcoming season. The ripple effect.
 
 SLIDE 5 — THE VERDICT (30-50 words)
-Sharp, definitive verdict or witty takeaway. NOT philosophical — cinematic. Leaves room for debate.
+Sharp, definitive verdict with emotional weight. NOT generic analysis — make them feel something. Leave room for debate.
 
 SLIDE 6 — THE CTA (30-40 words)
 Casual, open-ended question that triggers heated debate. Not "What do you think?" — force opinion: "Is this the worst decision?", "Was he right?", "Can they survive this?". Do NOT add any URLs — the source URL is appended automatically.
