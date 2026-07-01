@@ -895,16 +895,9 @@ def main():
     now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=7)))
     wib = now.strftime("%H:%M WIB, %d %b %Y")
     post_count = len(json.load(open(POSTED)).get("topics", []))
-    print(f"""📰 **Pressbox MVP — Posted**
-━━━━━━━━━━━━━━━━
-**Title:** {best['title'][:100]}
-**Source:** {src} | **Score:** {score} | **Hook:** {hook_type}
-**Slides:** {slide_count}
-**Hook preview:** {slide_preview}...
-**Link:** {permalink}
-━━━━━━━━━━━━━━━━
-📊 Posts: {post_count} total | ⏱️ {total:.1f}s (LLM: {llm_time:.1f}s)
-⏰ {wib}""", flush=True)
+    print(f"""{best['title'][:100]}
+Score: {score} | {slide_count} slides | {total:.1f}s
+{permalink}""", flush=True)
 
 if __name__ == "__main__":
     import random as _rnd
