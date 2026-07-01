@@ -476,6 +476,7 @@ def get_analytics_summary():
         "total_posts_with_metrics": len(with_metrics),
         "avg_views": avg([t.get("views", 0) for t in with_metrics]),
         "median_views": median_views,
+        "avg_replies": avg([t.get("replies", 0) for t in with_metrics]),
         "best_hooks": [(h, avg(v)) for h, v in best_hooks[:3]],
         "best_topics": [(t, avg(v)) for t, v in best_topics[:5]],
         "best_sources": [(s, avg(v)) for s, v in best_sources],
