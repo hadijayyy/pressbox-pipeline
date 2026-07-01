@@ -94,6 +94,13 @@ EXCLUDE_KEYWORDS = {
         "odds", "accumulator", "bet of the day", "free bet",
         "casino", "slot online", "judi online",
     ],
+    "commercial": [
+        "snap up", "buy now", "shop now", "price drop",
+        "coupon", "voucher", "bargain", "save £", "save $",
+        "% off", "for £", "for $", "amazon", "ebay", "buy your",
+        "add to basket", "checkout", "free delivery", "next day delivery",
+        "black friday", "cyber monday", "prime day", "clearance",
+    ],
 }
 
 
