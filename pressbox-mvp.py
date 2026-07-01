@@ -818,7 +818,7 @@ def _load_article_text_cache():
     try:
         with open(ARTICLE_CACHE) as f:
             cache = json.load(f)
-        return {a["url"]: a.get("text", "") for a in cache if a.get("text")}
+        return {a["url"]: (a.get("text", ""), a.get("cached_image", "")) for a in cache if a.get("text")}
     except:
         return {}
 
@@ -837,12 +837,16 @@ def _save_article_text_to_cache(url, text, image_url=""):
     except: pass
 
 def fetch_article(url):
-    """Fetch article page, extract text + image. Checks cache first."""
+    """Fetch article page, extract text + image. Checks cache first.
+    Always returns og:image (high-res) when available, not RSS thumbnail."""
     # Check cache
     text_cache = _load_article_text_cache()
-    if url in text_cache and len(text_cache[url]) > 100:
+    if url in text_cache and len(text_cache[url][0]) > 100:
+        cached_text, cached_img = text_cache[url]
         log(f"   📦 Cached article: {url[:60]}")
-        return text_cache[url], ""
+        if cached_img:
+            log(f"   🖼️ Cached og:image: {cached_img[:60]}")
+        return cached_text, cached_img
     try:
         r = requests.get(url, headers={"User-Agent": UA}, timeout=10, allow_redirects=True)
         if r.status_code != 200: return "", ""
@@ -1316,6 +1320,13 @@ def main():
         print("❌ Pipeline: all articles are commercial, not football news", flush=True)
         sys.exit(1)
     log(f"   Article: {len(article_text)} chars, image: {'yes' if image_url else 'no'}")
+
+    # Image priority: og:image (1200px) > RSS thumbnail (240px)
+    if not image_url and best.get("image_url"):
+        image_url = best["image_url"]
+        log(f"   🖼️ Fallback to RSS thumbnail: {image_url[:60]}")
+    elif image_url and best.get("image_url"):
+        log(f"   🖼️ Using og:image (HD) over RSS thumbnail")
 
     # 4. Generate slides — select viral pattern based on article content
     t0 = time.time()
