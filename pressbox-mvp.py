@@ -991,7 +991,7 @@ def generate_slides(article_text, url, hooks="", cta_pattern="", tone="", patter
         extra += "\n- MANDATORY PATTERN: Use Pattern A (\"Nobody's talking about\"). Find a hidden scandal, real reason, or controversy in the article. If no scandal exists, create tension by contrasting public perception vs reality."
         pattern_hint = "Pattern A"
     else:
-        extra += "\n- MANDATORY PATTERN: Use Pattern B (\"While + Warning\"). Find a statistical paradox or counter-intuitive fact. End with a direct threat/warning to a big team. Example structure: \"X just became the first in history to [achievement] — while [paradox]. [Big team], you've been warned.\""
+        extra += "\n- MANDATORY PATTERN: Use Pattern B (\"While + Warning\"). Find a statistical paradox or counter-intuitive fact. End with a DIRECT THREAT to a big team — but vary the ending. NEVER repeat the same ending twice. Use one of: \"[Team], watch out.\", \"[Team] should be scared.\", \"[Team], this is your problem now.\", \"Good luck, [Team].\", \"[Team], you're next.\", \"[Team] just got exposed.\"\nExample: \"X just became the first in history to [achievement] — while [paradox]. Good luck, [Big team].\""
         pattern_hint = "Pattern B"
 
     system = f"""You are an elite Football Content Creator writing Threads carousels. Conversational, witty, deeply relatable to die-hard football fans. Use casual football slang/banter ("cooked", "benched", "baller", "tactical masterclass") to simplify complex jargon. Avoid dry, journalistic language.
@@ -1021,9 +1021,9 @@ Key ingredients: (1) specific stat/number (2) "first ever" framing (3) "nobody's
 WARNING: "nobody's talking about" ONLY works with big names (WC, CL, Premier League, etc). For niche topics, use direct conflict or hot take instead.
 
 Pattern B — "While + Warning" (61K):
-"X just became the first Y in [tournament] history to [achievement] — while [counter-intuitive paradox]. [Big team], you've been warned."
-Key ingredients: (1) "just became the first in history" (2) "while [paradox]" = counter-intuitive curiosity (3) direct threat to a giant team = debate bait
-Example: "Haaland just became the first striker in World Cup history to score in his first three games — while barely touching the ball. Brazil, you've been warned."
+"X just became the first Y in [tournament] history to [achievement] — while [counter-intuitive paradox]. [Big team], watch out."
+Key ingredients: (1) "just became the first in history" (2) "while [paradox]" = counter-intuitive curiosity (3) direct threat to a giant team = debate bait. VARY the ending — never repeat the same phrase.
+Example: "Haaland just became the first striker in World Cup history to score in his first three games — while barely touching the ball. Good luck, Brazil."
 
 PICK THE PATTERN that fits the data. Pattern A when there's a hidden scandal/reason. Pattern B when there's a paradox + big team opponent/threat.
 Hook must provoke REPLIES (opinions, debates) not just views. Questions like "Is this the worst decision?" drive 3x more comments than factual statements.
