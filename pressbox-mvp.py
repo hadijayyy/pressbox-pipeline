@@ -958,17 +958,31 @@ def _select_viral_pattern(topic, article_text):
                      "but only", "first in history", "record-breaking"]
     paradox_score = sum(1 for w in paradox_words if w in combined)
     
+    # Pattern C signals: specific numbers, financial amounts, human interest, emotional weight
+    detail_words = ["£", "$", "fee", "cost", "price", "pay", "million", "thousand",
+                    "visa", "banned", "denied", "blocked", "refused", "mother", "father",
+                    "family", "cry", "tears", "heart", "sacrifice", "hero", "legend"]
+    detail_score = sum(1 for w in detail_words if w in combined)
+    
+    # Check for specific numbers/amounts
+    import re as _re
+    has_specific_number = bool(_re.search(r'\d+[\d,.]*\s*(?:£|$|million|thousand|k\b)', combined))
+    if has_specific_number:
+        detail_score += 3  # Strong signal for Pattern C
+    
     # Has big team target for "you've been warned"?
     big_teams_warn = ["brazil", "argentina", "germany", "france", "spain", "england",
                       "real madrid", "barcelona", "manchester", "liverpool", "chelsea",
                       "bayern", "psg", "juventus", "inter milan", "arsenal"]
     has_big_team = any(bt in combined for bt in big_teams_warn)
     
-    # Decision: scandal wins if higher, else paradox. Tie-break by big team presence.
-    if scandal_score > paradox_score:
+    # Decision: scandal wins if higher, else paradox, else detail. Tie-break by big team presence.
+    if scandal_score > paradox_score and scandal_score > detail_score:
         return "a"
-    elif paradox_score > scandal_score:
+    elif paradox_score > scandal_score and paradox_score > detail_score:
         return "b"
+    elif detail_score > scandal_score and detail_score > paradox_score:
+        return "c"
     elif has_big_team:
         return "b"  # paradox + big team = Pattern B gold
     else:
@@ -990,9 +1004,12 @@ def generate_slides(article_text, url, hooks="", cta_pattern="", tone="", patter
     if pattern == "a":
         extra += "\n- MANDATORY PATTERN: Use Pattern A (\"Nobody's talking about\"). Find a hidden scandal, real reason, or controversy in the article. If no scandal exists, create tension by contrasting public perception vs reality."
         pattern_hint = "Pattern A"
-    else:
+    elif pattern == "b":
         extra += "\n- MANDATORY PATTERN: Use Pattern B (\"While + Warning\"). Find a statistical paradox or counter-intuitive fact. End with a DIRECT THREAT to a big team — but vary the ending. NEVER repeat the same ending twice. Use one of: \"[Team], watch out.\", \"[Team] should be scared.\", \"[Team], this is your problem now.\", \"Good luck, [Team].\", \"[Team], you're next.\", \"[Team] just got exposed.\"\nExample: \"X just became the first in history to [achievement] — while [paradox]. Good luck, [Big team].\""
         pattern_hint = "Pattern B"
+    else:
+        extra += "\n- MANDATORY PATTERN: Use Pattern C (\"Specific Detail + Emotional Weight\"). Find the most specific number/amount and pair it with the human consequence. Lead with the concrete detail, follow with the emotional impact.\nStructure: [Specific amount/detail] + [Human consequence]\nExamples:\n- \"FIFA will pay nearly half a million pounds for one tackle. Ismael Kone's broken leg carries a huge price tag.\"\n- \"$15,000 Visa Fee. 40 Years of Tears. Cape Verde's hero was in tears after a historic draw. But his mother couldn't be there due to a cruel visa rule.\""
+        pattern_hint = "Pattern C"
 
     system = f"""You are an elite Football Content Creator writing Threads carousels. Conversational, witty, deeply relatable to die-hard football fans. Use casual football slang/banter ("cooked", "benched", "baller", "tactical masterclass") to simplify complex jargon. Avoid dry, journalistic language.
 
@@ -1025,8 +1042,17 @@ Pattern B — "While + Warning" (61K):
 Key ingredients: (1) "just became the first in history" (2) "while [paradox]" = counter-intuitive curiosity (3) direct threat to a giant team = debate bait. VARY the ending — never repeat the same phrase.
 Example: "Haaland just became the first striker in World Cup history to score in his first three games — while barely touching the ball. Good luck, Brazil."
 
-PICK THE PATTERN that fits the data. Pattern A when there's a hidden scandal/reason. Pattern B when there's a paradox + big team opponent/threat.
+PICK THE PATTERN that fits the data. Pattern A when there's a hidden scandal/reason. Pattern B when there's a paradox + big team opponent/threat. Pattern C when there's a human story with specific numbers or emotional weight.
 Hook must provoke REPLIES (opinions, debates) not just views. Questions like "Is this the worst decision?" drive 3x more comments than factual statements.
+
+Pattern C — "Specific Detail + Emotional Weight" (500K+ views):
+Structure: [Specific amount/detail] + [Human consequence]
+Examples:
+- "FIFA will pay nearly half a million pounds for one tackle. Ismael Kone's broken leg carries a huge price tag." (897K views)
+- "$15,000 Visa Fee. 40 Years of Tears. Cape Verde's hero was in tears after a historic draw. But his mother couldn't be there due to a cruel visa rule." (523K views)
+- "Mohamed Salah and his teammates were denied entry to Seattle after a 3-1 win. Now the squad must scramble to reach their next match." (844K views)
+Key ingredients: (1) concrete number/amount (2) human consequence (3) clear conflict (4) specific detail
+Why it works: Numbers create curiosity + emotional weight drives replies + specific details feel real
 
 SLIDE 2 — THE CONTEXT (40-60 words)
 Connect hook to the actual news. Explain current situation and why fans should care.
@@ -1360,7 +1386,8 @@ def main():
     # 4. Generate slides — select viral pattern based on article content
     t0 = time.time()
     pattern = _select_viral_pattern(best, article_text)
-    log(f"   🎯 Viral pattern: {'A (scandal)' if pattern == 'a' else 'B (paradox)'}")
+    pattern_name = {'a': 'A (scandal)', 'b': 'B (paradox)', 'c': 'C (detail+emotion)'}[pattern]
+    log(f"   🎯 Viral pattern: {pattern_name}")
     slides = generate_slides(article_text, url, hooks, cta_pattern, tone, pattern=pattern)
     if not slides:
         print("❌ Pipeline: LLM generation failed", flush=True)
