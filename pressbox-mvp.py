@@ -1339,6 +1339,11 @@ def main():
         log(f"   ⚠️ Article too short ({len(article_text)} chars < 1000 min). Skipping LLM.")
         print(f"❌ Pipeline: article too short for carousel ({len(article_text)} chars)", flush=True)
         sys.exit(1)
+    word_count = len(article_text.split())
+    if word_count < 150:
+        log(f"   ⚠️ Article too thin ({word_count} words < 150 min). Skipping LLM.")
+        print(f"❌ Pipeline: article too thin for carousel ({word_count} words)", flush=True)
+        sys.exit(1)
 
     # Image priority: og:image (1200px) > RSS thumbnail (240px)
     if not image_url and best.get("image_url"):
@@ -1365,8 +1370,8 @@ def main():
             log(f"   ⚠️ INSUFFICIENT SOURCE — trying next article: {best['title'][:50]}")
             article_text, image_url = fetch_article(url)
             fetch_tries += 1
-            if len(article_text.strip()) < 1000:
-                log(f"   ⚠️ Next article too short ({len(article_text)} chars) — skip")
+            if len(article_text.strip()) < 1000 or len(article_text.split()) < 150:
+                log(f"   ⚠️ Next article too short/thin ({len(article_text)} chars, {len(article_text.split())} words) — skip")
                 continue
     if not slides:
         print("❌ Pipeline: LLM generation failed", flush=True)
