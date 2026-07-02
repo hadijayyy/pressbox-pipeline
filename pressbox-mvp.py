@@ -1255,6 +1255,24 @@ def post_to_threads(slides, image_url=None):
         log(f"❌ Post failed: {e}")
         return None, None
 
+# ── 5b. TELEGRAM NOTIFY ───────────────────────────────────────────
+
+def notify_telegram(text):
+    """Send notification via @szejay_bot."""
+    try:
+        token_file = os.path.expanduser("~/.szejay_token")
+        if not os.path.exists(token_file):
+            return
+        with open(token_file) as f:
+            token = f.read().strip()
+        requests.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            json={"chat_id": 1022032312, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True},
+            timeout=10,
+        )
+    except Exception:
+        pass
+
 # ── 6. TRACK ───────────────────────────────────────────────────────
 
 def track_post(title, url, source, root_id, permalink, hotness_score=0):
@@ -1433,6 +1451,7 @@ def main():
     # Post
     root_id, permalink = post_to_threads(slides, image_url)
     if not root_id:
+        notify_telegram(f"❌ <b>Post Gagal</b>\n\n{best['title']}\nSource: {url}\n\nLLM gagal generate atau post error.")
         print("❌ Pipeline: post failed", flush=True)
         sys.exit(1)
 
@@ -1442,6 +1461,17 @@ def main():
 
     log(f"✅ {best['title']} → {permalink}")
     log(f"⏱️ Total: {total:.1f}s (LLM: {llm_time:.1f}s)")
+
+    # Notify @szejay_bot
+    score = best.get("_score", 0)
+    notify_telegram(
+        f"✅ <b>Posted!</b>\n\n"
+        f"{best['title']}\n"
+        f"Score: {score} | {len(slides)} slides\n"
+        f"Pattern: {pattern.upper()}\n"
+        f"Source: {best.get('source','?')}\n\n"
+        f"<a href=\"{permalink}\">View on Threads</a>"
+    )
 
     # Summary report (stdout → delivered to Telegram topic 20467)
     score = best.get("_score", 0)
