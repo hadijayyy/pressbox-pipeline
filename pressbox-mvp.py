@@ -973,6 +973,63 @@ def grounding_check(slides_text, article_text, article_names, article_stages):
             warnings.append(f"HALLUCINATED_STAGE: '{stage}'")
     return warnings
 
+def evaluator_check(slides, article_text, url):
+    """Independent evaluator — skeptical review before post.
+    Generator says 'looks done'; evaluator says 'actually right'.
+    Returns (decision, reasons): decision is APPROVE/REVISE/REJECT.
+    """
+    if not MISTRAL_KEY:
+        return "APPROVE", ["no API key — skip eval"]
+
+    slides_text = "\n\n".join(
+        f"[Slide {i+1}: {s.get('title','')}]\n{s['content']}"
+        for i, s in enumerate(slides)
+    )
+    # Truncate article to save tokens
+    art_short = article_text[:3000]
+
+    system = (
+        "You are a skeptical editor reviewing social media slides BEFORE publication. "
+        "Your job is to find problems, not praise. Be harsh. Look for:\n"
+        "1. FACTUAL ERRORS: claims not supported by the article\n"
+        "2. HALLUCINATION: invented stats, names, quotes, transfer fees\n"
+        "3. TONE ISSUES: clickbait that damages credibility, insensitive content\n"
+        "4. QUALITY: grammar errors, incoherent flow, too many slides\n"
+        "5. MISLEADING: headline says X but article says Y\n\n"
+        "Respond in EXACTLY this JSON format:\n"
+        '{"decision": "APPROVE|REVISE|REJECT", "reasons": ["reason1", "reason2"]}\n'
+        "APPROVE = post as-is. REVISE = has issues but fixable. REJECT = do not post."
+    )
+    user = (
+        f"ARTICLE (source):\n{art_short}\n\n"
+        f"SLIDES (to review):\n{slides_text}\n\n"
+        f"Source URL: {url}\n\n"
+        "Review these slides. Be skeptical. Find problems."
+    )
+
+    try:
+        r = requests.post(
+            "https://api.mistral.ai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {MISTRAL_KEY}", "Content-Type": "application/json"},
+            json={"model": "mistral-small-latest", "messages": [
+                {"role": "system", "content": system}, {"role": "user", "content": user}],
+                "max_tokens": 500, "temperature": 0.1},
+            timeout=30)
+        if r.status_code != 200:
+            return "APPROVE", [f"evaluator HTTP {r.status_code}"]
+        content = r.json()["choices"][0]["message"]["content"].strip()
+        # Parse JSON response
+        candidate = re.sub(r"^```(?:json)?\s*", "", content)
+        candidate = re.sub(r"\s*```$", "", candidate)
+        data = json.loads(candidate)
+        decision = data.get("decision", "APPROVE").upper()
+        reasons = data.get("reasons", [])
+        if decision not in ("APPROVE", "REVISE", "REJECT"):
+            decision = "APPROVE"
+        return decision, reasons
+    except Exception as e:
+        return "APPROVE", [f"evaluator error: {e}"]
+
 def _count_sentences(text):
     return len([s for s in re.split(r'(?<=[.!?])\s+', text.strip()) if len(s.strip()) > 5])
 
@@ -1147,6 +1204,8 @@ Output:
                         # Post-process: clean formatting
                         text = text.replace("—", " - ").replace("–", " - ")
                         text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
+                        # Insert \n between sentences (whitespace after each sentence)
+                        text = re.sub(r'(?<!Mr)(?<!Mrs)(?<!Ms)(?<!Dr)(?<!St)(?<!vs)(?<!Jr)(?<!Sr)(?<!Prof)([.?!])\s+(?=[A-Z])', r'\1\n', text)
                         slides.append({"title": f"S{i}", "content": text})
                 caption = data.get("caption", "").strip()
                 hashtags = data.get("hashtags", "").strip()
@@ -1161,6 +1220,8 @@ Output:
                     if text and len(text) >= 20:
                         text = text.replace("—", " - ").replace("–", " - ")
                         text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
+                        # Insert \n between sentences (whitespace after each sentence)
+                        text = re.sub(r'(?<!Mr)(?<!Mrs)(?<!Ms)(?<!Dr)(?<!St)(?<!vs)(?<!Jr)(?<!Sr)(?<!Prof)([.?!])\s+(?=[A-Z])', r'\1\n', text)
                         slides.append({"title": f"S{num}", "content": text})
             if len(slides) < 3:
                 log(f"   ❌ Only {len(slides)} parseable slides")
@@ -1328,7 +1389,13 @@ def main():
         print("❌ Pipeline: all topics filtered out", flush=True)
         sys.exit(1)
 
-    best = ranked[0]
+    # HARD GATE: Only post hot/viral topics — must have hotness > 0 from clustering
+    hot_candidates = [t for t in ranked if hotness.get(t["url"], 0) > 0]
+    if not hot_candidates:
+        log("❌ No hot/viral topics — all candidates have hotness=0. Skipping this run.")
+        print("⏸️ Skip — no hot/viral topics in this run", flush=True)
+        sys.exit(0)
+    best = hot_candidates[0]
     if best["_score"] < 40:
         log(f"   ⏸️ Best score {best['_score']} < 40 threshold — skipping")
         print(f"⏸️ Skip — best topic score {best['_score']} below threshold", flush=True)
@@ -1425,6 +1492,16 @@ def main():
         log(f"   ⚠️ Name warnings (soft): {'; '.join(hallucinated_names)}")
     if hallucinated_stages:
         log(f"   ⚠️ Stage warnings (soft): {'; '.join(hallucinated_stages)}")
+
+    # 5.5. Evaluator — independent skeptical review (Loop Engineering pattern)
+    eval_t0 = time.time()
+    eval_decision, eval_reasons = evaluator_check(slides, article_text, url)
+    eval_time = time.time() - eval_t0
+    log(f"   🔍 Evaluator: {eval_decision} ({eval_time:.1f}s) — {'; '.join(eval_reasons[:3])}")
+    if eval_decision == "REJECT":
+        log(f"   🚫 Evaluator REJECTED — not posting. Reasons: {'; '.join(eval_reasons)}")
+        print(f"🚫 Evaluator rejected: {'; '.join(eval_reasons[:2])}", flush=True)
+        sys.exit(0)
 
     # 6. DRY RUN or POST
     total = time.time() - START
