@@ -1038,8 +1038,11 @@ Hook rules (Slide 1):
 * Lead with irony, cost, or stakes
 
 DEEPEN rules (Slide 4), the highest hallucination-risk slide:
-* Only state consequences or stakes the article itself mentions
-* If the article does not explain what happens next, keep this slide about the in-game impact only (for example playing short-handed), not off-pitch speculation
+* Only state consequences or stakes the article itself explicitly mentions
+* Do NOT invent game-state changes (red cards, injuries, substitutions) unless the article states them
+* Do NOT invent tactical shifts (formation changes, "down to ten men", "rampant on the counter") unless the article states them
+* If the article does not explain what happens next, keep this slide about the emotional weight or the moment itself, not invented consequences
+* When in doubt, describe what happened in the moment (the clash, the separation, the reaction) rather than what it caused
 
 Insufficient source protocol: flag it, do not fabricate to fill the arc.
 
