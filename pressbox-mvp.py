@@ -1142,6 +1142,8 @@ Would you trust USA to do that again?"""
             content = re.sub(r"^```(?:text)?\s*", "", content)
             content = re.sub(r"\s*```$", "", content)
             # Parse "Slide N:" format (plain text output)
+            # Strip bold markers that LLM sometimes adds
+            content = re.sub(r'\*\*Slide\s+(\d)\s*:\*\*', r'Slide \1:', content)
             slides = []
             slide_pattern = re.compile(r'(?:^|\n)\s*Slide\s+(\d)\s*:\s*\n(.*?)(?=\n\s*Slide\s+\d\s*:|\Z)', re.DOTALL | re.IGNORECASE)
             for match in slide_pattern.finditer(content):
