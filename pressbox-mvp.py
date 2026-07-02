@@ -870,6 +870,8 @@ def _load_article_text_cache():
     try:
         with open(ARTICLE_CACHE) as f:
             cache = json.load(f)
+        if isinstance(cache, dict):
+            return {url: (d.get("text", ""), d.get("image", "")) for url, d in cache.items() if isinstance(d, dict) and d.get("text")}
         return {a["url"]: (a.get("text", ""), a.get("cached_image", "")) for a in cache if a.get("text")}
     except:
         return {}
@@ -879,11 +881,10 @@ def _save_article_text_to_cache(url, text, image_url=""):
     try:
         with open(ARTICLE_CACHE) as f:
             cache = json.load(f)
-        for a in cache:
-            if a.get("url") == url:
-                a["text"] = text[:5000]  # cap to prevent bloat
-                a["cached_image"] = image_url
-                break
+        if url in cache:
+            cache[url]["text"] = text[:5000]
+            if image_url:
+                cache[url]["image"] = image_url
         with open(ARTICLE_CACHE, "w") as f:
             json.dump(cache, f)
     except: pass
