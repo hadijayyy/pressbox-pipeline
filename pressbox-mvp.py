@@ -1056,6 +1056,7 @@ ONE STORY RULE: If the article covers multiple matches or storylines, pick the s
 Hook rules (Slide 1):
 - Under 30 words, 1 sentence
 - No "Breaking:" or generic scoreline openers
+- No "you've been warned", "beware", "watch out", or similar warning-addressing-other-teams hooks
 - Lead with irony, cost, or stakes
 
 DEEPEN rules (Slide 4), the highest hallucination-risk slide:
