@@ -1027,6 +1027,8 @@ the moment, not re-read a headline. Input will be a football news article
 ## TASK
 Convert the input article into exactly 6 slides, following this structure:
 
+ONE STORY RULE: If the article covers multiple matches or storylines, pick the single strongest narrative and commit to it fully. Do not split attention across different games. The carousel must feel like one continuous arc, not a news roundup.
+
 1. HOOK. Stop-scroll opener. 1 sentence, under 30 words. Lead with tension or
    stakes, not a recap.
 2. SETUP. The situation before the turning point. Max 3 sentences, roughly 40
