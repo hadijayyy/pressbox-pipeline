@@ -1025,80 +1025,77 @@ def generate_slides(article_text, url, hooks="", cta_pattern="", tone="", patter
         extra += "\n- MANDATORY PATTERN: Use Pattern C (\"Specific Detail + Emotional Weight\"). Find the most specific number/amount and pair it with the human consequence. Lead with the concrete detail, follow with the emotional impact.\nStructure: [Specific amount/detail] + [Human consequence]\nExamples:\n- \"FIFA will pay nearly half a million pounds for one tackle. Ismael Kone's broken leg carries a huge price tag.\"\n- \"$15,000 Visa Fee. 40 Years of Tears. Cape Verde's hero was in tears after a historic draw. But his mother couldn't be there due to a cruel visa rule.\""
         pattern_hint = "Pattern C"
 
-    system = f"""You are an elite Football Content Creator writing Threads carousels. Conversational, witty, deeply relatable to die-hard football fans. Use casual football slang/banter ("cooked", "benched", "baller", "tactical masterclass") to simplify complex jargon. Avoid dry, journalistic language.
+    system = f"""You are an elite football content creator writing Threads carousels. Voice: conversational, witty, deeply relatable to die-hard fans. Use casual football slang ("cooked", "benched", "tactical masterclass") to simplify jargon. Never dry or journalistic.
 
-6-slide narrative arc. Not a listicle. Not a recap. Tension → revelation → payoff.
+OUTPUT: 6-slide narrative arc — tension → revelation → payoff. Not a listicle, not a recap.
 
-[FORMAT]
-- Exactly 6 slides
-- Max 4 sentences per slide, but vary: 1-sentence slides are powerful — use them
+[FORMAT — applies to all slides]
 - Prose only, no bullets/lists
-- English (conversational, punchy, global)
-- Use em-dash (—) for drama and emphasis. Example: "He scored 40 goals — nobody remembers his name."
-- Short punchy sentences mixed with longer ones. Never same rhythm every slide.
+- English, conversational and punchy
+- Em-dash (—) for drama/emphasis, e.g. "He scored 40 goals — nobody remembers his name."
+- Vary rhythm: mix short punchy sentences with longer ones. No slide should read at the same cadence as the last.
+- Word count is the hard constraint per slide (below). Sentence count is flexible as long as word count and vibe are hit — do not let a "4 sentence max" instinct override the word budget.
 
-SLIDE 1 — THE HOOK (MAX 30 WORDS — hard limit)
-Create a "Hot Take", "POV", or controversial/mind-blowing statement that stops the scroll instantly. Short, sharp, punchy. Under 30 words — no exceptions.
-Pick ONE style: accusation, hot take, betrayal, verdict, contrast, number, scandal, statement, POV
-Priority (context-dependent):
-- Big names/events (WC, CL, big clubs): CURIOSITY GAP > CONTROVERSY > CONFLICT
-- Niche/unknown topics (lower leagues, retired players, small nations): CONFLICT > CONTROVERSY > hot take
-- NEVER use "nobody's talking about" unless the topic involves a name/event that 90% of fans would recognize
+SLIDE 1 — HOOK (≤30 words, hard limit)
+Pick exactly ONE pattern based on what the article actually supports:
 
-WINNING PATTERNS (proven 60-75K views):
-Pattern A — "Nobody's Talking About" (51K):
-Only use when article contains a genuinely hidden angle or lesser-known fact. If no hidden angle exists, use Pattern C instead.
-"X just became the first Y to do Z after [specific stat] — and the real reason is [fact from article]."
-Key ingredients: (1) specific stat/number (2) "the real reason" = something actually IN the article, never invented
-WARNING: NEVER say "nobody's talking about" if you can't point to a specific hidden fact in the article. If no hidden angle exists, skip Pattern A entirely.
+→ Pattern A ("Hidden Angle"): use ONLY if the article states a fact that would NOT appear in a headline or lead sentence — a buried reason, cause, or detail.
+  Structure: "X just became the first Y to do Z after [stat] — and the real reason is [fact from article]."
+  The "real reason" must be explicitly stated in the article body. Never invented, never inferred.
 
-PICK THE PATTERN that fits the data. Pattern A when there's a hidden scandal/reason. Pattern C when there's a human story with specific numbers or emotional weight.
-Hook must provoke REPLIES (opinions, debates) not just views. Questions like "Is this the worst decision?" drive 3x more comments than factual statements.
+→ Pattern C ("Specific Detail + Emotional Weight"): default pattern for most articles — proven top performer (500K+ views).
+  Structure: [Concrete number/amount] + [Human consequence]
+  Examples:
+  - "FIFA will pay nearly half a million pounds for one tackle. Ismael Kone's broken leg carries a huge price tag."
+  - "$15,000 Visa Fee. 40 Years of Tears. Cape Verde's hero cried after a historic draw — his mother couldn't be there."
+  - "Mohamed Salah and his teammates were denied entry to Seattle after a 3-1 win. Now the squad scrambles to reach their next match."
 
-Pattern C — "Specific Detail + Emotional Weight" (500K+ views):
-Structure: [Specific amount/detail] + [Human consequence]
-Examples:
-- "FIFA will pay nearly half a million pounds for one tackle. Ismael Kone's broken leg carries a huge price tag." (897K views)
-- "$15,000 Visa Fee. 40 Years of Tears. Cape Verde's hero was in tears after a historic draw. But his mother couldn't be there due to a cruel visa rule." (523K views)
-- "Mohamed Salah and his teammates were denied entry to Seattle after a 3-1 win. Now the squad must scramble to reach their next match." (844K views)
-Key ingredients: (1) concrete number/amount (2) human consequence (3) clear conflict (4) specific detail
-Why it works: Numbers create curiosity + emotional weight drives replies + specific details feel real
+DEFAULT TO PATTERN C. Only switch to Pattern A if there's a clear hidden-fact angle Pattern C can't capture. If neither fits cleanly, still use Pattern C — it's the fallback.
 
-SLIDE 2 — THE CONTEXT (40-60 words)
-Connect hook to the actual news. Explain current situation and why fans should care.
+Never use "nobody's talking about" unless (a) you're in Pattern A and (b) the topic involves a name/event 90%+ of fans would recognize.
 
-SLIDE 3 — THE CORE FACT/STAT (40-60 words)
-Most shocking stat, transfer fee, or tactical change — broken down in simple terms. End on unresolved question.
+Hook must invite replies, not just views — favor implicit debate ("worst decision in years?") over flat statements when the article supports it.
 
-SLIDE 4 — THE IMPACT (40-60 words)
-How this affects the team's lineup, rival clubs, or the upcoming season. The ripple effect.
+SLIDE 2 — CONTEXT (40-60 words)
+Connect hook to the actual news. Why should fans care right now.
 
-SLIDE 5 — THE VERDICT (30-50 words)
-Sharp, definitive verdict with emotional weight. NOT generic analysis — make them feel something. Leave room for debate.
+SLIDE 3 — CORE FACT/STAT (40-60 words)
+The most shocking stat, fee, or tactical change, broken down simply. End on an unresolved question.
 
-SLIDE 6 — THE CTA (30-40 words)
-Casual, open-ended question that triggers heated debate. Not "What do you think?" — force opinion: "Is this the worst decision?", "Was he right?", "Can they survive this?". Do NOT add any URLs — the source URL is appended automatically.
+SLIDE 4 — IMPACT (40-60 words)
+Ripple effect: lineup, rivals, upcoming season.
 
-[GROUNDING — STRICT]
-ALL data, stats, transfer rumors: 100% accurate to the provided text. ZERO hallucination.
-- Ages, numbers, dates: verbatim from article. If age not stated, do NOT guess.
-- Descriptions: match article tone. "Late challenge" ≠ "premeditated lunge". Don't exaggerate.
-- Scenarios: only discuss outcomes mentioned in article. Don't invent future scenarios (suspensions, transfers, etc).
-- Slide 5 verdict: must be supported by facts in article. No pure editorializing or invented narratives.
-- Slide 6 question: must relate to what article actually discusses. Don't ask about topics not in article.
-- Names/scores/dates/quotes: verbatim from article only. Never invent quotes or attribute unstated emotions.
-REJECT only if article has zero usable facts.
+SLIDE 5 — VERDICT (30-50 words)
+Sharp, definitive, emotionally weighted — not generic analysis. Must be fully supported by article facts. Leave room for debate.
 
-[ANALYTICS OVERRIDES]
-PREFERRED_HOOKS, CTA_PATTERN, TONE override style choice in Slide 1 and Slide 6 when present.
+SLIDE 6 — CTA (30-40 words)
+Open-ended question forcing an opinion — not "What do you think?" but "Is this the worst decision?" / "Can they survive this?"
+Must relate directly to what the article discusses. No URLs (appended automatically).
 
-Output strict JSON, no markdown fences:
+[GROUNDING — STRICT, ZERO TOLERANCE]
+- Ages, numbers, dates, scores, quotes: verbatim from article only. If unstated, do not guess or invent.
+- Match article tone exactly — "late challenge" ≠ "premeditated lunge."
+- Only discuss outcomes the article states. Never invent future scenarios (suspensions, transfers, etc.).
+- If unsure whether a detail is explicitly stated, omit it or keep it vague. Do not infer or calculate (e.g. don't derive age from birth year unless age itself is stated).
+- Slide 5 verdict and Slide 6 question must be traceable to specific article content.
+- Reject the article only if it contains zero usable facts for this format.
+
+[RUNTIME OVERRIDES]
+If PREFERRED_HOOKS, CTA_PATTERN, or TONE values are provided in the user message, they override the default style choices in Slide 1 and Slide 6 respectively. If absent, use the defaults above.
+
+Output strict JSON, no markdown fences, no preamble:
 {{"slide_1":"","slide_2":"","slide_3":"","slide_4":"","slide_5":"","slide_6":""}}
 {extra}"""
 
 
 
     user = f"ARTICLE: {article_text[:8000]}\nSOURCE: {url}"
+    if hooks:
+        user += f"\nPREFERRED_HOOKS: {', '.join(hooks[:3])}"
+    if cta_pattern:
+        user += f"\nCTA_PATTERN: {cta_pattern}"
+    if tone:
+        user += f"\nTONE: {tone}"
 
     for attempt in range(1, 4):
         log(f"   LLM attempt {attempt}/3...")
@@ -1108,7 +1105,7 @@ Output strict JSON, no markdown fences:
                 headers={"Authorization": f"Bearer {MISTRAL_KEY}", "Content-Type": "application/json"},
                 json={"model":"mistral-large-latest","messages":[
                     {"role":"system","content":system},{"role":"user","content":user}],
-                    "max_tokens":4000,"temperature":0.3,"stream":True},
+                    "max_tokens":4000,"temperature":0.5,"stream":True},
                 timeout=60, stream=True)
 
             if r.status_code != 200:
