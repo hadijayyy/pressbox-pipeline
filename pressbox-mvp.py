@@ -1311,12 +1311,14 @@ def main():
             "snap up","bargain","order now","next day delivery"] if kw in bl)
         return football < 2 and commercial >= 2
 
-    while fetch_tries < len(ranked[:3]):
+    while fetch_tries < len(ranked[:5]):
         # Check length
         if not article_text or len(article_text) < 100:
             log(f"   ❌ Article too short on '{best['title']}' — trying next")
         elif _is_commercial_body(article_text):
             log(f"   🛒 Body is commercial, not football — trying next")
+        elif len(article_text.strip()) < 1000:
+            log(f"   ⚠️ Article too short ({len(article_text)} chars) — trying next")
         else:
             break  # Article is valid
         best = ranked[fetch_tries]
@@ -1345,12 +1347,27 @@ def main():
     elif image_url and best.get("image_url"):
         log(f"   🖼️ Using og:image (HD) over RSS thumbnail")
 
-    # 4. Generate slides — select viral pattern based on article content
+    # 4. Generate slides — retry on INSUFFICIENT SOURCE
     t0 = time.time()
-    pattern = _select_viral_pattern(best, article_text)
-    pattern_name = {'a': 'A (scandal)', 'b': 'B (paradox)', 'c': 'C (detail+emotion)'}[pattern]
-    log(f"   🎯 Viral pattern: {pattern_name}")
-    slides = generate_slides(article_text, url, hooks, cta_pattern, tone, pattern=pattern)
+    gen_tries = 0
+    while gen_tries < 3:
+        pattern = _select_viral_pattern(best, article_text)
+        pattern_name = {'a': 'A (scandal)', 'b': 'B (paradox)', 'c': 'C (detail+emotion)'}[pattern]
+        log(f"   🎯 Viral pattern: {pattern_name}")
+        slides = generate_slides(article_text, url, hooks, cta_pattern, tone, pattern=pattern)
+        if slides:
+            break
+        gen_tries += 1
+        # INSUFFICIENT SOURCE — try next article
+        if gen_tries < 3 and fetch_tries < len(ranked):
+            best = ranked[fetch_tries]
+            url = best["url"]
+            log(f"   ⚠️ INSUFFICIENT SOURCE — trying next article: {best['title'][:50]}")
+            article_text, image_url = fetch_article(url)
+            fetch_tries += 1
+            if len(article_text.strip()) < 1000:
+                log(f"   ⚠️ Next article too short ({len(article_text)} chars) — skip")
+                continue
     if not slides:
         print("❌ Pipeline: LLM generation failed", flush=True)
         sys.exit(1)
