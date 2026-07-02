@@ -90,6 +90,8 @@ class ThreadsPoster:
         """Step 1: create a media container. Returns creation_id."""
         # Normalize whitespace: Threads strips \n\n but keeps single \n
         text = re.sub(r'\n{2,}', '\n', text)
+        # Insert \n between sentences if not already separated
+        text = re.sub(r'(?<!Mr)(?<!Mrs)(?<!Ms)(?<!Dr)(?<!St)(?<!vs)(?<!Jr)(?<!Sr)(?<!Prof)([.?!])\s+(?=[A-Z])', r'\1\n', text)
         url = f"{GRAPH_API_BASE}/{self.user_id}/threads"
         params = {
             "text": text,
