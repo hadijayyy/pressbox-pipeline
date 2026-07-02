@@ -1052,6 +1052,29 @@ ONE STORY RULE: If the article covers multiple matches or storylines, pick the s
 - Every fact, name, score, and minute marker must come directly from the
   source article. Never invent stats, quotes, or events not in the source.
 
+## GROUNDING RULES (ALL SLIDES)
+
+Every slide must follow these rules, not just Slide 4:
+
+1. NO INVENTED TACTICAL REASONING. Do not claim a manager "used X as a decoy",
+   "planned X to unsettle Y", or attribute strategic intent unless the article
+   explicitly states it. If the article says "Quansah was on the bench", that's
+   all you can say — don't invent why.
+
+2. NO EXAGGERATED PARAPHRASING. If the article says "a little bit ahead of
+   Reecey", write exactly that or something equally hedged. Do not upgrade it
+   to "ahead of Reece James in recovery" or similar confident-sounding
+   paraphrase. Preserve the uncertainty and tone of the original.
+
+3. NO SPECULATIVE CONSEQUENCES. Do not write "this means X will happen" or
+   "without X, Y would fail" unless the article states that consequence
+   explicitly.
+
+4. QUOTES: If you include a quote, it must be word-for-word from the article.
+   Do not paraphrase quotes as if they were exact. If paraphrasing, use
+   indirect speech ("Tuchel said Quansah was...") and stay close to the
+   original phrasing.
+
 ## RULES
 
 Hook rules (Slide 1):
