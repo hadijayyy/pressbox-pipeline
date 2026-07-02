@@ -1006,132 +1006,86 @@ def _select_viral_pattern(topic, article_text):
     else:
         return "c"  # default to Pattern C (proven 500K+ views)
 
-def generate_slides(article_text, url, hooks="", cta_pattern="", tone="", pattern="a"):
+def generate_slides(article_text, url, title="", source="", hooks="", cta_pattern="", tone="", pattern="a"):
     """Call LLM to generate 6-slide thread. Returns parsed slides or None."""
     if not MISTRAL_KEY:
         log("❌ No MISTRAL_API_KEY — cannot generate")
         return None
 
-    system = """# PRESS BOX — SYSTEM PROMPT (RCTOR)
+    system = """# Football Drama Prompt v1.0 — International, Casual Audience
 
 ## ROLE
-You are a football content editor for @parkthebus.football, a Threads account
-known for sharp, story-driven football breakdowns. You turn news articles into
-6-slide carousels that make people stop scrolling and actually read to the end.
+You're a football content strategist running a Threads account focused on drama, controversy, and viral moments in international football. You write like a sharp fan who's always plugged in, not a sports journalist. Confident takes, zero corporate tone.
 
 ## CONTEXT
-Audience: football fans on Threads who scroll fast and skip generic recaps.
-They've already seen the scoreline elsewhere. Your job is to make them feel
-the moment, not re-read a headline. Input will be a football news article
-(match report, transfer news, or player/club storyline).
+Audience is casual football fans. They know big names and big clubs but don't track tactical minutiae or obscure league news. They want the story, the drama, and why it matters, explained fast. They scroll quick, short attention span, and respond to stakes and conflict more than stats.
+
+## ARTICLE
+Title: {title}
+Body: {body}
+Source: {source}
+
+## STORY SELECTION
+If the article covers more than one incident, controversy, or storyline, pick ONE to build the post around: most dramatic/high-stakes > most relevant to casual fans (big names/clubs > obscure ones) > most contradictory or shocking > most recent. Other storylines can get a one-sentence mention as context in slides 2-3, but don't develop them. One post = one story.
 
 ## TASK
-Convert the input article into exactly 6 slides, following this structure:
+6 slides:
+- **Slide 1 (Hook):** Max 2 sentences, <30 words. Lead with the conflict, the shock, or the stakes. Vary structure. Don't always open the same way:
+  - Bold claim/contradiction
+  - Direct quote or reaction paraphrased (never verbatim beyond a few words)
+  - "This just happened" urgency
+  - Rhetorical question that implies drama
+- **Slide 2-4 (Context/Story):** Max 3 sentences/slide, total <40 words/slide. One beat of the story per slide, must build linearly from the hook (not random facts). If you'd delete slide 3 and slide 4 still makes sense, it's connected properly.
+- **Slide 5 (Take):** Your read on it. Pick ONE angle: why this matters beyond the immediate drama / what it reveals about the club-player-manager dynamic / the most likely next move. Avoid generic hot takes ("this is crazy but not surprising").
+- **Slide 6 (Closing + CTA):** Wrap it up + invite comment/save/follow. One short question tied back to the hook.
 
-ONE STORY RULE: If the article covers multiple matches or storylines, pick the single strongest narrative and commit to it fully. Do not split attention across different games. The carousel must feel like one continuous arc, not a news roundup.
-
-1. HOOK. Stop-scroll opener. 1 sentence, under 30 words. Lead with tension or
-   stakes, not a recap.
-2. SETUP. The situation before the turning point. Max 3 sentences, roughly 40
-   words per sentence.
-3. TURN. The pivotal moment or incident. Max 3 sentences.
-4. DEEPEN. What this moment cost, risked, or changed. Must be grounded in
-   details the article explicitly states (for example, what a card means for
-   the next match, or how the team compensated). Max 3 sentences. Do not
-   speculate about player mindset, hidden motives, or future outcomes that
-   are not stated in the article.
-5. PAYOFF. The resolution, final score, or what actually happened. Max 3
-   sentences.
-6. CLOSE. A punchy takeaway or a question to drive comments. Max 2 sentences.
-
-## OUTPUT
-- Plain text, labeled "Slide 1" through "Slide 6"
-- No hashtags, no emojis unless natural to the story
-- No em dashes anywhere in the output. Use periods, commas, or separate
-  sentences instead.
-- Every fact, name, score, and minute marker must come directly from the
-  source article. Never invent stats, quotes, or events not in the source.
+## OUTPUT FORMAT
+Return ONLY valid JSON, no other text:
+{"slide_1":"", "slide_2":"", "slide_3":"", "slide_4":"", "slide_5":"", "slide_6":"", "caption":"", "hashtags":""}
+Caption: 1 punchy, provocative sentence. Zero emoji. Max 1 hashtag.
 
 ## GROUNDING RULES (ALL SLIDES)
+Every fact must come from the article. Never invent quotes, transfer fees, or incidents not confirmed in the source.
 
-Every slide must follow these rules, not just Slide 4:
+1. NO INVENTED TACTICAL REASONING. Do not claim a manager "used X as a decoy", "planned X to unsettle Y", or attribute strategic intent unless the article explicitly states it.
 
-1. NO INVENTED TACTICAL REASONING. Do not claim a manager "used X as a decoy",
-   "planned X to unsettle Y", or attribute strategic intent unless the article
-   explicitly states it. If the article says "Quansah was on the bench", that's
-   all you can say — don't invent why.
+2. NO EXAGGERATED PARAPHRASING. If the article says "a little bit ahead of Reecey", write exactly that or something equally hedged. Preserve the uncertainty and tone of the original.
 
-2. NO EXAGGERATED PARAPHRASING. If the article says "a little bit ahead of
-   Reecey", write exactly that or something equally hedged. Do not upgrade it
-   to "ahead of Reece James in recovery" or similar confident-sounding
-   paraphrase. Preserve the uncertainty and tone of the original.
+3. NO SPECULATIVE CONSEQUENCES. Do not write "this means X will happen" or "without X, Y would fail" unless the article states that consequence explicitly.
 
-3. NO SPECULATIVE CONSEQUENCES. Do not write "this means X will happen" or
-   "without X, Y would fail" unless the article states that consequence
-   explicitly.
+4. QUOTES: If you include a quote, it must be word-for-word from the article. If paraphrasing, use indirect speech and stay close to the original phrasing.
 
-4. QUOTES: If you include a quote, it must be word-for-word from the article.
-   Do not paraphrase quotes as if they were exact. If paraphrasing, use
-   indirect speech ("Tuchel said Quansah was...") and stay close to the
-   original phrasing.
+5. If it's a rumor/unconfirmed report, say so explicitly ("according to reports" / "still unconfirmed"). Don't present speculation as fact.
 
-## RULES
+## RULES (MANDATORY)
+1. No em dash; use commas, periods, or new sentences.
+2. Explain club/league context briefly if it's not globally famous. Don't assume tactical or regional knowledge.
+3. Avoid generic sports-blog phrasing ("in the world of football today", "fans everywhere are talking about").
+4. Max 1 stat/number per slide if used. Max 1 question per post (except hook/closing).
+5. Zero "link in bio." Never fabricate quotes.
+6. Don't sensationalize beyond what the source supports. Dramatic tone is fine, false urgency is not.
 
-Hook rules (Slide 1):
-- Under 30 words, 1 sentence
-- No "Breaking:" or generic scoreline openers
-- No "you've been warned", "beware", "watch out", or similar warning-addressing-other-teams hooks
-- Lead with irony, cost, or stakes
-
-DEEPEN rules (Slide 4), the highest hallucination-risk slide:
-* ONLY restate or reframe a fact the article already states in plain language
-* FORBIDDEN — do not write anything like these patterns:
-  - "risked a red card" / "could have been sent off" / "a booking would have meant..."
-  - "losing him would have left them..." / "without X they would have..."
-  - "down to ten men" / "chasing the game" / "rampant on the counter"
-  - Any sentence with "would have", "could have", "might have", "risked", "threatened"
-* If the article does not explicitly state what the spat/confrontation caused, Slide 4 should describe the emotional moment itself (e.g. "The same teammates who clashed moments earlier now had to find a way to work together")
+## BANNED PATTERNS
+Don't use: You won't believe... / In today's football world... / Sources say... (without specifying which) / This is a game-changer / Fans are furious (unless article shows actual fan reaction) / Shocking (used as a crutch word) / Insane (used as a crutch word) / Let that sink in / Say what you want, but... / you've been warned / beware / watch out
 
 ## WORKED EXAMPLE
 
-Source: Sky Sports match report. USA 2-0 Bosnia-Herzegovina, World Cup 2026
-Round of 32. Balogun scored in the 45th minute after a defensive error, then
-was sent off in the 64th minute for a reckless challenge on Muharemovic's
-ankle, confirmed by VAR review. USA held on with 10 men and Tillman scored a
-free kick in the 80th minute to make it 2-0. USA now face Belgium in Seattle
-in the last 16.
+Input: Sky Sports match report. USA 2-0 Bosnia-Herzegovina, World Cup 2026 Round of 32. Balogun scored in the 45th minute after a defensive error, then was sent off in the 64th minute for a reckless challenge on Muharemovic's ankle, confirmed by VAR review. USA held on with 10 men and Tillman scored a free kick in the 80th minute. USA now face Belgium in Seattle.
 
-Slide 1:
-He scored the goal that sent USA through, then got sent off before he could
-even celebrate the win.
+Output:
+{
+  "slide_1": "He scored the goal that sent USA through, then got sent off before he could even celebrate the win.",
+  "slide_2": "Balogun broke the deadlock in the 45th minute, pouncing on a defensive error from Stjepan Radeljic. It gave USA the lead right before half time in front of 68,827 fans at Levi's Stadium. Bosnia had shown nothing to suggest they'd find a way back.",
+  "slide_3": "On 62 minutes, Balogun caught Muharemovic's ankle in a challenge for a loose ball. Play continued at first, no card and no stoppage. Then VAR stepped in and sent the referee to the monitor.",
+  "slide_4": "The replay showed studs raking down Muharemovic's calf before turning his ankle. It was reckless enough that the referee had no real choice once he saw it back. USA were suddenly down a man with almost 30 minutes still to play.",
+  "slide_5": "Down to 10, USA didn't just hold on, they doubled the lead. Tillman's free kick sailed over the wall and beat Vasilj in the 80th minute. This is a squad that doesn't break under pressure, and that's the kind of mentality that goes deep in tournaments.",
+  "slide_6": "Ten men, one red card, zero goals conceded. Belgium is up next in Seattle. Would you trust USA to do that again?",
+  "caption": "He scored the winner and got sent off in the same game.",
+  "hashtags": "#USMNT"
+}"""
 
-Slide 2:
-Balogun broke the deadlock in the 45th minute, pouncing on a defensive error
-from Stjepan Radeljic. It gave USA the lead right before half time in front
-of 68,827 fans at Levi's Stadium. Bosnia had shown nothing to suggest they'd
-find a way back.
-
-Slide 3:
-On 62 minutes, Balogun caught Muharemovic's ankle in a challenge for a loose
-ball. Play continued at first, no card and no stoppage. Then VAR stepped in
-and sent the referee to the monitor.
-
-Slide 4:
-The replay showed studs raking down Muharemovic's calf before turning his
-ankle. It was reckless enough that the referee had no real choice once he
-saw it back. USA were suddenly down a man with almost 30 minutes still to
-play.
-
-Slide 5:
-Down to 10, USA didn't just hold on, they doubled the lead. Tillman's free
-kick sailed over the wall and beat Vasilj in the 80th minute. Final score,
-USA 2-0 Bosnia, and Bosnia finished the game with just 0.29 xG.
-
-Slide 6:
-Ten men, one red card, zero goals conceded. Belgium is up next in Seattle.
-Would you trust USA to do that again?"""
-
-    user = f"ARTICLE: {article_text[:8000]}\nSOURCE: {url}"
+    source_name = source or url.split("/")[2] if url else ""
+    user = f"Title: {title}\nBody: {article_text[:8000]}\nSource: {source_name}"
 
 
     for attempt in range(1, 4):
@@ -1166,28 +1120,44 @@ Would you trust USA to do that again?"""
                 continue
             # Clean thinking tags
             content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
-            content = re.sub(r"^```(?:text)?\s*", "", content)
+            content = re.sub(r"^```(?:json|text)?\s*", "", content)
             content = re.sub(r"\s*```$", "", content)
-            # Parse "Slide N:" format (plain text output)
-            # Strip bold markers that LLM sometimes adds
-            content = re.sub(r'\*\*Slide\s+(\d)\s*:\*\*', r'Slide \1:', content)
+            # Parse JSON output
             slides = []
-            slide_pattern = re.compile(r'(?:^|\n)\s*Slide\s+(\d)\s*:\s*\n(.*?)(?=\n\s*Slide\s+\d\s*:|\Z)', re.DOTALL | re.IGNORECASE)
-            for match in slide_pattern.finditer(content):
-                num = int(match.group(1))
-                text = match.group(2).strip()
-                if text and len(text) >= 20:
-                    slides.append({"title": f"S{num}", "content": text})
+            caption = ""
+            hashtags = ""
+            try:
+                data = json.loads(content)
+                for i in range(1, 7):
+                    key = f"slide_{i}"
+                    text = data.get(key, "").strip()
+                    if text and len(text) >= 10:
+                        # Post-process: clean formatting
+                        text = text.replace("—", " - ").replace("–", " - ")
+                        text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
+                        slides.append({"title": f"S{i}", "content": text})
+                caption = data.get("caption", "").strip()
+                hashtags = data.get("hashtags", "").strip()
+            except (json.JSONDecodeError, KeyError, TypeError) as e:
+                log(f"   ⚠️ JSON parse failed ({e}), trying plain text fallback")
+                # Fallback: try old "Slide N:" format
+                content = re.sub(r'\*\*Slide\s+(\d)\s*:\*\*', r'Slide \1:', content)
+                slide_pattern = re.compile(r'(?:^|\n)\s*Slide\s+(\d)\s*:\s*\n(.*?)(?=\n\s*Slide\s+\d\s*:|\Z)', re.DOTALL | re.IGNORECASE)
+                for match in slide_pattern.finditer(content):
+                    num = int(match.group(1))
+                    text = match.group(2).strip()
+                    if text and len(text) >= 20:
+                        text = text.replace("—", " - ").replace("–", " - ")
+                        text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
+                        slides.append({"title": f"S{num}", "content": text})
             if len(slides) < 3:
-                log(f"   ❌ Only {len(slides)} parseable slides (plain text format)")
+                log(f"   ❌ Only {len(slides)} parseable slides")
                 continue
-            # Post-process: clean formatting
-            for s in slides:
-                s["content"] = s["content"].replace("—", " - ").replace("–", " - ")
-                s["content"] = re.sub(r'\*\*(.+?)\*\*', r'\1', s["content"])
-                s["content"] = re.sub(r'\*(.+?)\*', r'\1', s["content"])
-                s["content"] = re.sub(r'  +', ' ', s["content"])
-                s["content"] = re.sub(r'([.!?])(\s+)([A-Z"])', r'\1\n\n\3', s["content"])
+            # Store caption/hashtags on slides for later use
+            if caption:
+                slides[0]["caption"] = caption
+            if hashtags:
+                slides[0]["hashtags"] = hashtags
             # Auto-trim slide 2-5 to max 3 sentences
             for i, s in enumerate(slides[:6]):
                 n = _count_sentences(s["content"])
@@ -1425,7 +1395,8 @@ def main():
     pattern = _select_viral_pattern(best, article_text)
     pattern_name = {'a': 'A (scandal)', 'b': 'B (paradox)', 'c': 'C (detail+emotion)'}[pattern]
     log(f"   🎯 Viral pattern: {pattern_name}")
-    slides = generate_slides(article_text, url, hooks, cta_pattern, tone, pattern=pattern)
+    hooks_str = ", ".join(hooks) if isinstance(hooks, list) else hooks
+    slides = generate_slides(article_text, url, title=best.get("title",""), source=best.get("source",""), hooks=hooks_str, cta_pattern=cta_pattern, tone=tone, pattern=pattern)
     if not slides:
         print("❌ Pipeline: LLM generation failed", flush=True)
         sys.exit(1)
@@ -1450,6 +1421,10 @@ def main():
         log(f"🔍 DRY RUN — {best['title']} ({len(slides)} slides)")
         for i, s in enumerate(slides):
             print(f"\n--- Slide {i+1} ({s['title']}) ---\n{s['content']}")
+        if slides and slides[0].get("caption"):
+            print(f"\n--- Caption ---\n{slides[0]['caption']}")
+        if slides and slides[0].get("hashtags"):
+            print(f"\n--- Hashtags ---\n{slides[0]['hashtags']}")
         print(f"\n✅ Dry run done in {total:.1f}s (LLM: {llm_time:.1f}s)")
         return
 
