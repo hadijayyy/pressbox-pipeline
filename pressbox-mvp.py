@@ -1039,10 +1039,11 @@ Hook rules (Slide 1):
 
 DEEPEN rules (Slide 4), the highest hallucination-risk slide:
 * Only state consequences or stakes the article itself explicitly mentions
+* Do NOT invent hypothetical scenarios (e.g. "a red card would have...", "if they lose him...")
 * Do NOT invent game-state changes (red cards, injuries, substitutions) unless the article states them
 * Do NOT invent tactical shifts (formation changes, "down to ten men", "rampant on the counter") unless the article states them
 * If the article does not explain what happens next, keep this slide about the emotional weight or the moment itself, not invented consequences
-* When in doubt, describe what happened in the moment (the clash, the separation, the reaction) rather than what it caused
+* When in doubt, describe what happened in the moment (the clash, the separation, the reaction) rather than what it caused or could have caused
 
 Insufficient source protocol: flag it, do not fabricate to fill the arc.
 
