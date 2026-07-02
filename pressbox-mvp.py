@@ -616,14 +616,26 @@ def _compute_score_tuning(posts, median_views):
     
     return tuning
 
-# Sensitive content filter
-_SENSITIVE = [
+# Sensitive content filter — use * as wildcard to catch variations
+_SENSITIVE_EXACT = [
     "breasts","boobs","topless","nude","naked","wardrobe malfunction",
     "rape","sexual assault","pedophilia","child abuse",
-    "charged with","convicted of","guilty of","domestic violence","murder","stabbing","shooting",
+    "charged with","convicted of","guilty of","domestic violence",
     "racist","racism","racial abuse","hate crime","antisemitic","islamophobia",
-    "genocide","ethnic cleansing","terrorism","bombing",
+    "genocide","ethnic cleansing","terrorism",
 ]
+_SENSITIVE_WILDCARD = [
+    "k*ll","de*th","m*rd*r","st*bb*ng","sh*ting","b*mb*ng","terr*rist","sl*ying","exec*ting",
+]
+
+import fnmatch as _fnmatch
+def _match_sensitive(text):
+    tl = text.lower()
+    for kw in _SENSITIVE_EXACT:
+        if kw in tl: return True
+    for pat in _SENSITIVE_WILDCARD:
+        if _fnmatch.fnmatch(tl, f"*{pat}*"): return True
+    return False
 _TV_GUIDE = ["tv channel","live stream","kick-off time","kickoff time",
              "how to watch","where to watch","what channel","start time","stream online"]
 _COMMERCIAL = ["snap up","buy now","deal","discount","shop","price drop","sale","coupon","voucher",
@@ -675,7 +687,7 @@ def filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_su
         # Filter out live commentary pages (skysports.com/.../live/...)
         if '/live/' in url: continue
         # Sensitive content
-        if any(kw in tl or kw in desc for kw in _SENSITIVE): continue
+        if _match_sensitive(tl) or _match_sensitive(desc): continue
         # Dedup
         if url in posted_urls: continue
         threshold = 0.50 if relaxed else 0.35
