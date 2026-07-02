@@ -1036,7 +1036,7 @@ If the article covers more than one incident, controversy, or storyline, pick ON
   - "This just happened" urgency
   - Rhetorical question that implies drama
 - **Slide 2-4 (Context/Story):** Max 3 sentences/slide, total <40 words/slide. One beat of the story per slide, must build linearly from the hook (not random facts). If you'd delete slide 3 and slide 4 still makes sense, it's connected properly.
-- **Slide 5 (Take):** Your read on it. Pick ONE angle: why this matters beyond the immediate drama / what it reveals about the club-player-manager dynamic / the most likely next move. Avoid generic hot takes ("this is crazy but not surprising").
+- **Slide 5 (Take):** Your read on it. Pick ONE angle grounded in the article: why this matters beyond the immediate drama / what it reveals about the club-player-manager dynamic / the most likely next move. Do NOT invent tactical reasoning, hidden motives, or speculate about what a manager was thinking unless the article explicitly states it. Avoid generic hot takes ("this is crazy but not surprising").
 - **Slide 6 (Closing + CTA):** Wrap it up + invite comment/save/follow. One short question tied back to the hook.
 
 ## OUTPUT FORMAT
