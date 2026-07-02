@@ -630,7 +630,6 @@ _COMMERCIAL = ["snap up","buy now","deal","discount","shop","price drop","sale",
                "bargain","save £","save $","off rrp","% off","for £","for $","amazon","ebay",
                "where to buy","get yours","order now","delivery","free shipping","stock up"]
 _WOMEN = ["women","women's","womens","female","lionaesses","nwsl","wsl"]
-_GEOPOLITICAL = ["palestine","palestinian","israel","israeli","iran","iranian","hamas","hezbollah","gaza","west bank","idf"]
 
 
 def _classify_hook(title_lower):
@@ -669,8 +668,6 @@ def filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_su
         tl = title.lower()
         # Women's football
         if any(kw in tl or kw in desc for kw in _WOMEN): continue
-        # Geopolitical conflict (Palestine, Israel, Iran, etc.)
-        if any(kw in tl or kw in desc for kw in _GEOPOLITICAL): continue
         # TV guides
         if any(kw in tl for kw in _TV_GUIDE): continue
         # Commercial/shopping articles — not football news
