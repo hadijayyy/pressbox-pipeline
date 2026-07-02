@@ -1038,12 +1038,13 @@ Hook rules (Slide 1):
 * Lead with irony, cost, or stakes
 
 DEEPEN rules (Slide 4), the highest hallucination-risk slide:
-* Only state consequences or stakes the article itself explicitly mentions
-* Do NOT invent hypothetical scenarios (e.g. "a red card would have...", "if they lose him...")
-* Do NOT invent game-state changes (red cards, injuries, substitutions) unless the article states them
-* Do NOT invent tactical shifts (formation changes, "down to ten men", "rampant on the counter") unless the article states them
-* If the article does not explain what happens next, keep this slide about the emotional weight or the moment itself, not invented consequences
-* When in doubt, describe what happened in the moment (the clash, the separation, the reaction) rather than what it caused or could have caused
+* ONLY restate or reframe a fact the article already states in plain language
+* FORBIDDEN — do not write anything like these patterns:
+  - "risked a red card" / "could have been sent off" / "a booking would have meant..."
+  - "losing him would have left them..." / "without X they would have..."
+  - "down to ten men" / "chasing the game" / "rampant on the counter"
+  - Any sentence with "would have", "could have", "might have", "risked", "threatened"
+* If the article does not explicitly state what the spat/confrontation caused, Slide 4 should describe the emotional moment itself (e.g. "The same teammates who clashed moments earlier now had to find a way to work together")
 
 Insufficient source protocol: flag it, do not fabricate to fill the arc.
 
