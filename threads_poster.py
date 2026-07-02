@@ -37,6 +37,7 @@ Usage:
 from __future__ import annotations
 
 import logging
+import re
 import time
 from dataclasses import dataclass
 from typing import Optional
@@ -87,6 +88,8 @@ class ThreadsPoster:
         image_url: Optional[str] = None,
     ) -> str:
         """Step 1: create a media container. Returns creation_id."""
+        # Normalize whitespace: Threads strips \n\n but keeps single \n
+        text = re.sub(r'\n{2,}', '\n', text)
         url = f"{GRAPH_API_BASE}/{self.user_id}/threads"
         params = {
             "text": text,
