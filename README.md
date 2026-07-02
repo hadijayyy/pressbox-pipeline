@@ -2,7 +2,7 @@
 
 Automated football content pipeline for [@parkthebus.football](https://www.threads.net/@parkthebus.football) on Threads.
 
-Scrapes football news from 5 sources, detects hot/viral topics via entity clustering, scores with a multi-layered engine (keyword + context-aware bonuses + soft cap), verifies article body quality, generates 6-slide carousels via LLM, and posts hourly with HD images — fully automated with engagement feedback loop.
+Scrapes football news from 5 sources, detects hot/viral topics via entity clustering, scores with a multi-layered engine, generates 6-slide carousels via LLM with anti-hallucination grounding, and posts hourly with HD images — fully automated with engagement feedback loop.
 
 ## How It Works
 
@@ -20,12 +20,13 @@ Scrapes football news from 5 sources, detects hot/viral topics via entity cluste
 │  4. SCORE           12-component engine + context-aware      │
 │                     bonuses + soft cap + auto-tuning         │
 │       ↓                                                      │
-│  5. VERIFY          Body check: football signals ≥ 2,       │
-│                     commercial signals < 2. Tries top 3.    │
+│  5. VERIFY          Article: 1000+ chars, 150+ words,       │
+│                     8+ unique sentences. Tries top 5.       │
 │       ↓                                                      │
 │  6. FETCH           Extract full article text + og:image HD  │
 │       ↓                                                      │
-│  7. GENERATE        Mistral LLM → 6-slide carousel          │
+│  7. GENERATE        Mistral LLM → JSON with 6 slides +      │
+│                     caption + hashtags                       │
 │       ↓                                                      │
 │  8. POST            Threads API (chained thread + image)     │
 │       ↓                                                      │
@@ -34,7 +35,7 @@ Scrapes football news from 5 sources, detects hot/viral topics via entity cluste
 │ 10. NOTIFY          @Szejay_bot (4-line format)              │
 └──────────────────────────────────────────────────────────────┘
 
-Cron: every hour (0 * * * *), watchdog at :15 re-runs if stale.
+Cron: every hour (skip 6, 8, 15, 21-22 WIB), watchdog at :15.
 ```
 
 ## Content Filters
@@ -46,7 +47,8 @@ Cron: every hour (0 * * * *), watchdog at :15 re-runs if stale.
 | `_SENSITIVE` | "charged with murder", "arrested", "domestic violence" |
 | `_WOMEN` | Lionesses, NWLS, women's football |
 | `/live/` URLs | Live commentary pages (not articles) |
-| Body verification | Article must have football signals (≥2) and no commercial intent (<2) |
+| Length gate | Article must be 1000+ chars, 150+ words, 8+ unique sentences |
+| Body verification | Football signals ≥ 2, commercial signals < 2 |
 
 ## Scoring System
 
@@ -133,27 +135,57 @@ Accent normalization: `Mbappé` → `mbappe` via `unicodedata` so French/Spanish
 
 ## Content Format
 
-6-slide Threads carousel. Conversational football fan tone.
+6-slide Threads carousel. Football Drama Prompt v1.0 — casual audience, drama-first tone.
 
 | Slide | Role |
 |-------|------|
-| 1 | **THE HOOK** — curiosity gap > controversy > conflict (with HD image) |
-| 2 | **THE CONTEXT** — why fans should care |
-| 3 | **THE CORE FACT/STAT** — most shocking stat |
-| 4 | **THE IMPACT** — ripple effect on team/league |
-| 5 | **THE VERDICT** — sharp, definitive take |
-| 6 | **THE CTA** — debate question + source URL (auto-appended) |
+| 1 | **Hook** — conflict, shock, or stakes (with HD image) |
+| 2 | **Story Beat** — setup/context |
+| 3 | **Story Beat** — turning point |
+| 4 | **Story Beat** — cost/consequence |
+| 5 | **Take** — grounded opinion/analysis |
+| 6 | **Closing + CTA** — question + source URL |
 
-### Viral Hook Patterns (75K+ views proven)
+Plus: **caption** (1 provocative sentence) + **hashtags** (max 1).
 
-**Pattern A** — "Nobody's talking about":
+### Anti-Hallucination Grounding
+
+All slides follow these rules:
+
+1. **No invented tactical reasoning** — don't attribute strategic intent unless article states it
+2. **No exaggerated paraphrasing** — preserve uncertainty and tone of original
+3. **No speculative consequences** — only state consequences the article mentions
+4. **Quotes must be exact** — word-for-word, or clearly marked as indirect speech
+5. **Rumors flagged** — "according to reports" / "still unconfirmed" when applicable
+
+### One Story Rule
+
+If the article covers multiple matches/storylines, pick ONE. No roundup carousels.
+
+### Banned Patterns
+
 ```
-X just became the first Y to do Z after [stat] — and nobody's talking about [scandal].
+You won't believe... | In today's football world... | Sources say...
+This is a game-changer | Fans are furious | Shocking | Insane
+Let that sink in | Say what you want, but... | you've been warned
+beware | watch out | Breaking: (generic scoreline openers)
 ```
 
-**Pattern B** — "While + Warning":
-```
-X just became the first Y in [tournament] history to [achievement] — while [paradox]. [Big team], you've been warned.
+## Output Format
+
+LLM returns JSON (with plain text fallback):
+
+```json
+{
+  "slide_1": "...",
+  "slide_2": "...",
+  "slide_3": "...",
+  "slide_4": "...",
+  "slide_5": "...",
+  "slide_6": "...",
+  "caption": "...",
+  "hashtags": "#..."
+}
 ```
 
 ## Engagement Feedback Loop
@@ -192,11 +224,11 @@ Feedback delay: ~12–24 hours (post → collect metrics → next run uses real 
 
 | Job | Schedule | Behavior |
 |-----|----------|----------|
-| Pressbox MVP | `0 * * * *` | Scrape → score → verify → generate → post |
-| Pressbox Watchdog | `15 * * * *` | Re-runs pipeline if stale |
+| Pressbox MVP | `0 0-5,7,9-14,16-20,23 * * *` | Scrape → score → verify → generate → post |
+| Pressbox Watchdog | `15 0-5,7,9-14,16-20,23 * * *` | Re-runs pipeline if stale |
 | Daily Report | `0 8 * * *` | Engagement summary → @Szejay_bot |
 | Clean Cache | `0 5 * * *` | Purge expired entries |
-| Auto-Tuning | Per-run | ML adjusts multipliers from 181+ posts |
+| Auto-Tuning | Per-run | ML adjusts multipliers from 180+ posts |
 
 ## Setup
 
