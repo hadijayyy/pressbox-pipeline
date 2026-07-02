@@ -1006,96 +1006,64 @@ def _select_viral_pattern(topic, article_text):
         return "c"  # default to Pattern C (proven 500K+ views)
 
 def generate_slides(article_text, url, hooks="", cta_pattern="", tone="", pattern="a"):
-    """Call LLM to generate 6-slide thread. Returns parsed slides or None."""
+    """Call LLM to generate 6-slide thread. Returns parsed slides or None.
+    Uses RCTOR prompt with INSUFFICIENT SOURCE protocol."""
     if not MISTRAL_KEY:
         log("❌ No MISTRAL_API_KEY — cannot generate")
         return None
 
-    # Build dynamic sections
-    extra = ""
-    if hooks: extra += f"\n- PREFERRED HOOKS: {', '.join(hooks[:3])}"
-    if cta_pattern: extra += f"\n- CTA PATTERN: {cta_pattern}"
-    if tone: extra += f"\n- TONE: {tone}"
+    system = """You are a football content editor for @parkthebus.football, a Threads account known for sharp, story-driven football breakdowns. You turn news articles into 6-slide carousels that make people stop scrolling and actually read to the end.
 
-    # Force the selected pattern — explicit instruction
-    if pattern == "a":
-        extra += "\n- MANDATORY PATTERN: Use Pattern A (\"Nobody's talking about\"). Find a hidden scandal, real reason, or controversy in the article. If no scandal exists, create tension by contrasting public perception vs reality."
-        pattern_hint = "Pattern A"
-    else:
-        extra += "\n- MANDATORY PATTERN: Use Pattern C (\"Specific Detail + Emotional Weight\"). Find the most specific number/amount and pair it with the human consequence. Lead with the concrete detail, follow with the emotional impact.\nStructure: [Specific amount/detail] + [Human consequence]\nExamples:\n- \"FIFA will pay nearly half a million pounds for one tackle. Ismael Kone's broken leg carries a huge price tag.\"\n- \"$15,000 Visa Fee. 40 Years of Tears. Cape Verde's hero was in tears after a historic draw. But his mother couldn't be there due to a cruel visa rule.\""
-        pattern_hint = "Pattern C"
+Audience: football fans on Threads who scroll fast and skip generic recaps. They have already seen the scoreline elsewhere. Your job is to make them feel the moment, not re-read a headline.
 
-    system = f"""You are an elite football content creator writing Threads carousels. Voice: conversational, witty, deeply relatable to die-hard fans. Use casual football slang ("cooked", "benched", "tactical masterclass") to simplify jargon. Never dry or journalistic.
+Convert the input article into exactly 6 slides, following this structure:
 
-OUTPUT: 6-slide narrative arc — tension → revelation → payoff. Not a listicle, not a recap.
+1. HOOK. Stop-scroll opener. 2 sentences, under 30 words. Lead with tension or stakes, not a recap.
+2. SETUP. The situation before the turning point. Max 3 sentences, roughly 40 words per sentence.
+3. TURN. The pivotal moment or incident. Max 3 sentences.
+4. DEEPEN. What this moment cost, risked, or changed. Must be grounded in details the article explicitly states (for example, what a card means for the next match, or how the team compensated). Max 3 sentences. Do not speculate about player mindset, hidden motives, or future outcomes that are not stated in the article.
+5. PAYOFF. The resolution, final score, or what actually happened. Max 3 sentences.
+6. CLOSE. A punchy takeaway or a question to drive comments. Max 2 sentences.
 
-[FORMAT — applies to all slides]
-- Prose only, no bullets/lists
-- English, conversational and punchy
-- Em-dash (—) for drama/emphasis, e.g. "He scored 40 goals — nobody remembers his name."
-- Vary rhythm: mix short punchy sentences with longer ones. No slide should read at the same cadence as the last.
-- Word count is the hard constraint per slide (below). Sentence count is flexible as long as word count and vibe are hit — do not let a "4 sentence max" instinct override the word budget.
+OUTPUT RULES:
+* Plain text, labeled "Slide 1" through "Slide 6"
+* No hashtags, no emojis unless natural to the story
+* No em dashes anywhere in the output. Use periods, commas, or separate sentences instead.
+* Every fact, name, score, and minute marker must come directly from the source article. Never invent stats, quotes, or events not in the source.
+* If the source lacks enough material for a real 6-slide arc (for example a 100-word brief with no real turning point), output only this line: "INSUFFICIENT SOURCE. Only enough for [X] slides. Suggest merging with another story or running as a single-slide post." Do not pad with invented details to force 6 slides.
 
-SLIDE 1 — HOOK (≤30 words, hard limit)
-Pick exactly ONE pattern based on what the article actually supports:
+Hook rules (Slide 1):
+* Under 30 words, 1 sentence
+* No "Breaking:" or generic scoreline openers
+* Lead with irony, cost, or stakes
 
-→ Pattern A ("Hidden Angle"): use ONLY if the article states a fact that would NOT appear in a headline or lead sentence — a buried reason, cause, or detail.
-  Structure: "X just became the first Y to do Z after [stat] — and the real reason is [fact from article]."
-  The "real reason" must be explicitly stated in the article body. Never invented, never inferred.
+DEEPEN rules (Slide 4), the highest hallucination-risk slide:
+* Only state consequences or stakes the article itself mentions
+* If the article does not explain what happens next, keep this slide about the in-game impact only (for example playing short-handed), not off-pitch speculation
 
-→ Pattern C ("Specific Detail + Emotional Weight"): default pattern for most articles — proven top performer (500K+ views).
-  Structure: [Concrete number/amount] + [Human consequence]
-  Examples:
-  - "FIFA will pay nearly half a million pounds for one tackle. Ismael Kone's broken leg carries a huge price tag."
-  - "$15,000 Visa Fee. 40 Years of Tears. Cape Verde's hero cried after a historic draw — his mother couldn't be there."
-  - "Mohamed Salah and his teammates were denied entry to Seattle after a 3-1 win. Now the squad scrambles to reach their next match."
+Insufficient source protocol: flag it, do not fabricate to fill the arc.
 
-DEFAULT TO PATTERN C. Only switch to Pattern A if there's a clear hidden-fact angle Pattern C can't capture. If neither fits cleanly, still use Pattern C — it's the fallback.
+Output format:
+Slide 1:
+[text]
 
-Never use "nobody's talking about" unless (a) you're in Pattern A and (b) the topic involves a name/event 90%+ of fans would recognize.
+Slide 2:
+[text]
 
-Hook must invite replies, not just views — favor implicit debate ("worst decision in years?") over flat statements when the article supports it.
+Slide 3:
+[text]
 
-SLIDE 2 — CONTEXT (40-60 words)
-Connect hook to the actual news. Why should fans care right now.
+Slide 4:
+[text]
 
-SLIDE 3 — CORE FACT/STAT (40-60 words)
-The most shocking stat, fee, or tactical change, broken down simply. End on an unresolved question.
+Slide 5:
+[text]
 
-SLIDE 4 — IMPACT (40-60 words)
-Ripple effect: lineup, rivals, upcoming season.
-
-SLIDE 5 — VERDICT (30-50 words)
-Sharp, definitive, emotionally weighted — not generic analysis. Must be fully supported by article facts. Leave room for debate.
-
-SLIDE 6 — CTA (30-40 words)
-Open-ended question forcing an opinion — not "What do you think?" but "Is this the worst decision?" / "Can they survive this?"
-Must relate directly to what the article discusses. No URLs (appended automatically).
-
-[GROUNDING — STRICT, ZERO TOLERANCE]
-- Ages, numbers, dates, scores, quotes: verbatim from article only. If unstated, do not guess or invent.
-- Match article tone exactly — "late challenge" ≠ "premeditated lunge."
-- Only discuss outcomes the article states. Never invent future scenarios (suspensions, transfers, etc.).
-- If unsure whether a detail is explicitly stated, omit it or keep it vague. Do not infer or calculate (e.g. don't derive age from birth year unless age itself is stated).
-- Slide 5 verdict and Slide 6 question must be traceable to specific article content.
-- Reject the article only if it contains zero usable facts for this format.
-
-[RUNTIME OVERRIDES]
-If PREFERRED_HOOKS, CTA_PATTERN, or TONE values are provided in the user message, they override the default style choices in Slide 1 and Slide 6 respectively. If absent, use the defaults above.
-
-Output strict JSON, no markdown fences, no preamble:
-{{"slide_1":"","slide_2":"","slide_3":"","slide_4":"","slide_5":"","slide_6":""}}
-{extra}"""
-
-
+Slide 6:
+[text]"""
 
     user = f"ARTICLE: {article_text[:8000]}\nSOURCE: {url}"
-    if hooks:
-        user += f"\nPREFERRED_HOOKS: {', '.join(hooks[:3])}"
-    if cta_pattern:
-        user += f"\nCTA_PATTERN: {cta_pattern}"
-    if tone:
-        user += f"\nTONE: {tone}"
+
 
     for attempt in range(1, 4):
         log(f"   LLM attempt {attempt}/3...")
@@ -1123,92 +1091,48 @@ Output strict JSON, no markdown fences, no preamble:
                     delta = chunk.get("choices",[{}])[0].get("delta",{})
                     if delta.get("content"): parts.append(delta["content"])
                 except: continue
-
             content = "".join(parts).strip()
             if not content:
                 log("   ❌ Empty response")
                 continue
-
-            # Extract JSON
-            candidate = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
-            candidate = re.sub(r"^```(?:json)?\s*", "", candidate)
-            candidate = re.sub(r"\s*```$", "", candidate)
-            # Mustache braces (Mistral quirk)
-            if candidate.startswith("{{"):
-                candidate = candidate.replace("{{","{").replace("}}","}")
-            # Trailing brace fix
-            missing = candidate.count('{') - candidate.count('}')
-            if missing > 0: candidate += '}' * missing
-
-            try:
-                data = json.JSONDecoder().raw_decode(candidate.lstrip())[0]
-            except json.JSONDecodeError:
-                log("   ❌ JSON parse failed")
-                continue
-
-            if "error" in data:
-                log(f"   ⚠️ LLM rejected: {data.get('reason','')}")
+            # Clean thinking tags
+            content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+            content = re.sub(r"^```(?:text)?\s*", "", content)
+            content = re.sub(r"\s*```$", "", content)
+            # INSUFFICIENT SOURCE check
+            if "INSUFFICIENT SOURCE" in content.upper():
+                log(f"   ⚠️ INSUFFICIENT SOURCE: {content[:200]}")
                 return None
-
-            # Parse slides
+            # Parse "Slide N:" format (plain text output)
             slides = []
-            if "slides" in data and isinstance(data["slides"], list):
-                for i, s in enumerate(data["slides"][:6]):
-                    if isinstance(s, dict):
-                        slides.append({"title":s.get("title",f"S{i+1}"), "content":(s.get("content") or "").strip()})
-                    elif isinstance(s, str):
-                        slides.append({"title":f"S{i+1}", "content":s.strip()})
-            else:
-                for i in range(1,7):
-                    s = data.get(f"slide_{i}", {})
-                    if isinstance(s, dict) and s.get("content","").strip():
-                        slides.append({"title":s.get("title",f"S{i}"), "content":s["content"].strip()})
-                    elif isinstance(s, str) and s.strip():
-                        slides.append({"title":f"S{i}", "content":s.strip()})
-
+            slide_pattern = re.compile(r'(?:^|\n)\s*Slide\s+(\d)\s*:\s*\n(.*?)(?=\n\s*Slide\s+\d\s*:|\Z)', re.DOTALL | re.IGNORECASE)
+            for match in slide_pattern.finditer(content):
+                num = int(match.group(1))
+                text = match.group(2).strip()
+                if text and len(text) >= 20:
+                    slides.append({"title": f"S{num}", "content": text})
             if len(slides) < 3:
-                log(f"   ❌ Only {len(slides)} usable slides")
+                log(f"   ❌ Only {len(slides)} parseable slides (plain text format)")
                 continue
-
-            # Reject slides that are too short (< 30 chars)
-            slides = [s for s in slides if len(s["content"]) >= 30]
-            if len(slides) < 3:
-                log(f"   ❌ Only {len(slides)} slides after min-length filter")
-                continue
-
-            # Auto-trim: sentence count + char cap
-            for i, s in enumerate(slides[:6]):
-                n = _count_sentences(s["content"])
-                mn, mx = SENTENCE_COUNTS.get(i+1, (2,4))
-                if n > mx:
-                    parts = re.split(r'(?<=[.!?])\s+', s["content"].strip())
-                    trimmed = [p for p in parts if len(p.strip())>5][:mx]
-                    s["content"] = " ".join(trimmed)
-                if len(s["content"]) > MAX_CHARS:
-                    txt = s["content"][:MAX_CHARS]
-                    lp = max(txt.rfind(". "), txt.rfind("! "), txt.rfind("? "))
-                    s["content"] = txt[:lp+1] if lp > 50 else txt.rstrip()+"..."
-
-            # Strip Markdown formatting
+            # Post-process: clean formatting
             for s in slides:
+                s["content"] = s["content"].replace("—", " - ").replace("–", " - ")
                 s["content"] = re.sub(r'\*\*(.+?)\*\*', r'\1', s["content"])
                 s["content"] = re.sub(r'\*(.+?)\*', r'\1', s["content"])
-                s["content"] = s["content"].replace("—"," - ").replace("–"," - ")
                 s["content"] = re.sub(r'  +', ' ', s["content"])
-                # Enforce blank line after every sentence
                 s["content"] = re.sub(r'([.!?])(\s+)([A-Z"])', r'\1\n\n\3', s["content"])
-
-            # Guarantee source URL on last slide (deduplicate if LLM already included it)
+            # Auto-trim slide 2-5 to max 3 sentences
+            for i, s in enumerate(slides[:6]):
+                n = _count_sentences(s["content"])
+                if n > 3 and i not in (0, 5):
+                    parts = re.split(r'(?<=[.!?])\s+', s["content"].strip())
+                    s["content"] = " ".join(parts[:3])
+            # Source URL on last slide
             last = slides[-1]["content"]
-            url_base = url.split("?")[0].rstrip("/")  # normalize for fuzzy match
+            url_base = url.split("?")[0].rstrip("/")
             if url_base not in last and url not in last:
                 slides[-1]["content"] = last.rstrip() + "\n\n" + url
-            elif last.count(url) > 1:
-                # LLM repeated URL — remove duplicates
-                slides[-1]["content"] = last.replace(url, "", last.count(url) - 1).strip()
-
             return slides
-
         except Exception as e:
             log(f"   ❌ LLM exception: {e}")
             continue
