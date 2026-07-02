@@ -1006,8 +1006,7 @@ def _select_viral_pattern(topic, article_text):
         return "c"  # default to Pattern C (proven 500K+ views)
 
 def generate_slides(article_text, url, hooks="", cta_pattern="", tone="", pattern="a"):
-    """Call LLM to generate 6-slide thread. Returns parsed slides or None.
-    Uses RCTOR prompt with INSUFFICIENT SOURCE protocol."""
+    """Call LLM to generate 6-slide thread. Returns parsed slides or None."""
     if not MISTRAL_KEY:
         log("❌ No MISTRAL_API_KEY — cannot generate")
         return None
@@ -1030,7 +1029,6 @@ OUTPUT RULES:
 * No hashtags, no emojis unless natural to the story
 * No em dashes anywhere in the output. Use periods, commas, or separate sentences instead.
 * Every fact, name, score, and minute marker must come directly from the source article. Never invent stats, quotes, or events not in the source.
-* If the source lacks enough material for a real 6-slide arc (for example a 100-word brief with no real turning point), output only this line: "INSUFFICIENT SOURCE. Only enough for [X] slides. Suggest merging with another story or running as a single-slide post." Do not pad with invented details to force 6 slides.
 
 Hook rules (Slide 1):
 * Under 30 words, 1 sentence
@@ -1104,10 +1102,6 @@ Slide 6:
             content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
             content = re.sub(r"^```(?:text)?\s*", "", content)
             content = re.sub(r"\s*```$", "", content)
-            # INSUFFICIENT SOURCE check
-            if "INSUFFICIENT SOURCE" in content.upper():
-                log(f"   ⚠️ INSUFFICIENT SOURCE: {content[:200]}")
-                return None
             # Parse "Slide N:" format (plain text output)
             slides = []
             slide_pattern = re.compile(r'(?:^|\n)\s*Slide\s+(\d)\s*:\s*\n(.*?)(?=\n\s*Slide\s+\d\s*:|\Z)', re.DOTALL | re.IGNORECASE)
@@ -1358,27 +1352,12 @@ def main():
     elif image_url and best.get("image_url"):
         log(f"   🖼️ Using og:image (HD) over RSS thumbnail")
 
-    # 4. Generate slides — retry on INSUFFICIENT SOURCE
+    # 4. Generate slides
     t0 = time.time()
-    gen_tries = 0
-    while gen_tries < 3:
-        pattern = _select_viral_pattern(best, article_text)
-        pattern_name = {'a': 'A (scandal)', 'b': 'B (paradox)', 'c': 'C (detail+emotion)'}[pattern]
-        log(f"   🎯 Viral pattern: {pattern_name}")
-        slides = generate_slides(article_text, url, hooks, cta_pattern, tone, pattern=pattern)
-        if slides:
-            break
-        gen_tries += 1
-        # INSUFFICIENT SOURCE — try next article
-        if gen_tries < 3 and fetch_tries < len(ranked):
-            best = ranked[fetch_tries]
-            url = best["url"]
-            log(f"   ⚠️ INSUFFICIENT SOURCE — trying next article: {best['title'][:50]}")
-            article_text, image_url = fetch_article(url)
-            fetch_tries += 1
-            if len(article_text.strip()) < 1000 or len(article_text.split()) < 150:
-                log(f"   ⚠️ Next article too short/thin ({len(article_text)} chars, {len(article_text.split())} words) — skip")
-                continue
+    pattern = _select_viral_pattern(best, article_text)
+    pattern_name = {'a': 'A (scandal)', 'b': 'B (paradox)', 'c': 'C (detail+emotion)'}[pattern]
+    log(f"   🎯 Viral pattern: {pattern_name}")
+    slides = generate_slides(article_text, url, hooks, cta_pattern, tone, pattern=pattern)
     if not slides:
         print("❌ Pipeline: LLM generation failed", flush=True)
         sys.exit(1)
