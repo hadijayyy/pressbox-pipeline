@@ -1344,6 +1344,12 @@ def main():
         log(f"   ⚠️ Article too thin ({word_count} words < 150 min). Skipping LLM.")
         print(f"❌ Pipeline: article too thin for carousel ({word_count} words)", flush=True)
         sys.exit(1)
+    # Sentence count filter — catches boilerplate-inflated articles
+    sentences = [s.strip() for s in re.split(r'[.!?]+', article_text) if len(s.strip()) > 20]
+    if len(sentences) < 8:
+        log(f"   ⚠️ Article too few sentences ({len(sentences)} < 8 min). Skipping LLM.")
+        print(f"❌ Pipeline: article too few sentences ({len(sentences)})", flush=True)
+        sys.exit(1)
 
     # Image priority: og:image (1200px) > RSS thumbnail (240px)
     if not image_url and best.get("image_url"):
