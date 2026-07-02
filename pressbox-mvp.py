@@ -1328,8 +1328,8 @@ def main():
         print("❌ Pipeline: all articles are commercial, not football news", flush=True)
         sys.exit(1)
     log(f"   Article: {len(article_text)} chars, image: {'yes' if image_url else 'no'}")
-    if len(article_text.strip()) < 500:
-        log(f"   ⚠️ Article too short ({len(article_text)} chars < 500 min). Skipping LLM.")
+    if len(article_text.strip()) < 1000:
+        log(f"   ⚠️ Article too short ({len(article_text)} chars < 1000 min). Skipping LLM.")
         print(f"❌ Pipeline: article too short for carousel ({len(article_text)} chars)", flush=True)
         sys.exit(1)
 
