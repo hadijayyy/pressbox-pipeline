@@ -1396,12 +1396,12 @@ def main():
     if not hot_candidates:
         log("❌ No hot/viral topics — all candidates have hotness=0. Skipping this run.")
         print("⏸️ Skip — no hot/viral topics in this run", flush=True)
-        sys.exit(0)
+        sys.exit(1)
     best = hot_candidates[0]
     if best["_score"] < 40:
         log(f"   ⏸️ Best score {best['_score']} < 40 threshold — skipping")
         print(f"⏸️ Skip — best topic score {best['_score']} below threshold", flush=True)
-        sys.exit(0)
+        sys.exit(1)
     log(f"   🏆 Best: {best['title']} (score={best['_score']}, type={best.get('_topic_type','')})")
 
     # 3. Fetch article — try top 3 topics, verify body is football news
@@ -1503,7 +1503,7 @@ def main():
     if eval_decision == "REJECT":
         log(f"   🚫 Evaluator REJECTED — not posting. Reasons: {'; '.join(eval_reasons)}")
         print(f"🚫 Evaluator rejected: {'; '.join(eval_reasons[:2])}", flush=True)
-        sys.exit(0)
+        sys.exit(1)
 
     # 6. DRY RUN or POST
     total = time.time() - START
