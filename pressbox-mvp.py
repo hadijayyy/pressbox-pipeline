@@ -1391,13 +1391,8 @@ def main():
         print("❌ Pipeline: all topics filtered out", flush=True)
         sys.exit(1)
 
-    # HARD GATE: Only post hot/viral topics — must have hotness > 0 from clustering
-    hot_candidates = [t for t in ranked if hotness.get(t["url"], 0) > 0]
-    if not hot_candidates:
-        log("❌ No hot/viral topics — all candidates have hotness=0. Skipping this run.")
-        print("⏸️ Skip — no hot/viral topics in this run", flush=True)
-        sys.exit(1)
-    best = hot_candidates[0]
+    # Score gate only — hotness boosts ranking but not required
+    best = ranked[0]
     if best["_score"] < 40:
         log(f"   ⏸️ Best score {best['_score']} < 40 threshold — skipping")
         print(f"⏸️ Skip — best topic score {best['_score']} below threshold", flush=True)
