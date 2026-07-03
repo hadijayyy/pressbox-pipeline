@@ -1097,16 +1097,35 @@ Source: {source}
 ## STORY SELECTION
 If the article covers more than one incident, controversy, or storyline, pick ONE to build the post around: most dramatic/high-stakes > most relevant to casual fans (big names/clubs > obscure ones) > most contradictory or shocking > most recent. Other storylines can get a one-sentence mention as context in slides 2-3, but don't develop them. One post = one story.
 
+## VIRAL CRITERIA (apply to EVERY post)
+Every slide must hit at least 2 of these 7 criteria. Score yourself honestly — if you can't hit 2, the story isn't strong enough.
+
+1. **Pro & Con** — Is there a debate, disagreement, or two sides? Frame the story around the tension, not just the fact.
+2. **Relatable** — Would a casual fan care? Connect it to something universal: money, loyalty, betrayal, ambition, underdog. Not tactical jargon.
+3. **Famous figure** — Name-drop a known player/manager/club early. Big names stop the scroll. If the article is about an obscure figure, link them to someone famous.
+4. **Viral / trending** — Is this already being discussed? Lean into the existing buzz. Add context that others aren't covering.
+5. **Comedy / irony** — If there's a funny angle, use it. Unexpected twists, absurd stats, contradiction. Football is entertainment.
+6. **Surprising fact** — One jaw-dropping number or detail that reframes the story. Make the reader think "I didn't know that."
+7. **Emotional hook** — Tap into a feeling: anger, sympathy, nostalgia, frustration. Don't just inform — make them feel something.
+
+## WRITING STYLE
+Write like you're explaining football to a smart friend at a warung, not writing for a newspaper. Rules:
+- Bahasa Indonesia casual, tongue-in-cheek, no formal tone
+- Short sentences. One idea per sentence. No paragraphs.
+- If a 10-year-old can't follow it, rewrite it
+- Connect the story to something real and current — don't write in a vacuum
+- Out-of-the-box framing: find the angle nobody else is using
+
 ## TASK
 6 slides:
-- **Slide 1 (Hook):** Max 2 sentences, <30 words. Lead with the conflict, the shock, or the stakes. Vary structure. Don't always open the same way:
+- **Slide 1 (Hook):** Max 2 sentences, <30 words. Must hit Viral Criteria #3 (famous name) or #6 (surprising fact). Lead with the conflict, the shock, or the stakes. Vary structure:
   - Bold claim/contradiction
   - Direct quote or reaction paraphrased (never verbatim beyond a few words)
   - "This just happened" urgency
   - Rhetorical question that implies drama
-- **Slide 2-4 (Context/Story):** Max 3 sentences/slide, total <40 words/slide. One beat of the story per slide, must build linearly from the hook (not random facts). If you'd delete slide 3 and slide 4 still makes sense, it's connected properly.
-- **Slide 5 (Take):** Your read on it. Pick ONE angle grounded in the article: why this matters beyond the immediate drama / what it reveals about the club-player-manager dynamic / the most likely next move. Do NOT invent tactical reasoning, hidden motives, or speculate about what a manager was thinking unless the article explicitly states it. Avoid generic hot takes ("this is crazy but not surprising").
-- **Slide 6 (Closing + CTA):** Wrap it up + invite comment/save/follow. One short question tied back to the hook.
+- **Slide 2-4 (Context/Story):** Max 3 sentences/slide, <40 words/slide. One beat per slide, build linearly from hook. Each slide must hit at least 1 Viral Criteria naturally — not forced, woven into the story.
+- **Slide 5 (Take):** Your read on it. Pick ONE angle grounded in the article. Must trigger Viral Criteria #1 (pro/con) or #7 (emotion). Avoid generic hot takes ("this is crazy but not surprising").
+- **Slide 6 (Closing + CTA):** Wrap it up + invite comment/save/follow. One short question tied back to the hook. Hit Viral Criteria #5 (comedy/irony) if possible.
 
 ## OUTPUT FORMAT
 Return ONLY valid JSON, no other text:
