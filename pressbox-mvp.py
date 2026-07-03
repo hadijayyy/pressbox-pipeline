@@ -755,7 +755,7 @@ def filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_su
 
         # Hot topic boost (multi-source coverage = viral)
         # Skip hot boost for niche topics — they ride trending entity clusters without being newsworthy
-        _is_niche = any(kw in tl for kw in _niche_kw) if '_niche_kw' in dir() else False
+        _is_niche = any(kw in tl for kw in _niche_kw)
         hot = hotness.get(url, 0)
         # Topic relevance: title must be ABOUT the entity (in first half), not just mention it
         _hot_relevant = True
@@ -1243,7 +1243,10 @@ Output:
             last = slides[-1]["content"]
             url_base = url.split("?")[0].rstrip("/")
             if url_base not in last and url not in last:
-                slides[-1]["content"] = last.rstrip() + "\n\n" + url
+                new_last = last.rstrip() + "\n\n" + url
+                if len(new_last) > 480:
+                    new_last = last.rstrip()[:480] + "...\n\n" + url
+                slides[-1]["content"] = new_last
             return slides
         except Exception as e:
             log(f"   ❌ LLM exception: {e}")
@@ -1259,7 +1262,7 @@ def load_threads_token():
         with open(f"{HOME}/.hermes/threads_token.json") as f:
             d = json.load(f)
         return d.get("access_token"), str(d.get("user_id",""))
-    except: return None, None
+    except Exception: return None, None
 
 def post_to_threads(slides, image_url=None):
     """Post slides as chained thread. Returns (root_id, permalink) or (None, None)."""
@@ -1313,7 +1316,7 @@ def track_post(title, url, source, root_id, permalink, hotness_score=0):
     try:
         with open(POSTED) as f:
             data = json.load(f)
-    except: data = {"topics":[]}
+    except (FileNotFoundError, json.JSONDecodeError): data = {"topics":[]}
     if "topics" not in data: data["topics"] = []
     entry = {
         "title": title, "url": url, "source": source,
@@ -1342,7 +1345,7 @@ def check_cooldown(minutes=15):
             dt = datetime.fromisoformat(posted)
             if (datetime.now(WIB) - dt).total_seconds() < minutes * 60:
                 return True
-    except: pass
+    except (FileNotFoundError, json.JSONDecodeError, ValueError): pass
     return False
 
 def main():
@@ -1362,7 +1365,7 @@ def main():
             from threads_poster import ThreadsPoster
             poster = ThreadsPoster(access_token=token, user_id=user_id)
         except:
-            pass
+            log("⚠️ Failed to init ThreadsPoster for reply")
 
     # 0.5. Pull engagement metrics for old posts (>12h)
     pull_engagement(poster)
@@ -1540,13 +1543,11 @@ def main():
     )
 
     # Summary report (stdout → delivered to Telegram topic 20467)
-    score = best.get("_score", 0)
     hook_type = best.get("_hook_type", "unknown")
     src = best.get("source", "unknown")
     slide_count = len(slides)
     slide_preview = slides[0]["content"][:120] if slides else "N/A"
-    import datetime
-    now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=7)))
+    now = datetime.now(timezone(timedelta(hours=7)))
     wib = now.strftime("%H:%M WIB, %d %b %Y")
     post_count = len(json.load(open(POSTED)).get("topics", []))
     print(f"""{best['title'][:100]}
