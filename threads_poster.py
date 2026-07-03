@@ -88,13 +88,13 @@ class ThreadsPoster:
         image_url: Optional[str] = None,
     ) -> str:
         """Step 1: create a media container. Returns creation_id."""
-        # Normalize whitespace: Threads strips \n\n but keeps single \n
-        text = re.sub(r'\n{2,}', '\n', text)
+        # Normalize whitespace: collapse 3+ newlines to 2
+        text = re.sub(r'\n{3,}', '\n\n', text)
         # Strip markdown italic/bold markers
         text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
         text = re.sub(r'(?<!\*)\*([^*\n]+)\*(?!\*)', r'\1', text)
-        # Insert \n between sentences if not already separated
-        text = re.sub(r'(?<!Mr)(?<!Mrs)(?<!Ms)(?<!Dr)(?<!St)(?<!vs)(?<!Jr)(?<!Sr)(?<!Prof)([.?!])\s+(?=[A-Z])', r'\1\n', text)
+        # Insert \n\n between sentences (Threads renders \n as space, \n\n as break)
+        text = re.sub(r'(?<!Mr)(?<!Mrs)(?<!Ms)(?<!Dr)(?<!St)(?<!vs)(?<!Jr)(?<!Sr)(?<!Prof)([.?!])\s+(?=[A-Z])', r'\1\n\n', text)
         url = f"{GRAPH_API_BASE}/{self.user_id}/threads"
         params = {
             "text": text,
