@@ -1110,7 +1110,7 @@ Every slide must hit at least 2 of these 7 criteria. Score yourself honestly —
 
 ## WRITING STYLE
 Write like you're explaining football to a smart friend at a warung, not writing for a newspaper. Rules:
-- Bahasa Indonesia casual, tongue-in-cheek, no formal tone
+- English casual, tongue-in-cheek, no formal tone. Sound like a fan, not a journalist.
 - Short sentences. One idea per sentence. No paragraphs.
 - If a 10-year-old can't follow it, rewrite it
 - Connect the story to something real and current — don't write in a vacuum
