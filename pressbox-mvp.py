@@ -993,9 +993,14 @@ def evaluator_check(slides, article_text, url):
         "Your job is to find problems, not praise. Be harsh. Look for:\n"
         "1. FACTUAL ERRORS: claims not supported by the article\n"
         "2. HALLUCINATION: invented stats, names, quotes, transfer fees\n"
-        "3. TONE ISSUES: clickbait that damages credibility, insensitive content\n"
-        "4. QUALITY: grammar errors, incoherent flow, too many slides\n"
-        "5. MISLEADING: headline says X but article says Y\n\n"
+        "3. SPECULATIVE EXTRAPOLATION: article mentions altitude but slide says 'players will gasp' — that's not in the article\n"
+        "4. OVERSIZED PARAPHRASE: article says 'called for changes' but slide says 'told to drop X' — that's escalation\n"
+        "5. PARTIAL LISTS: article mentions 5 players but slide shows only 3 as 'the lineup' — missing players = misleading\n"
+        "6. TONE ISSUES: clickbait that damages credibility, insensitive content\n"
+        "7. QUALITY: grammar errors, incoherent flow, too many slides\n"
+        "8. MISLEADING: headline says X but article says Y\n\n"
+        "RULE: For each slide, can you point to the EXACT sentence in the article that supports every claim? "
+        "If a claim requires inference beyond the literal text, flag it.\n\n"
         "Respond in EXACTLY this JSON format:\n"
         '{"decision": "APPROVE|REVISE|REJECT", "reasons": ["reason1", "reason2"]}\n'
         "APPROVE = post as-is. REVISE = has issues but fixable. REJECT = do not post."
@@ -1013,7 +1018,7 @@ def evaluator_check(slides, article_text, url):
             headers={"Authorization": f"Bearer {MISTRAL_KEY}", "Content-Type": "application/json"},
             json={"model": "mistral-small-latest", "messages": [
                 {"role": "system", "content": system}, {"role": "user", "content": user}],
-                "max_tokens": 500, "temperature": 0.1},
+                "max_tokens": 800, "temperature": 0.1},
             timeout=30)
         if r.status_code != 200:
             return "APPROVE", [f"evaluator HTTP {r.status_code}"]
@@ -1021,7 +1026,7 @@ def evaluator_check(slides, article_text, url):
         # Parse JSON response
         candidate = re.sub(r"^```(?:json)?\s*", "", content)
         candidate = re.sub(r"\s*```$", "", candidate)
-        data = json.loads(candidate)
+        data = json.loads(candidate, strict=False)
         decision = data.get("decision", "APPROVE").upper()
         reasons = data.get("reasons", [])
         if decision not in ("APPROVE", "REVISE", "REJECT"):
@@ -1145,13 +1150,17 @@ Every fact must come from the article. Never invent quotes, transfer fees, or in
 
 1. NO INVENTED TACTICAL REASONING. Do not claim a manager "used X as a decoy", "planned X to unsettle Y", or attribute strategic intent unless the article explicitly states it.
 
-2. NO EXAGGERATED PARAPHRASING. If the article says "a little bit ahead of Reecey", write exactly that or something equally hedged. Preserve the uncertainty and tone of the original.
+2. NO EXAGGERATED PARAPHRASING. If the article says "called for changes", you cannot write "told him to drop X". Preserve the exact strength of the original language. "Called for" ≠ "demanded". "Suggested" ≠ "insisted".
 
-3. NO SPECULATIVE CONSEQUENCES. Do not write "this means X will happen" or "without X, Y would fail" unless the article states that consequence explicitly.
+3. NO SPECULATIVE CONSEQUENCES. Do not write "this means X will happen", "Y will fail", "players will gasp for air", or any physical/psychological consequence unless the article explicitly states it. Mentioning altitude ≠ predicting players will struggle. Mentioning a weak defense ≠ claiming they'll concede.
 
 4. QUOTES: If you include a quote, it must be word-for-word from the article. If paraphrasing, use indirect speech and stay close to the original phrasing.
 
-5. If it's a rumor/unconfirmed report, say so explicitly ("according to reports" / "still unconfirmed"). Don't present speculation as fact.
+5. NO PARTIAL LISTS. If listing a squad, lineup, or group, you must include ALL names mentioned in the article. Never cherry-pick a subset and present it as "the full list". If the article lists 5 players, show 5. If it says "among others", write "among others".
+
+6. If it's a rumor/unconfirmed report, say so explicitly ("according to reports" / "still unconfirmed"). Don't present speculation as fact.
+
+7. TEST EACH SLIDE: Before finalizing, ask "Can I point to the exact sentence in the article that supports this?" If no, cut it.
 
 ## RULES (MANDATORY)
 1. No em dash; use commas, periods, or new sentences.
