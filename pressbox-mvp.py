@@ -1169,7 +1169,6 @@ Don't use: You won't believe... / In today's football world... / Sources say... 
 Input: Sky Sports match report. USA 2-0 Bosnia-Herzegovina, World Cup 2026 Round of 32. Balogun scored in the 45th minute after a defensive error, then was sent off in the 64th minute for a reckless challenge on Muharemovic's ankle, confirmed by VAR review. USA held on with 10 men and Tillman scored a free kick in the 80th minute. USA now face Belgium in Seattle.
 
 Output:
-```json
 {
   "slide_1": "68,827 fans watched him score the winner. Then VAR sent him off 19 minutes later.",
   "slide_2": "Balogun pounced on a defensive error in the 45th. USA led right before half time.",
@@ -1179,8 +1178,7 @@ Output:
   "slide_6": "Belgium up next in Seattle. Can they do it again with 10 men?",
   "caption": "He scored the winner and got sent off in the same game.\n68,827 fans watched both happen.",
   "cover_image_keywords": "Balogun USA celebration close-up"
-}
-```
+}"""
 
     source_name = source or url.split("/")[2] if url else ""
     user = f"Title: {title}\nBody: {article_text[:8000]}\nSource: {source_name}"
@@ -1225,7 +1223,7 @@ Output:
             caption = ""
             hashtags = ""
             try:
-                data = json.loads(content)
+                data = json.loads(content, strict=False)
                 for i in range(1, 7):
                     key = f"slide_{i}"
                     text = data.get(key, "").strip()
@@ -1238,6 +1236,7 @@ Output:
                         text = re.sub(r'(?<!Mr)(?<!Mrs)(?<!Ms)(?<!Dr)(?<!St)(?<!vs)(?<!Jr)(?<!Sr)(?<!Prof)([.?!])\s+(?=[A-Z])', r'\1\n', text)
                         slides.append({"title": f"S{i}", "content": text})
                 caption = data.get("caption", "").strip()
+                cover_keywords = data.get("cover_image_keywords", "").strip()
                 hashtags = data.get("hashtags", "").strip()
             except (json.JSONDecodeError, KeyError, TypeError) as e:
                 log(f"   ⚠️ JSON parse failed ({e}), trying plain text fallback")
