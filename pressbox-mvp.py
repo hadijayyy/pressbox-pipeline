@@ -1117,20 +1117,28 @@ Write like you're explaining football to a smart friend at a warung, not writing
 - Out-of-the-box framing: find the angle nobody else is using
 
 ## TASK
-6 slides:
-- **Slide 1 (Hook):** Max 2 sentences, <30 words. Must hit Viral Criteria #3 (famous name) or #6 (surprising fact). Lead with the conflict, the shock, or the stakes. Vary structure:
-  - Bold claim/contradiction
-  - Direct quote or reaction paraphrased (never verbatim beyond a few words)
-  - "This just happened" urgency
-  - Rhetorical question that implies drama
-- **Slide 2-4 (Context/Story):** Max 3 sentences/slide, <40 words/slide. One beat per slide, build linearly from hook. Each slide must hit at least 1 Viral Criteria naturally — not forced, woven into the story.
-- **Slide 5 (Take):** Your read on it. Pick ONE angle grounded in the article. Must trigger Viral Criteria #1 (pro/con) or #7 (emotion). Avoid generic hot takes ("this is crazy but not surprising").
-- **Slide 6 (Closing + CTA):** Wrap it up + invite comment/save/follow. One short question tied back to the hook. Hit Viral Criteria #5 (comedy/irony) if possible.
+6 slides (text only — images handled separately):
+- **Slide 1 (Hook):** Max 1-2 lines, <20 words. ONE shocking number/fact/consequence. Formula: [SHOCKING NUMBER] → [CONSEQUENCE]. Examples:
+  - "€223m price tag. Real Madrid are ready to pay it."
+  - "7,220ft altitude. Players will gas out before halftime."
+  - NO intro fluff. NO "Here's why". Straight to the shock.
+- **Slide 2-4 (Story):** Max 2-3 lines/slide, <30 words/slide. One beat per slide, build linearly. Short sentences. Punchy. Each slide hits 1 Viral Criteria naturally.
+- **Slide 5 (Take):** Your read on it. ONE angle grounded in the article. Hit Viral Criteria #1 (pro/con) or #7 (emotion). Max 2 lines.
+- **Slide 6 (Closing + CTA):** Wrap up + question tied to hook. Hit Viral Criteria #5 (comedy/irony). Max 2 lines.
 
 ## OUTPUT FORMAT
 Return ONLY valid JSON, no other text:
-{"slide_1":"", "slide_2":"", "slide_3":"", "slide_4":"", "slide_5":"", "slide_6":"", "caption":"", "hashtags":""}
-Caption: 1 punchy, provocative sentence. Zero emoji. Max 1 hashtag.
+{"slide_1":"", "slide_2":"", "slide_3":"", "slide_4":"", "slide_5":"", "slide_6":"", "caption":"", "cover_image_keywords":""}
+
+## CAPTION RULES
+2-3 lines max. First line = THE shocking number/fact. Second line = consequence.
+Example: "England's next World Cup game is at 7,220ft.\nThe air's so thin, players will gas out before halftime."
+Zero emoji. Zero hashtags.
+
+## COVER IMAGE RULES
+Slide 1 image = clean player photo (close-up, emotional moment). NO text overlay on cover.
+Return cover_image_keywords: 2-3 search terms for the hero photo (e.g. "Olise portrait France kit", "Kane hands on head England").
+Text lives in the carousel slides, NOT on the cover.
 
 ## GROUNDING RULES (ALL SLIDES)
 Every fact must come from the article. Never invent quotes, transfer fees, or incidents not confirmed in the source.
@@ -1161,16 +1169,18 @@ Don't use: You won't believe... / In today's football world... / Sources say... 
 Input: Sky Sports match report. USA 2-0 Bosnia-Herzegovina, World Cup 2026 Round of 32. Balogun scored in the 45th minute after a defensive error, then was sent off in the 64th minute for a reckless challenge on Muharemovic's ankle, confirmed by VAR review. USA held on with 10 men and Tillman scored a free kick in the 80th minute. USA now face Belgium in Seattle.
 
 Output:
+```json
 {
-  "slide_1": "He scored the goal that sent USA through, then got sent off before he could even celebrate the win.",
-  "slide_2": "Balogun broke the deadlock in the 45th minute, pouncing on a defensive error from Stjepan Radeljic. It gave USA the lead right before half time in front of 68,827 fans at Levi's Stadium. Bosnia had shown nothing to suggest they'd find a way back.",
-  "slide_3": "On 62 minutes, Balogun caught Muharemovic's ankle in a challenge for a loose ball. Play continued at first, no card and no stoppage. Then VAR stepped in and sent the referee to the monitor.",
-  "slide_4": "The replay showed studs raking down Muharemovic's calf before turning his ankle. It was reckless enough that the referee had no real choice once he saw it back. USA were suddenly down a man with almost 30 minutes still to play.",
-  "slide_5": "Down to 10, USA didn't just hold on, they doubled the lead. Tillman's free kick sailed over the wall and beat Vasilj in the 80th minute. This is a squad that doesn't break under pressure, and that's the kind of mentality that goes deep in tournaments.",
-  "slide_6": "Ten men, one red card, zero goals conceded. Belgium is up next in Seattle. Would you trust USA to do that again?",
-  "caption": "He scored the winner and got sent off in the same game.",
-  "hashtags": "#USMNT"
-}"""
+  "slide_1": "68,827 fans watched him score the winner. Then VAR sent him off 19 minutes later.",
+  "slide_2": "Balogun pounced on a defensive error in the 45th. USA led right before half time.",
+  "slide_3": "On 62 minutes, VAR spotted a reckless challenge. Ref went to the monitor. Red card.",
+  "slide_4": "Down to 10 men with 30 minutes left. USA didn't just hold on. They scored again.",
+  "slide_5": "Tillman's free kick in the 80th sealed it. This squad doesn't break under pressure.",
+  "slide_6": "Belgium up next in Seattle. Can they do it again with 10 men?",
+  "caption": "He scored the winner and got sent off in the same game.\n68,827 fans watched both happen.",
+  "cover_image_keywords": "Balogun USA celebration close-up"
+}
+```
 
     source_name = source or url.split("/")[2] if url else ""
     user = f"Title: {title}\nBody: {article_text[:8000]}\nSource: {source_name}"
