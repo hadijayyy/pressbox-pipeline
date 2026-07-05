@@ -1080,8 +1080,9 @@ def _select_viral_pattern(topic, article_text):
     else:
         return "c"  # default to Pattern C (proven 500K+ views)
 
-def generate_slides(article_text, url, title="", source="", hooks="", cta_pattern="", tone="", pattern="a"):
-    """Call LLM to generate 6-slide thread. Returns parsed slides or None."""
+def generate_slides(article_text, url, title="", source="", hooks="", cta_pattern="", tone="", pattern="a", evaluator_feedback=""):
+    """Call LLM to generate 6-slide thread. Returns parsed slides or None.
+    If evaluator_feedback is provided, appends correction instructions to the prompt."""
     if not MISTRAL_KEY:
         log("❌ No MISTRAL_API_KEY — cannot generate")
         return None
@@ -1191,6 +1192,8 @@ Output:
 
     source_name = source or url.split("/")[2] if url else ""
     user = f"Title: {title}\nBody: {article_text[:8000]}\nSource: {source_name}"
+    if evaluator_feedback:
+        user += f"\n\n## ⚠️ EVALUATOR REJECTED YOUR PREVIOUS ATTEMPT — FIX THESE ERRORS:\n{evaluator_feedback}\nRegenerate ALL 6 slides. Do NOT repeat the errors above."
 
 
     for attempt in range(1, 4):
@@ -1506,39 +1509,53 @@ def main():
     elif image_url and best.get("image_url"):
         log(f"   🖼️ Using og:image (HD) over RSS thumbnail")
 
-    # 4. Generate slides
+    # 4. Generate slides (with evaluator retry loop)
     t0 = time.time()
     pattern = _select_viral_pattern(best, article_text)
     pattern_name = {'a': 'A (scandal)', 'b': 'B (paradox)', 'c': 'C (detail+emotion)'}[pattern]
     log(f"   🎯 Viral pattern: {pattern_name}")
     hooks_str = ", ".join(hooks) if isinstance(hooks, list) else hooks
-    slides = generate_slides(article_text, url, title=best.get("title",""), source=best.get("source",""), hooks=hooks_str, cta_pattern=cta_pattern, tone=tone, pattern=pattern)
-    if not slides:
-        print("❌ Pipeline: LLM generation failed", flush=True)
-        sys.exit(1)
-    llm_time = time.time() - t0
+    slides = None
+    eval_feedback = ""
+    for eval_round in range(3):  # max 3 generate→evaluate cycles
+        slides = generate_slides(article_text, url, title=best.get("title",""), source=best.get("source",""), hooks=hooks_str, cta_pattern=cta_pattern, tone=tone, pattern=pattern, evaluator_feedback=eval_feedback)
+        if not slides:
+            print("❌ Pipeline: LLM generation failed", flush=True)
+            sys.exit(1)
+        llm_time = time.time() - t0
 
-    # 5. Grounding check — block on hallucinated stages, warn on names
-    slides_text = " ".join(s["content"] for s in slides)
-    art_names = _extract_proper_nouns(article_text)
-    art_stages = _extract_stages(article_text)
-    warnings = grounding_check(slides_text, article_text, art_names, art_stages)
-    hallucinated_stages = [w for w in warnings if "HALLUCINATED_STAGE" in w]
-    hallucinated_names = [w for w in warnings if "HALLUCINATED_NAME" in w]
-    if hallucinated_names:
-        log(f"   ⚠️ Name warnings (soft): {'; '.join(hallucinated_names)}")
-    if hallucinated_stages:
-        log(f"   ⚠️ Stage warnings (soft): {'; '.join(hallucinated_stages)}")
+        # 5. Grounding check — block on hallucinated stages, warn on names
+        slides_text = " ".join(s["content"] for s in slides)
+        art_names = _extract_proper_nouns(article_text)
+        art_stages = _extract_stages(article_text)
+        warnings = grounding_check(slides_text, article_text, art_names, art_stages)
+        hallucinated_stages = [w for w in warnings if "HALLUCINATED_STAGE" in w]
+        hallucinated_names = [w for w in warnings if "HALLUCINATED_NAME" in w]
+        if hallucinated_names:
+            log(f"   ⚠️ Name warnings (soft): {'; '.join(hallucinated_names)}")
+        if hallucinated_stages:
+            log(f"   ⚠️ Stage warnings (soft): {'; '.join(hallucinated_stages)}")
 
-    # 5.5. Evaluator — independent skeptical review (Loop Engineering pattern)
-    eval_t0 = time.time()
-    eval_decision, eval_reasons = evaluator_check(slides, article_text, url)
-    eval_time = time.time() - eval_t0
-    log(f"   🔍 Evaluator: {eval_decision} ({eval_time:.1f}s) — {'; '.join(eval_reasons[:3])}")
-    if eval_decision == "REJECT":
-        log(f"   🚫 Evaluator REJECTED — not posting. Reasons: {'; '.join(eval_reasons)}")
-        print(f"🚫 Evaluator rejected: {'; '.join(eval_reasons[:2])}", flush=True)
-        sys.exit(1)
+        # 5.5. Evaluator — independent skeptical review
+        eval_t0 = time.time()
+        eval_decision, eval_reasons = evaluator_check(slides, article_text, url)
+        eval_time = time.time() - eval_t0
+        log(f"   🔍 Evaluator: {eval_decision} ({eval_time:.1f}s) — {'; '.join(eval_reasons[:3])}")
+
+        if eval_decision == "APPROVE":
+            break
+        elif eval_decision == "REVISE":
+            log(f"   ⚠️ Evaluator REVISE — approving with notes: {'; '.join(eval_reasons[:3])}")
+            break  # REVISE = fixable issues, post anyway
+        else:  # REJECT
+            if eval_round < 2:
+                eval_feedback = "\n".join(f"- {r}" for r in eval_reasons)
+                log(f"   🔄 Evaluator REJECTED (round {eval_round+1}/3) — retrying with feedback")
+                continue
+            else:
+                log(f"   🚫 Evaluator REJECTED after 3 attempts — not posting. Reasons: {'; '.join(eval_reasons)}")
+                print(f"🚫 Evaluator rejected after 3 attempts: {'; '.join(eval_reasons[:2])}", flush=True)
+                sys.exit(1)
 
     # 6. DRY RUN or POST
     total = time.time() - START
