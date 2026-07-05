@@ -1444,8 +1444,8 @@ def main():
 
     # Score gate only — hotness boosts ranking but not required
     best = ranked[0]
-    if best["_score"] < 40:
-        log(f"   ⏸️ Best score {best['_score']} < 40 threshold — skipping")
+    if best["_score"] < 20:
+        log(f"   ⏸️ Best score {best['_score']} < 20 threshold — skipping")
         print(f"⏸️ Skip — best topic score {best['_score']} below threshold", flush=True)
         sys.exit(1)
     log(f"   🏆 Best: {best['title']} (score={best['_score']}, type={best.get('_topic_type','')})")
