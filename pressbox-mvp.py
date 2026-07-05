@@ -1124,6 +1124,8 @@ Write like you're explaining football to a smart friend at a warung, not writing
 
 ## TASK
 6 slides (text only — images handled separately):
+- **Step 1 FIRST: FACT EXTRACTION.** Before writing any slide, list the key facts from the article as bullet points. Include: people mentioned, clubs involved, specific numbers/valuations, exact quotes, confirmed events, and hedged language (reportedly, looks likely, I assume). This is your ONLY source of truth.
+- **Step 2: Write slides using ONLY those facts.** Do not add any fact not in your bullet list.
 - **Slide 1 (Hook):** Max 1-2 lines, <20 words. ONE shocking number/fact/consequence. Formula: [SHOCKING NUMBER] → [CONSEQUENCE]. Examples:
   - "€223m price tag. Real Madrid are ready to pay it."
   - "7,220ft altitude. Players will gas out before halftime."
@@ -1162,6 +1164,12 @@ Every fact must come from the article. Never invent quotes, transfer fees, or in
 6. If it's a rumor/unconfirmed report, say so explicitly ("according to reports" / "still unconfirmed"). Don't present speculation as fact.
 
 7. TEST EACH SLIDE: Before finalizing, ask "Can I point to the exact sentence in the article that supports this?" If no, cut it.
+
+8. NO INVENTED VALUATIONS OR FEES. Never write £80m, €100m, 'dream move', 'record deal', or any specific fee unless the article explicitly states it. If the article says 'looks likely to stay', you CANNOT write 'won't leave' or 'shut the door'. Preserve the exact certainty level.
+
+9. NO INVENTED INVOLVEMENT. Never add people/agents/managers not mentioned in the article. If the article doesn't name Mourinho, you cannot mention Mourinho. If the article doesn't mention an agent, you cannot mention an agent.
+
+10. PRESERVE HEDGING. If the article says 'looks likely', 'reportedly', 'according to sources', 'I assume' — keep that uncertainty. Never upgrade hedges to certainties. 'Looks likely to stay' ≠ 'won't leave'. 'I assume he won't stand in the way' ≠ 'Red Bull won't block him'.
 
 ## RULES (MANDATORY)
 1. No em dash; use commas, periods, or new sentences.
@@ -1204,7 +1212,7 @@ Output:
                 headers={"Authorization": f"Bearer {MISTRAL_KEY}", "Content-Type": "application/json"},
                 json={"model":"mistral-large-latest","messages":[
                     {"role":"system","content":system},{"role":"user","content":user}],
-                    "max_tokens":4000,"temperature":0.5,"stream":True},
+                    "max_tokens":4000,"temperature":0.3,"stream":True},
                 timeout=60, stream=True)
 
             if r.status_code != 200:
