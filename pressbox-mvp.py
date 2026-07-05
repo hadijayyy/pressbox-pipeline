@@ -1112,14 +1112,25 @@ From the article content, find the 5 strongest insights using this filter (rank 
 
 From those 5 insights, pick the strongest one for the hook, and arrange the rest logically (not randomly) into 6 sequential slides.
 
-## 5. OUTPUT FORMAT
+## 5. VIRAL CRITERIA (apply to EVERY post)
+Every slide must hit at least 2 of these 7 criteria. Score yourself honestly — if you can't hit 2, the story isn't strong enough.
+
+1. **Pro & Con** — Is there a debate, disagreement, or two sides? Frame the story around the tension, not just the fact.
+2. **Relatable** — Would a casual fan care? Connect it to something universal: money, loyalty, betrayal, ambition, underdog. Not tactical jargon.
+3. **Famous figure** — Name-drop a known player/manager/club early. Big names stop the scroll. If the article is about an obscure figure, link them to someone famous.
+4. **Viral / trending** — Is this already being discussed? Lean into the existing buzz. Add context that others aren't covering.
+5. **Comedy / irony** — If there's a funny angle, use it. Unexpected twists, absurd stats, contradiction. Football is entertainment.
+6. **Surprising fact** — One jaw-dropping number or detail that reframes the story. Make the reader think "I didn't know that."
+7. **Emotional hook** — Tap into a feeling: anger, sympathy, nostalgia, frustration. Don't just inform — make them feel something.
+
+## 6. OUTPUT FORMAT
 Return ONLY valid JSON, no other text:
 {"slide_1":"", "slide_2":"", "slide_3":"", "slide_4":"", "slide_5":"", "slide_6":"", "caption":"", "cover_image_keywords":""}
 
-Within one slide: each sentence separated by \\n\\n (double newline)
+Within one slide: each sentence separated by \n\n (double newline)
 The last slide (Slide 6) must close with a natural open-ended question — not a sales CTA, goal is to bait replies/comments
 
-## 6. EXECUTION & EXCLUSION
+## 7. EXECUTION & EXCLUSION
 Tone: Raw, unpolished, casual. FORBIDDEN:
 - "Did you know?", "Let's dive in!", "Here's the secret"
 - Clickbait-style headlines like tabloid football media
@@ -1151,7 +1162,7 @@ Slide 1 image = clean player photo (close-up, emotional moment). NO text overlay
 Return cover_image_keywords: 2-3 search terms for the hero photo (e.g. "Olise portrait France kit", "Kane hands on head England").
 Text lives in the carousel slides, NOT on the cover.
 
-## 7. GROUNDING RULES (ALL SLIDES)
+## 8. GROUNDING RULES (ALL SLIDES)
 Every fact must come from the article. Never invent quotes, transfer fees, or incidents not confirmed in the source.
 
 1. NO INVENTED TACTICAL REASONING. Do not claim a manager "used X as a decoy", "planned X to unsettle Y", or attribute strategic intent unless the article explicitly states it.
@@ -1174,10 +1185,10 @@ Every fact must come from the article. Never invent quotes, transfer fees, or in
 
 10. PRESERVE HEDGING. If the article says 'looks likely', 'reportedly', 'according to sources', 'I assume' — keep that uncertainty. Never upgrade hedges to certainties. 'Looks likely to stay' ≠ 'won't leave'. 'I assume he won't stand in the way' ≠ 'Red Bull won't block him'.
 
-## 8. BANNED PATTERNS
+## 9. BANNED PATTERNS
 Don't use: You won't believe... / In today's football world... / Sources say... (without specifying which) / This is a game-changer / Fans are furious (unless article shows actual fan reaction) / Shocking (used as a crutch word) / Insane (used as a crutch word) / Let that sink in / Say what you want, but... / you've been warned / beware / watch out / "Tahukah kamu?", "Yuk simak!", "Ini dia rahasianya" / "Did you know?", "Let's dive in!", "Here's the secret" / Clickbait-style headlines / AIDA/PAS formulas / Motivational closing lines
 
-## 9. WORKED EXAMPLE
+## 10. WORKED EXAMPLE
 
 Input: Sky Sports match report. USA 2-0 Bosnia-Herzegovina, World Cup 2026 Round of 32. Balogun scored in the 45th minute after a defensive error, then was sent off in the 64th minute for a reckless challenge on Muharemovic's ankle, confirmed by VAR review. USA held on with 10 men and Tillman scored a free kick in the 80th minute. USA now face Belgium in Seattle.
 
