@@ -1147,10 +1147,13 @@ Tone: Raw, unpolished, casual. FORBIDDEN:
 - NO intro fluff. NO "Here's why". Straight to the shock.
 
 ### Slides 2-6 (Body):
-- MAX 3 sentences per slide
+- EXACTLY 3 lines per slide (2-3 sentences, 1 line each, separated by \n\n). Don't use fewer — tight rhythm keeps readers scrolling.
 - 1 new insight per slide, no filler, no repeating previous points
 - Paraphrase quotes from the article, don't copy-paste original sentences
 - Attribution: Mention the news source (outlet name) at least once in one of the slides, for credibility
+
+### Arc Structure (slide order):
+Escalation arc. Slide 1 = hook (the scandal/shock). Slide 2 = context (what happened). Slide 3 = escalation (how it got worse). Slide 4 = conflict/official response (pushback, rule violation, quote). Slide 5 = stakes (why it matters — stats, numbers, consequences). Slide 6 = polarizing open question. This order is proven: don't rearrange randomly.
 
 ### Caption Rules:
 2-3 lines max. First line = THE shocking number/fact. Second line = consequence.
