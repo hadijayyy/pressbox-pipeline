@@ -1553,7 +1553,11 @@ def main():
         if hallucinated_stages:
             log(f"   ⚠️ Stage warnings (soft): {'; '.join(hallucinated_stages)}")
 
-        # 5.5. Evaluator — independent skeptical review
+        # 5.5. Evaluator — skip for high-score posts (saves ~50s)
+        score_val = hotness.get(url, 0) or best.get("_score", 0)
+        if score_val >= 80:
+            log(f"   ⏭️ Evaluator skipped (score {score_val:.0f} >= 80)")
+            break
         eval_t0 = time.time()
         eval_decision, eval_reasons = evaluator_check(slides, article_text, url)
         eval_time = time.time() - eval_t0
