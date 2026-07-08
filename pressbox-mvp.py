@@ -1595,8 +1595,9 @@ def main():
     # Post
     root_id, permalink = post_to_threads(slides, image_url)
     if not root_id:
+        err_msg = f"❌ Post failed: {best.get('title','?')[:60]} | source={url[:50]}"
         notify_telegram(f"❌ <b>Post Gagal</b>\n\n{best['title']}\nSource: {url}\n\nLLM gagal generate atau post error.")
-        print("❌ Pipeline: post failed", flush=True)
+        print(err_msg, flush=True)
         sys.exit(1)
 
     # Track
