@@ -132,7 +132,7 @@ def _save_fingerprints(fps):
 
 def scrape_all():
     """Scrape all sources in parallel. Skip sources with unchanged RSS."""
-    log("Scraping 5 sources...")
+    log("Scraping 4 sources...")
     t0 = time.time()
     fingerprints = _load_fingerprints()
     new_fingerprints = {}
@@ -157,7 +157,7 @@ def scrape_all():
             "goal": ex.submit(scrape_with_fingerprint, "goal", scrape_goal),
             "bbc": ex.submit(scrape_with_fingerprint, "bbc", scrape_rss, "https://feeds.bbci.co.uk/sport/football/rss.xml", "bbc", 10),
             "fourfourtwo": ex.submit(scrape_with_fingerprint, "fourfourtwo", scrape_rss, "https://www.fourfourtwo.com/rss", "fourfourtwo", 8),
-            "mirror": ex.submit(scrape_with_fingerprint, "mirror", scrape_rss, "https://www.mirror.co.uk/sport/football/rss.xml", "mirror", 7),
+
         }
         for name, f in futs.items():
             try:
@@ -185,7 +185,7 @@ def scrape_all():
                 "goal": ex.submit(scrape_goal),
                 "bbc": ex.submit(scrape_rss, "https://feeds.bbci.co.uk/sport/football/rss.xml", "bbc", 10),
                 "fourfourtwo": ex.submit(scrape_rss, "https://www.fourfourtwo.com/rss", "fourfourtwo", 8),
-                "mirror": ex.submit(scrape_rss, "https://www.mirror.co.uk/sport/football/rss.xml", "mirror", 7),
+
             }
             for name, f in futs.items():
                 try:
