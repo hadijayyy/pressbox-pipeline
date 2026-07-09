@@ -16,7 +16,7 @@ from bs4 import BeautifulSoup
 
 # ── Config ──────────────────────────────────────────────────────────
 DRY_RUN = "--dry-run" in sys.argv
-SOURCES = ["skysports", "goal", "bbc", "fourfourtwo", "mirror"]
+SOURCES = ["skysports", "goal", "bbc", "fourfourtwo"]
 ARTICLE_CACHE = f"{HOME}/.hermes/pressbox/article-cache.json"
 SOURCE_FINGERPRINTS = f"{HOME}/.hermes/pressbox/source-fingerprints.json"
 MAX_CHARS = 500  # Threads per-slide limit
