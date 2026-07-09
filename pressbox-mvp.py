@@ -355,8 +355,10 @@ def detect_hot_topics(topics, window_hours=4):
 # ── 2. FILTER + SCORE ──────────────────────────────────────────────
 
 def load_posted():
-    """Load posted URLs and title word-sets."""
+    """Load posted URLs and title word-sets (72h window for similarity)."""
+    from datetime import datetime, timedelta
     posted_urls, posted_ws = set(), []
+    cutoff = datetime.now(WIB) - timedelta(hours=72)
     if os.path.exists(POSTED):
         try:
             with open(POSTED) as f:
@@ -365,7 +367,16 @@ def load_posted():
                 u = (t.get("url") or "").strip()
                 if u.startswith("http"): posted_urls.add(u)
                 ti = (t.get("title") or "").strip()
-                if ti: posted_ws.append(clean_words(ti))
+                if not ti: continue
+                # Only include recent posts for similarity check
+                pa = t.get("posted_at", "")
+                if pa:
+                    try:
+                        dt = datetime.fromisoformat(pa)
+                        if dt.tzinfo is None: dt = dt.replace(tzinfo=WIB)
+                        if dt < cutoff: continue  # too old, skip similarity
+                    except: pass
+                posted_ws.append(clean_words(ti))
         except: pass
     return posted_urls, posted_ws
 
