@@ -1637,9 +1637,14 @@ def main():
     now = datetime.now(timezone(timedelta(hours=7)))
     wib = now.strftime("%H:%M WIB, %d %b %Y")
     post_count = len(json.load(open(POSTED)).get("topics", []))
-    print(f"""{best['title'][:100]}
+    report = f"""✅ Posted @ {wib}
+{best['title'][:100]}
 Score: {score} | {slide_count} slides | {total:.1f}s
-{permalink}""", flush=True)
+{permalink}"""
+    # Save for hourly report
+    with open("/tmp/pressbox-last-report", "w") as f:
+        f.write(report)
+    print(report, flush=True)
 
 if __name__ == "__main__":
     import random as _rnd
