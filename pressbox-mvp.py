@@ -176,8 +176,8 @@ def scrape_all():
     fingerprints.update(new_fingerprints)
     _save_fingerprints(fingerprints)
 
-    # If ALL sources unchanged, force a full scrape (prevent stale pipeline)
-    if not all_t and skipped:
+    # If too few topics (<20) or all unchanged, force full scrape
+    if len(all_t) < 20 and skipped:
         log("   ⚠️ All sources unchanged — forcing full scrape")
         with ThreadPoolExecutor(max_workers=5) as ex:
             futs = {
@@ -695,8 +695,8 @@ def filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_su
         if any(kw in tl for kw in _TV_GUIDE): continue
         # Commercial/shopping articles — not football news
         if any(kw in tl for kw in _COMMERCIAL): continue
-        # Filter out live commentary pages (skysports.com/.../live/...)
-        if '/live/' in url: continue
+        # Filter out live commentary/live-blog pages
+        if '/live/' in url or '/live-blog/' in url: continue
         # Sensitive content
         if _match_sensitive(tl) or _match_sensitive(desc): continue
         # Dedup
