@@ -18,20 +18,18 @@ exec 200>"$LOCKFILE"
 flock -n 200 || exit 0
 
 # Pipeline: jitter (0-30s) + scrape + LLM all inside Python
-OUTPUT=$(python3 -u pressbox-mvp.py --with-jitter 2>/dev/null)
+# Log to file, stdout only has summary
+python3 -u pressbox-mvp.py --with-jitter > /tmp/pressbox-mvp.log 2>&1
 EXIT_CODE=$?
 
-# Mark posted only when OUTPUT non-empty
-if [ $EXIT_CODE -eq 0 ] && [ -n "$OUTPUT" ]; then
-    echo "ok $(date -Iseconds)" > /tmp/pressbox-last-post
-fi
-
-# Output + notify @Szejay_bot
 NOW_WIB=$(TZ=Asia/Jakarta date '+%H:%M WIB')
-if [ -n "$OUTPUT" ]; then
-    echo "$OUTPUT"
-    notify "✅ Posted @ $NOW_WIB
-$OUTPUT"
+
+if [ $EXIT_CODE -eq 0 ] && [ -f /tmp/pressbox-last-report ]; then
+    echo "ok $(date -Iseconds)" > /tmp/pressbox-last-post
+    REPORT=$(cat /tmp/pressbox-last-report)
+    echo "$REPORT"
+    notify "$REPORT"
+
 elif [ $EXIT_CODE -ne 0 ]; then
     MSG="❌ Pressbox MVP failed @ $NOW_WIB"
     echo "$MSG"
