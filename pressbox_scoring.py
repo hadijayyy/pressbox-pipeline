@@ -115,6 +115,24 @@ EXCLUDE_KEYWORDS = {
         "add to basket", "checkout", "free delivery", "next day delivery",
         "black friday", "cyber monday", "prime day", "clearance",
     ],
+    "gossip_roundup": [
+        "monday's gossip", "tuesday's gossip", "wednesday's gossip",
+        "thursday's gossip", "friday's gossip", "saturday's gossip",
+        "sunday's gossip", "paper talk", "paper round",
+        "transfer gossip", "rumour mill",
+    ],
+    "non_football_context": [
+        # Military / war — ALWAYS non-football, hard reject
+        "soldiers died", "soldiers killed", "troops deployed",
+        "falklands", "malvinas", "military coup", "war crimes",
+        "prisoner of war", "casualties", "fallen soldiers",
+        "armed forces", "navy", "air force", "regiment",
+        "battle of", "invasion of",
+        # Disaster / violence — hard reject
+        "mass shooting", "terror attack", "hostage",
+        "earthquake", "tsunami", "hurricane",
+        "pandemic", "covid", "virus outbreak",
+    ],
 }
 
 
@@ -197,16 +215,14 @@ DRAMA_WORDS = [
     "war of words", "bust-up", "rift", "scandal", "controversy",
     "refuses", "walks out", "storms off", "under pressure",
     "collapsed", "disaster", "nightmare", "crisis",
-    "fate confirmed", "forced", "denied", "disagrees",
-    "repeating", "mistake", "problem", "rivals", "statement",
-    "risk", "warning", "fears", "anger", "rage", "hit back",
+    "fate confirmed", "forced", "denied", "disagrees", "rivals",
     "under fire", "disastrous", "catastrophic", "collapse",
     "betrayal", "backlash", "fury", "rowing", "tensions",
-    "exclusive", "breaking", "confirmed", "revealed", "drops bombshell",
-    "responds", "admits", "hints", "teases", "sends message",
-    "breaks silence", "sets record straight", "makes decision",
+    "exclusive", "breaking", "drops bombshell",
+    "responds", "admits", "sends message",
+    "breaks silence", "sets record straight",
     "takes swipe", "calls out", "fires back", "double down",
-]
+ ]
 
 
 def check_include_keywords(text):
@@ -362,12 +378,12 @@ def score_topic(t):
             audience_pts += 10
     audience_pts = min(audience_pts, 40)  # cap at 40 (3 big-name mentions max, boosted)
 
-    # 7. Drama/Engagement Signal in title (max 15 pts)
+    # 7. Drama/Engagement Signal in title (max 10 pts)
     drama_pts = 0
     for dw in DRAMA_WORDS:
         if dw in title_lower:
             drama_pts += 5
-    drama_pts = min(drama_pts, 15)
+    drama_pts = min(drama_pts, 10)
 
     # 8. "First Ever" + Stat Boost (max 20 pts) — proven 75K views pattern
     # Matches: "first team", "first player", "first ever", "in history" + any number
@@ -427,7 +443,49 @@ def score_topic(t):
     if any(re.search(p, title_lower_combined) for p in WARNING_PATTERNS):
         warning_pts = 8
 
-    total = keyword_pts + cat_pts + recency_pts + data_pts + source_pts + audience_pts + drama_pts + first_ever_pts + niche_pts + paradox_pts + warning_pts
+    # 12. Winning Formula Bonus (+10) — "[Entity] just [past-tense action]"
+    # Proven 100K+ pattern: "Erling Haaland just scored", "Norway just swapped"
+    WINNING_FORMULA_RE = re.compile(
+        r'\b[a-z\']+\s+just\s+(?:scored|signed|revealed|announced|dismissed|'
+        r'gambled|changed|banned|ditched|refused|admitted|confirmed|replaced|quit|'
+        r'walked|stormed|threw|exposed|left|dropped|suspended|sacked|fired|hired|'
+        r'appointed|named|chose|picked|axed|blasted|slammed|hit\s+back|fired\s+back|'
+        r'doubled\s+down|backed|swooped|stole|poached|snubbed|destroyed|wrecked|'
+        r'lost|won|claimed|sealed|secured)\b', re.IGNORECASE)
+    winning_formula_pts = 0
+    if WINNING_FORMULA_RE.search(title_lower):
+        winning_formula_pts = 10
+
+    # 13. Curiosity Gap Bonus (+8) — proven CTA/cliffhanger hooks
+    CURIOSITY_GAP = [
+        r"the\s+reason\??$",
+        r"here'?s\s+(?:why|how)",
+        r"this\s+is\s+(?:why|how)",
+        r"let\s+me\s+explain",
+        r"the\s+full\s+story",
+        r"you\s+won'?t\s+believe",
+        r"you\s+need\s+to\s+(?:see|know|watch)",
+        r"it\s+gets\s+(?:worse|better|crazier)",
+    ]
+    curiosity_pts = 0
+    if any(re.search(p, title_lower) for p in CURIOSITY_GAP):
+        curiosity_pts = 8
+
+    # 14. Timing Urgency Bonus (+5) — immediate/breaking signals
+    TIMING_URGENCY = [
+        r'\bjust\b', r'\bbreaking\b', r'\bminutes\s+ago\b',
+        r'\blatest\b', r'\bminutes\b',
+    ]
+    urgency_pts = 0
+    urgency_hits = sum(1 for p in TIMING_URGENCY if re.search(p, title_lower))
+    if urgency_hits >= 2:
+        urgency_pts = 5
+
+    total = (
+        keyword_pts + cat_pts + recency_pts + data_pts + source_pts +
+        audience_pts + drama_pts + first_ever_pts + niche_pts + paradox_pts +
+        warning_pts + winning_formula_pts + curiosity_pts + urgency_pts
+    )
     return total
 
 

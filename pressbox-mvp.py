@@ -634,6 +634,8 @@ _SENSITIVE_EXACT = [
     "charged with","convicted of","guilty of","domestic violence",
     "racist","racism","racial abuse","hate crime","antisemitic","islamophobia",
     "genocide","ethnic cleansing","terrorism",
+    "falklands","malvinas",
+    "soldiers died","soldiers killed","troops deployed",
 ]
 _SENSITIVE_WILDCARD = [
     "k*ll","de*th","m*rd*r","st*bb*ng","sh*ting","b*mb*ng","terr*rist","sl*ying","exec*ting",
@@ -1462,10 +1464,15 @@ def main():
         print("❌ Pipeline: all topics filtered out", flush=True)
         sys.exit(1)
 
-    # Score gate only — hotness boosts ranking but not required
+    # Score gate — dynamic threshold from batch median (adaptive)
     best = ranked[0]
-    if best["_score"] < 20:
-        log(f"   ⏸️ Best score {best['_score']} < 20 threshold — skipping")
+    # Compute median of top scores in this batch
+    batch_scores = sorted([t["_score"] for t in ranked[:10]])
+    batch_median = batch_scores[len(batch_scores) // 2] if batch_scores else 0
+    threshold = max(8, min(25, batch_median))
+    log(f"   📊 Batch median={batch_median:.0f}, threshold={threshold}")
+    if best["_score"] < threshold:
+        log(f"   ⏸️ Best score {best['_score']} < {threshold} threshold — skipping")
         print(f"⏸️ Skip — best topic score {best['_score']} below threshold", flush=True)
         sys.exit(1)
     log(f"   🏆 Best: {best['title']} (score={best['_score']}, type={best.get('_topic_type','')})")
@@ -1490,7 +1497,7 @@ def main():
             "snap up","bargain","order now","next day delivery"] if kw in bl)
         return football < 2 and commercial >= 2
 
-    while fetch_tries < len(ranked[:5]):
+    while fetch_tries < len(ranked[:15]):
         # Check length
         if not article_text or len(article_text) < 100:
             log(f"   ❌ Article too short on '{best['title']}' — trying next")
@@ -1498,6 +1505,10 @@ def main():
             log(f"   🛒 Body is commercial, not football — trying next")
         elif len(article_text.strip()) < 1000:
             log(f"   ⚠️ Article too short ({len(article_text)} chars) — trying next")
+        elif len(article_text.split()) < 150:
+            log(f"   ⚠️ Article too thin ({len(article_text.split())} words) — trying next")
+        elif len([s for s in re.split(r'[.!?]+', article_text) if len(s.strip()) > 20]) < 5:
+            log(f"   ⚠️ Article too few sentences (< 5) — trying next")
         else:
             break  # Article is valid
         best = ranked[fetch_tries]
@@ -1525,8 +1536,8 @@ def main():
         sys.exit(1)
     # Sentence count filter — catches boilerplate-inflated articles
     sentences = [s.strip() for s in re.split(r'[.!?]+', article_text) if len(s.strip()) > 20]
-    if len(sentences) < 8:
-        log(f"   ⚠️ Article too few sentences ({len(sentences)} < 8 min). Skipping LLM.")
+    if len(sentences) < 5:
+        log(f"   ⚠️ Article too few sentences ({len(sentences)} < 5 min). Skipping LLM.")
         print(f"❌ Pipeline: article too few sentences ({len(sentences)})", flush=True)
         sys.exit(1)
 
@@ -1537,57 +1548,92 @@ def main():
     elif image_url and best.get("image_url"):
         log(f"   🖼️ Using og:image (HD) over RSS thumbnail")
 
-    # 4. Generate slides (with evaluator retry loop)
-    t0 = time.time()
-    pattern = _select_viral_pattern(best, article_text)
-    pattern_name = {'a': 'A (scandal)', 'b': 'B (paradox)', 'c': 'C (detail+emotion)'}[pattern]
-    log(f"   🎯 Viral pattern: {pattern_name}")
-    hooks_str = ", ".join(hooks) if isinstance(hooks, list) else hooks
+    # 4. Generate slides (with article fallback + evaluator retry)
+    # Outer loop: try next ranked article if evaluator rejects all 3 attempts
+    # Inner loop: max 3 generate→evaluate cycles per article
+    article_fallback_idx = fetch_tries  # start from where we left off after article quality checks
     slides = None
-    eval_feedback = ""
-    for eval_round in range(3):  # max 3 generate→evaluate cycles
-        slides = generate_slides(article_text, url, title=best.get("title",""), source=best.get("source",""), hooks=hooks_str, cta_pattern=cta_pattern, tone=tone, pattern=pattern, evaluator_feedback=eval_feedback)
-        if not slides:
-            print("❌ Pipeline: LLM generation failed", flush=True)
-            sys.exit(1)
-        llm_time = time.time() - t0
-
-        # 5. Grounding check — block on hallucinated stages, warn on names
-        slides_text = " ".join(s["content"] for s in slides)
-        art_names = _extract_proper_nouns(article_text)
-        art_stages = _extract_stages(article_text)
-        warnings = grounding_check(slides_text, article_text, art_names, art_stages)
-        hallucinated_stages = [w for w in warnings if "HALLUCINATED_STAGE" in w]
-        hallucinated_names = [w for w in warnings if "HALLUCINATED_NAME" in w]
-        if hallucinated_names:
-            log(f"   ⚠️ Name warnings (soft): {'; '.join(hallucinated_names)}")
-        if hallucinated_stages:
-            log(f"   ⚠️ Stage warnings (soft): {'; '.join(hallucinated_stages)}")
-
-        # 5.5. Evaluator — skip for high-score posts (saves ~50s)
-        score_val = hotness.get(url, 0) or best.get("_score", 0)
-        if score_val >= 80:
-            log(f"   ⏭️ Evaluator skipped (score {score_val:.0f} >= 80)")
-            break
-        eval_t0 = time.time()
-        eval_decision, eval_reasons = evaluator_check(slides, article_text, url)
-        eval_time = time.time() - eval_t0
-        log(f"   🔍 Evaluator: {eval_decision} ({eval_time:.1f}s) — {'; '.join(eval_reasons[:3])}")
-
-        if eval_decision == "APPROVE":
-            break
-        elif eval_decision == "REVISE":
-            log(f"   ⚠️ Evaluator REVISE — approving with notes: {'; '.join(eval_reasons[:3])}")
-            break  # REVISE = fixable issues, post anyway
-        else:  # REJECT
-            if eval_round < 2:
-                eval_feedback = "\n".join(f"- {r}" for r in eval_reasons)
-                log(f"   🔄 Evaluator REJECTED (round {eval_round+1}/3) — retrying with feedback")
+    llm_time = 0
+    article_accepted = False
+    for article_attempt in range(3):  # try up to 3 different articles
+        if article_attempt > 0:
+            # Try next ranked article
+            next_idx = article_fallback_idx + article_attempt
+            if next_idx >= len(ranked[:15]):
+                log("   ❌ No more ranked articles to try")
+                break
+            best = ranked[next_idx]
+            url = best["url"]
+            log(f"   🔄 Trying next article: {best.get('title','')[:60]}")
+            article_text, image_url = fetch_article(url)
+            if not article_text or len(article_text) < 1000:
+                log(f"   ⚠️ Next article too short ({len(article_text or '')} chars) — skipping")
                 continue
-            else:
-                log(f"   🚫 Evaluator REJECTED after 3 attempts — not posting. Reasons: {'; '.join(eval_reasons)}")
-                print(f"🚫 Evaluator rejected after 3 attempts: {'; '.join(eval_reasons[:2])}", flush=True)
-                sys.exit(1)
+            # Re-extract hooks for new article
+            hooks = detect_hooks(article_text, best.get("title", ""))
+            hooks_str = ", ".join(hooks) if isinstance(hooks, list) else hooks
+
+        t0 = time.time()
+        pattern = _select_viral_pattern(best, article_text)
+        pattern_name = {'a': 'A (scandal)', 'b': 'B (paradox)', 'c': 'C (detail+emotion)'}[pattern]
+        log(f"   🎯 Viral pattern: {pattern_name}")
+        hooks_str = ", ".join(hooks) if isinstance(hooks, list) else hooks
+        eval_feedback = ""
+        eval_accepted = False
+        for eval_round in range(3):  # max 3 generate→evaluate cycles
+            slides = generate_slides(article_text, url, title=best.get("title",""), source=best.get("source",""), hooks=hooks_str, cta_pattern=cta_pattern, tone=tone, pattern=pattern, evaluator_feedback=eval_feedback)
+            if not slides:
+                log("   ⚠️ LLM generation failed — trying next article")
+                break
+            llm_time = time.time() - t0
+
+            # 5. Grounding check — block on hallucinated stages, warn on names
+            slides_text = " ".join(s["content"] for s in slides)
+            art_names = _extract_proper_nouns(article_text)
+            art_stages = _extract_stages(article_text)
+            warnings = grounding_check(slides_text, article_text, art_names, art_stages)
+            hallucinated_stages = [w for w in warnings if "HALLUCINATED_STAGE" in w]
+            hallucinated_names = [w for w in warnings if "HALLUCINATED_NAME" in w]
+            if hallucinated_names:
+                log(f"   ⚠️ Name warnings (soft): {'; '.join(hallucinated_names)}")
+            if hallucinated_stages:
+                log(f"   ⚠️ Stage warnings (soft): {'; '.join(hallucinated_stages)}")
+
+            # 5.5. Evaluator — skip for high-score posts (saves ~50s)
+            score_val = hotness.get(url, 0) or best.get("_score", 0)
+            if score_val >= 80:
+                log(f"   ⏭️ Evaluator skipped (score {score_val:.0f} >= 80)")
+                eval_accepted = True
+                break
+            eval_t0 = time.time()
+            eval_decision, eval_reasons = evaluator_check(slides, article_text, url)
+            eval_time = time.time() - eval_t0
+            log(f"   🔍 Evaluator: {eval_decision} ({eval_time:.1f}s) — {'; '.join(eval_reasons[:3])}")
+
+            if eval_decision == "APPROVE":
+                eval_accepted = True
+                break
+            elif eval_decision == "REVISE":
+                log(f"   ⚠️ Evaluator REVISE — approving with notes: {'; '.join(eval_reasons[:3])}")
+                eval_accepted = True
+                break  # REVISE = fixable issues, post anyway
+            else:  # REJECT
+                if eval_round < 2:
+                    eval_feedback = "\n".join(f"- {r}" for r in eval_reasons)
+                    log(f"   🔄 Evaluator REJECTED (round {eval_round+1}/3) — retrying with feedback")
+                    continue
+                else:
+                    log(f"   🚫 Evaluator REJECTED after 3 attempts — trying next article")
+                    break
+
+        if eval_accepted:
+            article_accepted = True
+            break
+
+    if not article_accepted or not slides:
+        log("❌ Pipeline: all articles failed evaluator or generation")
+        print("❌ Pipeline: all articles failed evaluator or generation", flush=True)
+        sys.exit(1)
 
     # 6. DRY RUN or POST
     total = time.time() - START
