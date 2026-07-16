@@ -14,11 +14,11 @@ Scrapes football news from 5 sources, detects hot/viral topics via entity cluste
 │  2. FILTER          Commercial/TV/sensitive/women blocked    │
 │                     + dedup + similarity + analytics penalty  │
 │       ↓                                                      │
-│  3. HOT DETECT      4h persistent cache + entity clustering  │
+|  3. HOT DETECT      4h persistent cache + entity clustering  │
 │                     (Union-Find). Multi-source = viral boost │
 │       ↓                                                      │
-│  4. SCORE           12-component engine + context-aware      │
-│                     bonuses + soft cap + auto-tuning         │
+│  4. SCORE           16-component data-driven engine +        │
+│                     context-aware bonuses + soft cap + tune  │
 │       ↓                                                      │
 │  5. VERIFY          Article: 1000+ chars, 150+ words,       │
 │                     8+ unique sentences. Tries top 5.       │
@@ -46,28 +46,32 @@ Cron: every hour (skip 6, 8, 15, 21-22 WIB), watchdog at :15.
 | `_TV_GUIDE` | "How to watch", "TV channel", "live stream" |
 | `_SENSITIVE` | "charged with murder", "arrested", "domestic violence" |
 | `_WOMEN` | Lionesses, NWLS, women's football |
-| `/live/` URLs | Live commentary pages (not articles) |
+| `/live/` `/quiz/` URLs | Live commentary, quiz pages (not articles) |
 | Length gate | Article must be 1000+ chars, 150+ words, 8+ unique sentences |
 | Body verification | Football signals ≥ 2, commercial signals < 2 |
 
 ## Scoring System
 
-### Base Components (0–120 pts)
+### Base Components (0–170+ pts)
 
-| # | Component | Points |
-|---|-----------|--------|
-| 1 | Keyword Match | +8/keyword (max 5 = 40) |
-| 2 | Category | 20/10/0 |
-| 3 | Recency | 15/10/5/0 |
-| 4 | Data/Konkret | 15/7/0 |
-| 5 | Source Tier | 10/5/0 |
-| 6 | Audience Reach | +10/big name (max 40) |
-| 7 | Drama Signal | +5/word (max 15) |
-| 8 | First Ever | +20/+10 |
-| 9 | Niche Nation | -15 |
-| 10 | Paradox Bonus | +12 |
-| 11 | Warning Bonus | +8 |
-| 12 | Exclude Keywords | -1 (hard reject) |
+| # | Component | Points | Data Source |
+|---|-----------|--------|-------------|
+| 1 | Keyword Match | +8/keyword (max 5 = 40) | |
+| 2 | Category | 20 (transfer/match/drama) / 10 (international) / 0 | |
+| 3 | Recency | 15/10/5/0 | |
+| 4 | Data/Konkret | 15/7/0 | |
+| 5 | Source Tier | **15** (Super: goal) / 10 (Tier 1) / 5 (Tier 2) / 0 (unknown=99) | goal avg 58K views — 2.1x BBC |
+| 6 | Audience Reach | +10/big name (max 40) | |
+| 7 | Drama Signal | +5/word (max 10) | Expanded 55 keywords |
+| 8 | First Ever | +20/+10 | |
+| 9 | Niche Nation | -15 | |
+| 10 | Paradox Bonus | +12 | |
+| 11 | Warning Bonus | +8 | |
+| **12** | **Star Player** | **+20** | Data: +39% above baseline, top 5 dominated by star names |
+| **13** | **Conflict Hook** | **+10** | Data: conflict avg 50.9K vs baseline 41.2K |
+| 14 | Timing Urgency | **+8** (1+ hit) | Up from +5 |
+| **15** | **Human Story** | **+20** | Data: highest engagement rate (1.5%) |
+| **16** | **Low Performer Penalty** | **-15** | Data: factual/QA patterns proven <2K views |
 
 ### Pipeline Bonuses (context-aware)
 
@@ -95,10 +99,11 @@ Cron: every hour (skip 6, 8, 15, 21-22 WIB), watchdog at :15.
 
 **Effective score range:**
 ```
-Low-quality (boots/kit)   : 30–50
-Average (preview/quiz)    : 50–70
-Good (match result)       : 70–90
-Hot drama (controversy)   : 90–110 (capped)
+Low-quality (boots/kit)   : 15–40
+Average (preview/quiz)    : 40–65
+Good (match result)       : 65–90
+Hot drama (controversy)   : 90–130
+Viral combo (star+conflict+human) : 130–170
 ```
 
 ## Hot Topic Detection
@@ -127,11 +132,11 @@ Accent normalization: `Mbappé` → `mbappe` via `unicodedata` so French/Spanish
 
 | Source | Method | Tier | Notes |
 |--------|--------|------|-------|
-| SkySports | RSS | 1 | 24h freshness |
-| Goal.com | HTML scrape | 1 | Direct homepage scrape |
-| BBC | RSS | 1 | Image upscale to 1024px |
-| FourFourTwo | RSS | 1 | |
-| Mirror | RSS | 2 | Fresh 0–1h |
+| Goal.com | HTML scrape | **Super** (+15) | Avg 58K views — 2.1x any other source |
+| SkySports | RSS | 1 (+10) | 24h freshness |
+| BBC | RSS | 1 (+10) | Image upscale to 1024px |
+| FourFourTwo | RSS | **2 (+5)** | Demoted — avg 27K, lowest engagement |
+| Mirror | RSS | 2 (+5) | Fresh 0–1h |
 
 ## Content Format
 
@@ -149,6 +154,12 @@ Accent normalization: `Mbappé` → `mbappe` via `unicodedata` so French/Spanish
 Plus: **caption** (1 provocative sentence) + **hashtags** (max 1).
 
 ### Anti-Hallucination Grounding
+
+3-layer system:
+
+1. **Prompt Hardening** — Rules baked into LLM system prompt (no invented tactics, exact quotes, flagged rumors)
+2. **Reference Data Injection** — `_build_reference_data()` prepends current date, player ages, WC timeline, and "ground-truth math" rules before every generation
+3. **Post-Gen Number Check** — `number_grounding_check()` scans generated slides for every `£/$/€` amount, year, and age/duration pattern. Warns if any number isn't in the article or reference data
 
 All slides follow these rules:
 
@@ -211,7 +222,7 @@ Feedback delay: ~12–24 hours (post → collect metrics → next run uses real 
 
 ~/.hermes/pressbox-pipeline/
   pressbox-mvp.py            ← Main pipeline
-  pressbox_scoring.py        ← 12-component scoring engine
+  pressbox_scoring.py        ← 16-component data-driven scoring engine
   threads_poster.py          ← Threads Graph API wrapper
   pressbox_common.py         ← Shared utilities
 

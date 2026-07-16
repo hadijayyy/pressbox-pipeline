@@ -105,6 +105,7 @@ EXCLUDE_KEYWORDS = {
     "non_editorial": [
         "advertorial", "press release", "lowongan kerja",
         "event promosi", "sponsored content", "betting tips",
+        "quiz",
         "odds", "accumulator", "bet of the day", "free bet",
         "casino", "slot online", "judi online",
     ],
@@ -147,17 +148,23 @@ AMBIGUOUS_EXCLUDES = ["liga"]
 # ─── SOURCE TIERS ────────────────────────────────────────────────────────────
 # Football-specific sources
 
+# Source: goal.com avg 58K views — 2.1x BBC (42K), 2.1x fourfourtwo (27K)
+# So super tier gets +15, tier 1 = +10, tier 2 = +5
+SOURCE_TIER_SUPER = [
+    "goal.com", "goal",
+]
+
 SOURCE_TIER_1 = [
     "bbc sport", "sky sports", "the athletic", "guardian football",
     "espn fc", "football italia", "90min", "fabrizio romano",
-    "transfermarkt", "goal.com",
-    "fourfourtwo",
+    "transfermarkt",
 ]
 
 SOURCE_TIER_2 = [
     "mirror", "sun", "daily mail", "express", "star",
     "football365", "talking points", "onefootball", "football london",
     "teamtalk", "hitc", "caughtoffside",
+    "fourfourtwo",
 ]
 
 
@@ -179,15 +186,18 @@ def compute_age_hours(pub_date_str):
 
 
 def source_tier(source):
-    """Return tier (1/2/0) for source name."""
+    """Return tier (0=super, 1, 2, 99=unknown) for source name."""
     s = (source or "").lower()
+    for t in SOURCE_TIER_SUPER:
+        if t in s:
+            return 0
     for t in SOURCE_TIER_1:
         if t in s:
             return 1
     for t in SOURCE_TIER_2:
         if t in s:
             return 2
-    return 0
+    return 99
 
 
 # ─── AUDIENCE REACH BOOST ──────────────────────────────────────────────────
@@ -222,7 +232,17 @@ DRAMA_WORDS = [
     "responds", "admits", "sends message",
     "breaks silence", "sets record straight",
     "takes swipe", "calls out", "fires back", "double down",
- ]
+    # Data-driven: 487K post pattern — accusation/controversy hooks
+    "break own rule", "breaks own rule", "violation", "violated",
+    "rigged", "fixing", "corruption", "corrupt", "cheating", "cheated",
+    "unfair", "unfair advantage", "special treatment",
+    "exemption", "secret deal", "backroom deal",
+    "lies", "lying", "cover-up", "cover up", "conspiracy",
+    "hypocrisy", "hypocrite", "double standard",
+    "injustice", "disgrace", "shameful", "embarrassing",
+    "clash", "standoff", "showdown", "confrontation",
+    "angered", "incensed", "fuming", "livid",
+]
 
 
 def check_include_keywords(text):
@@ -361,9 +381,11 @@ def score_topic(t):
     else:
         data_pts = 0
 
-    # 5. Sumber Kredibilitas (max 10 pts)
+    # 5. Sumber Kredibilitas (max 15 pts) — super tier (goal) = 15, tier 1 = 10, tier 2 = 5
     tier = source_tier(t.get("source", ""))
-    if tier == 1:
+    if tier == 0:
+        source_pts = 15
+    elif tier == 1:
         source_pts = 10
     elif tier == 2:
         source_pts = 5
@@ -443,48 +465,76 @@ def score_topic(t):
     if any(re.search(p, title_lower_combined) for p in WARNING_PATTERNS):
         warning_pts = 8
 
-    # 12. Winning Formula Bonus (+10) — "[Entity] just [past-tense action]"
-    # Proven 100K+ pattern: "Erling Haaland just scored", "Norway just swapped"
-    WINNING_FORMULA_RE = re.compile(
-        r'\b[a-z\']+\s+just\s+(?:scored|signed|revealed|announced|dismissed|'
-        r'gambled|changed|banned|ditched|refused|admitted|confirmed|replaced|quit|'
-        r'walked|stormed|threw|exposed|left|dropped|suspended|sacked|fired|hired|'
-        r'appointed|named|chose|picked|axed|blasted|slammed|hit\s+back|fired\s+back|'
-        r'doubled\s+down|backed|swooped|stole|poached|snubbed|destroyed|wrecked|'
-        r'lost|won|claimed|sealed|secured)\b', re.IGNORECASE)
-    winning_formula_pts = 0
-    if WINNING_FORMULA_RE.search(title_lower):
-        winning_formula_pts = 10
-
-    # 13. Curiosity Gap Bonus (+8) — proven CTA/cliffhanger hooks
-    CURIOSITY_GAP = [
-        r"the\s+reason\??$",
-        r"here'?s\s+(?:why|how)",
-        r"this\s+is\s+(?:why|how)",
-        r"let\s+me\s+explain",
-        r"the\s+full\s+story",
-        r"you\s+won'?t\s+believe",
-        r"you\s+need\s+to\s+(?:see|know|watch)",
-        r"it\s+gets\s+(?:worse|better|crazier)",
+    # 12. Star Player Bonus (+20) — data: +39% above baseline, top 5 dominated by star names
+    PROVEN_STARS = [
+        r"\bhaaland\b", r"\bmbappe\b", r"\bmessi\b", r"\bkane\b",
+        r"\bbellingham\b", r"\bsaka\b", r"\bsalah\b", r"\bvin[i]cius\b",
+        r"\bde\s+bruyne\b", r"\brodri\b", r"\byamal\b", r"\bwirtz\b",
+        r"\bmusiala\b", r"\bgavi\b", r"\bpedri\b", r"\bkvaratskhelia\b",
+        r"\bosimhen\b", r"\bzirkzee\b", r"\bmainoo\b", r"\bpalmer\b",
+        r"\bneymar\b", r"\blewandowski\b", r"\bhalland\b",
     ]
-    curiosity_pts = 0
-    if any(re.search(p, title_lower) for p in CURIOSITY_GAP):
-        curiosity_pts = 8
+    star_player_pts = 0
+    if any(re.search(p, title_lower) for p in PROVEN_STARS):
+        star_player_pts = 20
 
-    # 14. Timing Urgency Bonus (+5) — immediate/breaking signals
+    # 13. Conflict Hook Bonus (+10) — data: conflict avg 50,937v vs baseline 41,152v
+    CONFLICT_KW = [
+        r"\bvs\.?\b", r"\bagainst\b", r"\bclash\b", r"\brival\b", r"\bbattle\b",
+        r"\bwar\s+of\s+words\b", r"\bstandoff\b", r"\bshowdown\b", r"\bdispute\b",
+        r"\bfight\b", r"\bfeud\b", r"\bbust[-\s]up\b",
+    ]
+    conflict_hook_pts = 0
+    if any(re.search(p, title_lower) for p in CONFLICT_KW):
+        conflict_hook_pts = 10
+
+    # 14. Timing Urgency Bonus (+8)
     TIMING_URGENCY = [
         r'\bjust\b', r'\bbreaking\b', r'\bminutes\s+ago\b',
-        r'\blatest\b', r'\bminutes\b',
+        r'\blatest\b',
     ]
     urgency_pts = 0
     urgency_hits = sum(1 for p in TIMING_URGENCY if re.search(p, title_lower))
-    if urgency_hits >= 2:
-        urgency_pts = 5
+    if urgency_hits >= 1:
+        urgency_pts = 8
+
+    # 15. Human Story Bonus (+10) — proven highest engagement rate (1.5%)
+    # "Haaland journey", "How Argentina got best out of Messi", "secret to"
+    HUMAN_STORY_PATTERNS = [
+        r"\bjourney\b", r"\bsecret\s+to\b",
+        r"got\s+the\s+best\s+out\s+of",
+        r"mates?,\s*mate",
+        r"heart\s+of\b", r"\bstory\s+of\b",
+        r"life\s+of\b", r"\bmissed\b",
+        r"\bspecial\b", r"\bmeaning\b",
+        r"what\s+(?:they\s+)?missed",
+    ]
+    human_story_pts = 0
+    if any(re.search(p, title_lower) for p in HUMAN_STORY_PATTERNS):
+        human_story_pts = 20
+
+    # 16. Low Performer Penalty (-15) — factual/QA patterns proven <2K views
+    LOW_PERFORMER_PATTERNS = [
+        r"who\s+is\s+the\s+referee",
+        r"do\s+players\s+miss\s+",
+        r"rice\s+(?:fit|available)",
+        r"will\s+(?:there|he|she|they)\s+",
+        r"can\s+you\s+name",
+        r"quiz:?\s+can",
+        r"is\s+it\s+possible",
+        r"how\s+to\s+watch",
+        r"tv\s+channel",
+        r"broadcast\s+(?:info|details)",
+    ]
+    low_performer_pts = 0
+    if any(re.search(p, title_lower) for p in LOW_PERFORMER_PATTERNS):
+        low_performer_pts = -15
 
     total = (
         keyword_pts + cat_pts + recency_pts + data_pts + source_pts +
         audience_pts + drama_pts + first_ever_pts + niche_pts + paradox_pts +
-        warning_pts + winning_formula_pts + curiosity_pts + urgency_pts
+        warning_pts + star_player_pts + conflict_hook_pts + urgency_pts +
+        human_story_pts + low_performer_pts
     )
     return total
 

@@ -306,8 +306,8 @@ class TestComponentBreakdown:
         assert pbox_scoring.source_tier("Mirror") == 2
 
     def test_source_tier_unknown(self):
-        """Unknown source should be Tier 0."""
-        assert pbox_scoring.source_tier("RandomBlog") == 0
+        """Unknown source should return 99 (unknown)."""
+        assert pbox_scoring.source_tier("RandomBlog") == 99
 
     def test_has_specific_data_score(self):
         """Score '3-1' should be detected."""

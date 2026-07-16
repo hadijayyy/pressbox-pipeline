@@ -17,6 +17,7 @@ from bs4 import BeautifulSoup
 # ── Config ──────────────────────────────────────────────────────────
 DRY_RUN = "--dry-run" in sys.argv
 SOURCES = ["skysports", "goal", "bbc", "fourfourtwo"]
+_SOURCE_PRIORITY = {"goal": 0, "bbc": 1, "fourfourtwo": 2, "skysports": 3}
 ARTICLE_CACHE = f"{HOME}/.hermes/pressbox/article-cache.json"
 SOURCE_FINGERPRINTS = f"{HOME}/.hermes/pressbox/source-fingerprints.json"
 MAX_CHARS = 500  # Threads per-slide limit
@@ -698,7 +699,7 @@ def filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_su
         # Commercial/shopping articles — not football news
         if any(kw in tl for kw in _COMMERCIAL): continue
         # Filter out live commentary/live-blog pages
-        if '/live/' in url or '/live-blog/' in url: continue
+        if '/live/' in url or '/live-blog/' in url or '/quiz/' in url: continue
         # Sensitive content
         if _match_sensitive(tl) or _match_sensitive(desc): continue
         # Dedup
@@ -810,7 +811,7 @@ def filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_su
                         log(f"   🖼️ Image fallback: {fallback_img[:60]}...")
             except: pass
         results.append(t)
-    results.sort(key=lambda x: -x["_score"])
+    results.sort(key=lambda x: (-x["_score"], _SOURCE_PRIORITY.get(x.get("source", ""), 99)))
     # Cannibalization filter — skip lower-scored duplicate topics
     seen_sigs = set()
     deduped = []
@@ -1093,6 +1094,95 @@ def _select_viral_pattern(topic, article_text):
     else:
         return "c"  # default to Pattern C (proven 500K+ views)
 
+def _build_reference_data():
+    """Build factual reference data injected into every generation prompt.
+    Includes current date, WC timeline, and common player ages.
+    Returns string to prepend to the user message."""
+    from datetime import date
+    today = date.today()
+
+    players = [
+        ("Harry Kane", 7, 28, 1993),
+        ("Lionel Messi", 6, 24, 1987),
+        ("Kylian Mbappe", 12, 20, 1998),
+        ("Erling Haaland", 7, 21, 2000),
+        ("Jude Bellingham", 6, 29, 2003),
+        ("Bukayo Saka", 9, 5, 2001),
+        ("Mohamed Salah", 6, 15, 1992),
+        ("Lamine Yamal", 7, 13, 2007),
+        ("Vinicius Jr", 7, 12, 2000),
+        ("Rodri", 6, 22, 1996),
+        ("Florian Wirtz", 5, 3, 2003),
+    ]
+
+    wc_years = 2030 - today.year
+    lines = [f"## FACTUAL REFERENCE DATA (ground truth for all math)"]
+    lines.append(f"Current date: {today.strftime('%A, %B %d, %Y')}")
+    lines.append(f"2030 FIFA World Cup: June-July 2030 → ~{wc_years} years from now")
+    lines.append("")
+    lines.append(f"Player ages (mid-{today.year}):")
+    _months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+    for name, m, d, y in players:
+        age = today.year - y
+        if (today.month, today.day) < (m, d):
+            age -= 1  # birthday not yet this year
+        lines.append(f"- {name}: {age} (born {d} {_months[m-1]} {y})")
+    lines.append("")
+    lines.append("RULES for numbers in your output:")
+    lines.append("- Every number MUST come from the article OR this reference data.")
+    lines.append("- NEVER calculate ages, future dates, or fees not listed above.")
+    lines.append("- When in doubt: omit the number. Wrong is worse than vague.")
+    return "\n".join(lines)
+
+
+def number_grounding_check(slides_text, article_text, ref_text):
+    """Check numerical claims in slides are grounded in article or reference data.
+    Returns list of warning strings (empty = clean).
+    Uses article as primary source, reference data as secondary (allowed)."""
+    import re
+    warnings = []
+    article_lower = article_text.lower()
+    ref_lower = ref_text.lower()
+
+    # Collect reference-safe numbers (all digits from ref data)
+    ref_nums = set()
+    for m in re.finditer(r"\b\d+\b", ref_lower):
+        ref_nums.add(m.group())
+
+    # Check money amounts: £80m, $100m, €50m, "80 million", etc
+    for m in re.finditer(
+        r"\b(?:[£$€]\s*\d[\d,.]*\s*(?:m|million|bn|billion|k|thousand)?|"
+        r"\d[\d,.]*\s*(?:m|million|bn|billion|k|thousand))\b",
+        slides_text, re.IGNORECASE
+    ):
+        val = m.group().strip().lower()
+        if val in article_lower:
+            continue
+        if val in ref_lower:
+            continue
+        warnings.append(f"NUMBER_HALLUCINATION: '{m.group().strip()}' not in article or reference")
+
+    # Check 4-digit years (likely tournament years, record milestones)
+    for m in re.finditer(r"\b(20\d{2})\b", slides_text):
+        year = m.group()
+        if year in ref_nums:
+            continue
+        if re.search(r"\b" + re.escape(year) + r"\b", article_lower):
+            continue
+        warnings.append(f"NUMBER_HALLUCINATION: '{year}' not in source article")
+
+    # Check "X years" / "X-year-old" patterns (ages, durations)
+    for m in re.finditer(r"\b(\d{1,2})\s*(?:year(?:s)?\b|[\- ]year[\- ]old\b)", slides_text, re.IGNORECASE):
+        num = m.group(1)
+        if num in ref_nums:
+            continue
+        if re.search(r"\b" + re.escape(num) + r"\b", article_lower):
+            continue
+        warnings.append(f"NUMBER_HALLUCINATION: age/duration '{m.group().strip()}' not in source")
+
+    return warnings
+
+
 def generate_slides(article_text, url, title="", source="", hooks="", cta_pattern="", tone="", pattern="a", evaluator_feedback=""):
     """Call LLM to generate 6-slide thread. Returns parsed slides or None.
     If evaluator_feedback is provided, appends correction instructions to the prompt."""
@@ -1201,6 +1291,17 @@ Every fact must come from the article. Never invent quotes, transfer fees, or in
 
 10. PRESERVE HEDGING. If the article says 'looks likely', 'reportedly', 'according to sources', 'I assume' — keep that uncertainty. Never upgrade hedges to certainties. 'Looks likely to stay' ≠ 'won't leave'. 'I assume he won't stand in the way' ≠ 'Red Bull won't block him'.
 
+## 8.5 NUMBER TRUTH RULES — STRICT (ZERO TOLERANCE)
+1. ONLY use numbers that appear verbatim in the article above or in the FACTUAL REFERENCE DATA section below.
+2. NEVER calculate or infer player ages. "He's 31" is forbidden unless the article explicitly mentions the player's age.
+3. NEVER calculate years-to-event (e.g., "6 years until 2030"). Use the FACTUAL REFERENCE DATA.
+4. If the article states a fee as "£60m" (exact), you may use it. If uncertain ("reportedly"), preserve uncertainty.
+5. When in doubt: OMIT the number. No number is better than a wrong number.
+6. HALLUCINATION WARNING — these are known past errors:
+   - Player ages not in source (e.g., "He's 31" when article doesn't mention age)
+   - Years-to-future-events (e.g., "2030 World Cup is 6 years away" — correct is 4)
+   - Transfer fees, percentages, stats not stated in the article
+
 ## 9. BANNED PATTERNS
 Don't use: You won't believe... / In today's football world... / Sources say... (without specifying which) / This is a game-changer / Fans are furious (unless article shows actual fan reaction) / Shocking (used as a crutch word) / Insane (used as a crutch word) / Let that sink in / Say what you want, but... / you've been warned / beware / watch out / "Tahukah kamu?", "Yuk simak!", "Ini dia rahasianya" / "Did you know?", "Let's dive in!", "Here's the secret" / Clickbait-style headlines / AIDA/PAS formulas / Motivational closing lines
 
@@ -1220,8 +1321,9 @@ Output:
   "cover_image_keywords": "Balogun USA celebration close-up"
 }"""
 
+    ref_data = _build_reference_data()
     source_name = source or url.split("/")[2] if url else ""
-    user = f"Title: {title}\n\nBody:\n{article_text[:8000]}\n\nSource: {source_name}"
+    user = f"Title: {title}\n\n{ref_data}\n\nBody:\n{article_text[:8000]}\n\nSource: {source_name}"
     if evaluator_feedback:
         user += f"\n\n## ⚠️ EVALUATOR REJECTED YOUR PREVIOUS ATTEMPT — FIX THESE ERRORS:\n{evaluator_feedback}\nRegenerate ALL 6 slides. Do NOT repeat the errors above."
 
@@ -1598,6 +1700,20 @@ def main():
                 log(f"   ⚠️ Name warnings (soft): {'; '.join(hallucinated_names)}")
             if hallucinated_stages:
                 log(f"   ⚠️ Stage warnings (soft): {'; '.join(hallucinated_stages)}")
+
+            # 5.3 Number grounding check — reject ungrounded numbers before expensive evaluator
+            ref_data_check = _build_reference_data()
+            num_warnings = number_grounding_check(slides_text, article_text, ref_data_check)
+            if num_warnings:
+                warn_str = "; ".join(num_warnings)
+                log(f"   🚫 Number hallucination detected: {warn_str}")
+                if eval_round < 2:
+                    eval_feedback = "\n".join(f"- {w}" for w in num_warnings)
+                    log(f"   🔄 Retrying (round {eval_round+1}/3) with number grounding feedback")
+                    continue
+                else:
+                    log(f"   🚫 Number hallucination persisted after 3 attempts — trying next article")
+                    break
 
             # 5.5. Evaluator — skip for high-score posts (saves ~50s)
             score_val = hotness.get(url, 0) or best.get("_score", 0)
