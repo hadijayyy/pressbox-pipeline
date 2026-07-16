@@ -637,9 +637,13 @@ _SENSITIVE_EXACT = [
     "genocide","ethnic cleansing","terrorism",
     "falklands","malvinas",
     "soldiers died","soldiers killed","troops deployed",
+    # exact terms (was wildcard — false positive on 'depth')
+    "death","dead","deadly","kill","killed","killing","kills",
 ]
 _SENSITIVE_WILDCARD = [
-    "k*ll","de*th","m*rd*r","st*bb*ng","sh*ting","b*mb*ng","terr*rist","sl*ying","exec*ting",
+    "m*rd*r","st*bb*ng","b*mb*ng","terr*rist","sl*ying","exec*ting",
+    # removed: de*th (matched 'depth'), k*ll (matched 'will'),
+    # sh*ting (matched 'shooting' — football term)
 ]
 
 import fnmatch as _fnmatch
