@@ -1507,6 +1507,29 @@ def track_post(title, url, source, root_id, permalink, hotness_score=0):
     with open(POSTED, "w") as f:
         json.dump(data, f, indent=2)
 
+# ── 7. PRE-FLIGHT ──────────────────────────────────────────────────
+
+def _self_check():
+    """Validate all essential names exist before main() runs."""
+    required = [
+        "scrape_rss", "scrape_goal",
+        "fetch_article", "extract_article", "extract_image",
+        "generate_slides", "post_to_threads", "notify_telegram",
+        "track_post", "load_threads_token",
+        "_select_viral_pattern", "grounding_check",
+        "_extract_proper_nouns", "_extract_stages",
+        "_match_sensitive", "_http", "_build_reference_data",
+        "_count_sentences",
+        "log", "check_cooldown",
+    ]
+    missing = [n for n in required if n not in globals()]
+    if missing:
+        msg = f"❌ Pre-flight failed — missing: {', '.join(missing)}"
+        log(msg)
+        print(msg, flush=True)
+        sys.exit(1)
+    log("✔ Pre-flight ok")
+
 # ── MAIN ────────────────────────────────────────────────────────────
 
 def check_cooldown(minutes=15):
@@ -1814,9 +1837,19 @@ Score: {score} | {slide_count} slides | {total:.1f}s
     print(report, flush=True)
 
 if __name__ == "__main__":
+    _self_check()
     import random as _rnd
     if "--with-jitter" in sys.argv:
         _jitter = _rnd.randint(0, 30)
         log(f"⏳ Jitter sleep: {_jitter}s")
         time.sleep(_jitter)
-    main()
+    try:
+        main()
+    except SystemExit:
+        raise
+    except Exception:
+        import traceback
+        err = traceback.format_exc()
+        log(f"❌ CRASH: {err[:500]}")
+        notify_telegram(f"❌ <b>Pipeline Crash</b>\n\n{err[:1000]}")
+        sys.exit(1)
