@@ -16,8 +16,8 @@ from bs4 import BeautifulSoup
 
 # ── Config ──────────────────────────────────────────────────────────
 DRY_RUN = "--dry-run" in sys.argv
-SOURCES = ["skysports", "goal", "bbc", "fourfourtwo"]
-_SOURCE_PRIORITY = {"goal": 0, "bbc": 1, "fourfourtwo": 2, "skysports": 3}
+SOURCES = ["goal", "bbc", "fourfourtwo"]
+_SOURCE_PRIORITY = {"goal": 0, "bbc": 1, "fourfourtwo": 2}
 ARTICLE_CACHE = f"{HOME}/.hermes/pressbox/article-cache.json"
 SOURCE_FINGERPRINTS = f"{HOME}/.hermes/pressbox/source-fingerprints.json"
 MAX_CHARS = 500  # Threads per-slide limit
@@ -133,7 +133,7 @@ def _save_fingerprints(fps):
 
 def scrape_all():
     """Scrape all sources in parallel. Skip sources with unchanged RSS."""
-    log("Scraping 4 sources...")
+    log("Scraping 3 sources...")
     t0 = time.time()
     fingerprints = _load_fingerprints()
     new_fingerprints = {}
@@ -154,7 +154,6 @@ def scrape_all():
 
     with ThreadPoolExecutor(max_workers=5) as ex:
         futs = {
-            "skysports": ex.submit(scrape_with_fingerprint, "skysports", scrape_rss, "https://www.skysports.com/rss/11095", "skysports", 12),
             "goal": ex.submit(scrape_with_fingerprint, "goal", scrape_goal),
             "bbc": ex.submit(scrape_with_fingerprint, "bbc", scrape_rss, "https://feeds.bbci.co.uk/sport/football/rss.xml", "bbc", 10),
             "fourfourtwo": ex.submit(scrape_with_fingerprint, "fourfourtwo", scrape_rss, "https://www.fourfourtwo.com/rss", "fourfourtwo", 8),
@@ -182,7 +181,6 @@ def scrape_all():
         log("   ⚠️ All sources unchanged — forcing full scrape")
         with ThreadPoolExecutor(max_workers=5) as ex:
             futs = {
-                "skysports": ex.submit(scrape_rss, "https://www.skysports.com/rss/11095", "skysports", 12),
                 "goal": ex.submit(scrape_goal),
                 "bbc": ex.submit(scrape_rss, "https://feeds.bbci.co.uk/sport/football/rss.xml", "bbc", 10),
                 "fourfourtwo": ex.submit(scrape_rss, "https://www.fourfourtwo.com/rss", "fourfourtwo", 8),
