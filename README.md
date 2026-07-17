@@ -8,7 +8,7 @@ Scrapes football news from 5 sources, detects hot/viral topics via entity cluste
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│  1. SCRAPE          5 sources (skysports, goal, bbc,         │
+│  1. SCRAPE          5 sources (goal, bbc, fourfourtwo, mirror) — parallel          │
 │                     fourfourtwo, mirror) — parallel          │
 │       ↓                                                      │
 │  2. FILTER          Commercial/TV/sensitive/women blocked    │
