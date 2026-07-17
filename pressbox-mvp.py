@@ -1341,7 +1341,7 @@ Output:
                 json={"model":"mistral-large-latest","messages":[
                     {"role":"system","content":system},{"role":"user","content":user}],
                     "max_tokens":4000,"temperature":0.3,"stream":True},
-                timeout=60, stream=True)
+                timeout=120, stream=True)
 
             if r.status_code != 200:
                 log(f"   ❌ HTTP {r.status_code}: {r.text[:200]}")
@@ -1661,6 +1661,7 @@ def main():
     slides = None
     llm_time = 0
     article_accepted = False
+    hooks = ""
     for article_attempt in range(3):  # try up to 3 different articles
         if article_attempt > 0:
             # Try next ranked article
@@ -1676,7 +1677,7 @@ def main():
                 log(f"   ⚠️ Next article too short ({len(article_text or '')} chars) — skipping")
                 continue
             # Re-extract hooks for new article
-            hooks = detect_hooks(article_text, best.get("title", ""))
+            hooks = ""
             hooks_str = ", ".join(hooks) if isinstance(hooks, list) else hooks
 
         t0 = time.time()
