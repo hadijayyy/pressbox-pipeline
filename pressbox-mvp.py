@@ -1062,13 +1062,18 @@ def _select_viral_pattern(topic, article_text):
     text = article_text.lower()[:2000]
     combined = title + " " + text
     
-    # Pattern A signals: scandal, controversy, hidden reason, money, behind-scenes
+    # Pattern A signals (Rule-Break primary): authority violates own rules, scandal
+    rule_break_words = ["rule", "regulation", "tradition", "golden rule", "broke its own",
+                        "violated", "waived", "ignored its own", "bent the rules",
+                        "loophole", "exception", "exemption", "contradicts", "fast-tracked",
+                        "changed its own", "greenlit", "special treatment"]
     scandal_words = ["scandal", "controversy", "behind the scenes", "secret", "real reason",
                      "nobody talks", "ugly truth", "shocking", "betray", "refuse", "clash",
                      "furious", "rage", "slam", "blast", "row", "rift", "feud"]
-    scandal_score = sum(1 for w in scandal_words if w in combined)
+    scandal_score = sum(2 for w in rule_break_words if w in combined) + \
+                    sum(1 for w in scandal_words if w in combined)
     
-    # Pattern B signals: paradox, statistical anomaly, "despite"/"while", big team threat
+    # Pattern B signals (deprecated — kept for backward compat)
     paradox_words = ["despite", "while barely", "yet somehow", "paradox", "irony",
                      "without", "only touched", "minimal", "fewest", "least",
                      "but only", "first in history", "record-breaking"]
@@ -1086,17 +1091,11 @@ def _select_viral_pattern(topic, article_text):
     if has_specific_number:
         detail_score += 3  # Strong signal for Pattern C
     
-    # Has big team target for "you've been warned"?
-    big_teams_warn = ["brazil", "argentina", "germany", "france", "spain", "england",
-                      "real madrid", "barcelona", "manchester", "liverpool", "chelsea",
-                      "bayern", "psg", "juventus", "inter milan", "arsenal"]
-    has_big_team = any(bt in combined for bt in big_teams_warn)
-    
-    # Decision: scandal wins if higher, else detail. No more Pattern B.
-    if scandal_score > detail_score:
+    # Decision: rule-break/scandal wins if higher
+    if scandal_score >= detail_score:
         return "a"
     else:
-        return "c"  # default to Pattern C (proven 500K+ views)
+        return "c"
 
 def _build_reference_data():
     """Build factual reference data injected into every generation prompt.
@@ -1205,8 +1204,7 @@ Audience is casual football fans. They know big names and big clubs but don't tr
 
 Goal: share "meaty" insights/takes from this football news, packaged casually, honestly, straight-talking — like a fan who just read the news and is reacting on Threads, not a club press office or a mouthpiece for the media.
 
-## 3. STORY SELECTION
-If the article covers more than one incident, controversy, or storyline, pick ONE to build the post around: most dramatic/high-stakes > most relevant to casual fans (big names/clubs > obscure ones) > most contradictory or shocking > most recent. Other storylines can get a one-sentence mention as context in slides 2-3, but don't develop them. One post = one story.
+## 3. STORY SELECTION\nIf the article covers more than one incident, controversy, or storyline, pick ONE to build the post around.\n\nPRIORITY ORDER (highest first):\n1. Authority-bends-its-own-rules: FIFA/UEFA/FA/PL/IFAB violates, bends, or contradicts its own rule, regulation, or tradition for a specific match/team/player — this format generates 12M+ views\n2. Controversy/scandal: clash, rift, feud, behind-the-scenes drama\n3. Statistical anomaly: "despite X, Y happened" — specific numbers\n4. Human interest: emotional story about a player's sacrifice, family, journey\n\nOther storylines can get a one-sentence mention as context in slides 2-3, but don't develop them. One post = one story.
 
 ## 4. TASK
 From the article content, find the 5 strongest insights using this filter (rank them, don't just list):
@@ -1235,7 +1233,7 @@ Return ONLY valid JSON, no other text:
 {"slide_1":"", "slide_2":"", "slide_3":"", "slide_4":"", "slide_5":"", "slide_6":"", "caption":"", "cover_image_keywords":""}
 
 Within one slide: each sentence separated by \n\n (double newline)
-The last slide (Slide 6) must close with a natural open-ended question — not a sales CTA, goal is to bait replies/comments
+The last slide (Slide 6) must close with a FORCED-CHOICE binary question. NOT yes/no. Format: "Option A or Option B?" — forces users to pick a side and reply. Example: "Engineering nightmare or sponsor snub?"
 
 ## 7. EXECUTION & EXCLUSION
 Tone: Raw, unpolished, casual. FORBIDDEN:
@@ -1247,11 +1245,7 @@ Tone: Raw, unpolished, casual. FORBIDDEN:
 - Generic sports-blog phrasing ("in the world of football today", "fans everywhere are talking about")
 - "link in bio." Never fabricate quotes.
 
-### Slide 1 (Hook):
-- MAX 2 sentences, under 20 words
-- Sentence 1 = stop-scroll hook: hits fan ego, challenges common football logic, or creates curiosity
-- If there's a relevant specific number from the news (fee, stat, wage), put it in the hook
-- NO intro fluff. NO "Here's why". Straight to the shock.
+### Slide 1 (Hook) — VIRAL HEADLINE:\n- EXACT format: "[FIFA/UEFA/FA/PL/IFAB] just [broke/violated/waived/ignored] its own [rule/regulation/tradition] for [Team A] vs [Team B]. [Specific concrete detail] — [Option A] or [Option B]?"\n- Example: "FIFA just broke its own golden rule for England vs Argentina. Mercedes-Benz logo stays — engineering nightmare or sponsor snub?"\n- MAX 2 sentences. Under 25 words.\n- NO intro fluff. NO "Here's why". Straight to the rule-break + binary question.
 
 ### Slides 2-6 (Body):
 - EXACTLY 3 lines per slide (2-3 sentences, 1 line each, separated by \n\n). Don't use fewer — tight rhythm keeps readers scrolling.
@@ -1259,12 +1253,11 @@ Tone: Raw, unpolished, casual. FORBIDDEN:
 - Paraphrase quotes from the article, don't copy-paste original sentences
 - Attribution: Mention the news source (outlet name) at least once in one of the slides, for credibility
 
-### Arc Structure (slide order):
-Escalation arc. Slide 1 = hook (the scandal/shock). Slide 2 = context (what happened). Slide 3 = escalation (how it got worse). Slide 4 = conflict/official response (pushback, rule violation, quote). Slide 5 = stakes (why it matters — stats, numbers, consequences). Slide 6 = polarizing open question. This order is proven: don't rearrange randomly.
+### Arc Structure (slide order) — VIRAL FORMAT:\nRule Break arc. Slide order is FIXED — don't rearrange.\nS1 = HOOK: "Authority breaks own rule" headline. MUST follow format: "FIFA/UEFA/FA/PL/IFAB just broke/violated/waived/ignored its own rule/regulation/tradition for Team A vs Team B. Specific detail — Option A or Option B?"\nS2 = THE RULE: What the rule says. Use exact phrasing if available from the article. Short, clear.\nS3 = THE VIOLATION: What happened. Names, dates, specific actions. The incident.\nS4 = THE DILEMMA: Two sides. Option A = follow the rule (consequences), Option B = break the rule (consequences). Make both sides feel reasonable.\nS5 = THE STAKES: Why this matters to fans. Money, fairness, competitive advantage, history, precedent.\nS6 = DEBATE: Forced-choice binary question. NOT yes/no. "Option A or Option B?"\n\nThis arc is proven to generate 12M+ views on football Threads. Follow it exactly.
 
 ### Caption Rules:
-2-3 lines max. First line = THE shocking number/fact. Second line = consequence.
-Example: "England's next World Cup game is at 7,220ft.\\nThe air's so thin, players will gas out before halftime."
+2 lines max. First line = headline format (same as Slide 1 hook). Second line = the binary question.
+Example: "FIFA just broke its own golden rule for England vs Argentina.\\nThe Mercedes-Benz logo stays — engineering nightmare or sponsor snub?"
 Zero emoji. Zero hashtags.
 
 ### Cover Image Rules:
@@ -1309,25 +1302,26 @@ Every fact must come from the article. Never invent quotes, transfer fees, or in
 ## 9. BANNED PATTERNS
 Don't use: You won't believe... / In today's football world... / Sources say... (without specifying which) / This is a game-changer / Fans are furious (unless article shows actual fan reaction) / Shocking (used as a crutch word) / Insane (used as a crutch word) / Let that sink in / Say what you want, but... / you've been warned / beware / watch out / "Tahukah kamu?", "Yuk simak!", "Ini dia rahasianya" / "Did you know?", "Let's dive in!", "Here's the secret" / Clickbait-style headlines / AIDA/PAS formulas / Motivational closing lines
 
-## 10. WORKED EXAMPLE
+## 10. WORKED EXAMPLE (VIRAL FORMAT)
 
-Input: Sky Sports match report. USA 2-0 Bosnia-Herzegovina, World Cup 2026 Round of 32. Balogun scored in the 45th minute after a defensive error, then was sent off in the 64th minute for a reckless challenge on Muharemovic's ankle, confirmed by VAR review. USA held on with 10 men and Tillman scored a free kick in the 80th minute. USA now face Belgium in Seattle.
+Input: Mirror.co.uk. Manchester United just got 3 of its 5 injured defenders back. But the Premier League denied United's request to postpone the Arsenal match. The rule says a club can request postponement if COVID/fatigue leave them with fewer than 14 available senior players. United had 12. PL said no — citing integrity of the fixture schedule. Arsenal's next game is in the Champions League.
 
 Output:
 {
-  "slide_1": "68,827 fans watched him score the winner. Then VAR sent him off 19 minutes later.",
-  "slide_2": "Balogun pounced on a defensive error in the 45th. USA led right before half time.",
-  "slide_3": "On 62 minutes, VAR spotted a reckless challenge. Ref went to the monitor. Red card.",
-  "slide_4": "Down to 10 men with 30 minutes left. USA didn't just hold on. They scored again.",
-  "slide_5": "Tillman's free kick in the 80th sealed it. This squad doesn't break under pressure.",
-  "slide_6": "Belgium up next in Seattle. Can they do it again with 10 men?",
-  "caption": "He scored the winner and got sent off in the same game.\\n68,827 fans watched both happen.",
-  "cover_image_keywords": "Balogun USA celebration close-up"
+  "slide_1": "PL just denied its own postponement rule for Man United vs Arsenal. 12 available players \u2014 14 required \u2014 integrity or inconsistency?",
+  "slide_2": "PL Rule 4.6: clubs can postpone if fewer than 14 senior players available. United had 12. The rule says yes.",
+  "slide_3": "PL said no. Statement cited fixture schedule integrity. Same rule Bayern got approved for last season.",
+  "slide_4": "Option A: Protect fixture calendar, avoid backlog. Option B: Apply the rule as written \u2014 12 < 14.",
+  "slide_5": "Arsenal play UCL in 4 days. United play with half a defense. One team risks its season, the other doesn't.",
+  "slide_6": "Follow the rule or protect the schedule \u2014 which matters more?",
+  "caption": "PL just denied its own postponement rule for Man United vs Arsenal.\\n12 available players \u2014 14 required \u2014 integrity or inconsistency?",
+  "cover_image_keywords": "Man United Arsenal Premier League fixture tension"
 }"""
 
     ref_data = _build_reference_data()
     source_name = source or url.split("/")[2] if url else ""
-    user = f"Title: {title}\n\n{ref_data}\n\nBody:\n{article_text[:8000]}\n\nSource: {source_name}"
+    pattern_label = {'a':'Rule-Break (scandal)', 'b':'Paradox', 'c':'Detail+Emotion'}.get(pattern, 'Detail+Emotion')
+    user = f"Title: {title}\n\nViral Pattern selected: {pattern_label}\n\n{ref_data}\n\nBody:\n{article_text[:8000]}\n\nSource: {source_name}"
     if evaluator_feedback:
         user += f"\n\n## ⚠️ EVALUATOR REJECTED YOUR PREVIOUS ATTEMPT — FIX THESE ERRORS:\n{evaluator_feedback}\nRegenerate ALL 6 slides. Do NOT repeat the errors above."
 
@@ -1705,7 +1699,7 @@ def main():
 
         t0 = time.time()
         pattern = _select_viral_pattern(best, article_text)
-        pattern_name = {'a': 'A (scandal)', 'b': 'B (paradox)', 'c': 'C (detail+emotion)'}[pattern]
+        pattern_name = {'a': 'A (Rule-Break)', 'b': 'B (deprecated)', 'c': 'C (Detail+Emotion)'}[pattern]
         log(f"   🎯 Viral pattern: {pattern_name}")
         hooks_str = ", ".join(hooks) if isinstance(hooks, list) else hooks
         eval_feedback = ""
