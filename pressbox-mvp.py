@@ -1334,6 +1334,8 @@ PRIORITY ORDER (highest first):
 6. Human interest: emotional story about a player's sacrifice, family, journey
 
 Other storylines can get a one-sentence mention as context in slides 2-3, but don't develop them. One post = one story.
+
+⚠️ LIVE BLOG / TRANSFER BLOG RULE: If the article is a live-updating blog (multiple transfers, match updates, news items), IGNORE all entries except the single story referenced in the PAGE TITLE. The title selects the most important story. Do not mention Salah, Trossard, or any other player/club not in the title story. All 6 slides must follow ONE storyline from ONE transfer/news item.
 ## 4. TASK
 From the article content, find the 5 strongest insights using this filter (rank them, don't just list):
 1. Counter-intuitive / challenges common fan assumptions (about a player, tactic, transfer, club decision, etc.)
