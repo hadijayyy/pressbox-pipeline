@@ -122,6 +122,19 @@ EXCLUDE_KEYWORDS = {
         "sunday's gossip", "paper talk", "paper round",
         "transfer gossip", "rumour mill",
     ],
+    "low_value": [
+        # Referee / official info — proven <500 views, filler
+        "who will referee", "who is the referee", "referee for", "referee appointed",
+        "team news:", "predicted lineup", "predicted lineups",
+        "predicted xi", "match preview", "preview:",
+        # Generic logistics — no shares
+        "what time is", "how to watch", "where to watch",
+        "tv channel", "broadcast details", "streaming kick-off",
+        # Quiz / trivia
+        "can you name", "can you guess",
+        # Future-telling
+        "how far can", "where will they finish", "predicted finish",
+    ],
     "non_football_context": [
         # Military / war — ALWAYS non-football, hard reject
         "soldiers died", "soldiers killed", "troops deployed",
@@ -242,6 +255,17 @@ DRAMA_WORDS = [
     "injustice", "disgrace", "shameful", "embarrassing",
     "clash", "standoff", "showdown", "confrontation",
     "angered", "incensed", "fuming", "livid",
+    # Rule-break / governance outrage — proven viral territory
+    "bends rules", "bending rules", "rule change", "loophole",
+    "exposed", "caught out", "caught on camera", "leaked",
+    "secret meeting", "backdoor", "cover-up", "officials",
+    "banned from", "barred from", "kicked out", "expelled",
+    "investigation", "investigates", "probe", "inquiry",
+    "fifa ban", "uefa ban", "fifa rule", "uefa rule",
+    "violates", "breach", "breaches", "breached",
+    "told to", "ordered to", "forced to", "demands", "demanded",
+    "under fire", "under scrutiny", "under review", "favouritism",
+    "nepotism", "conflict of interest", "privilege", "elitist",
 ]
 
 
@@ -354,9 +378,11 @@ def score_topic(t):
     matched_count, categories = check_include_keywords(combined)
     keyword_pts = min(matched_count, 5) * 8
 
-    # 2. Category Relevance (max 20 pts)
-    if categories & {"transfer", "match", "drama"}:
-        cat_pts = 20
+    # 2. Category Relevance (max 30 pts) — controversy/drama valued highest
+    if categories & {"drama"}:
+        cat_pts = 30
+    elif categories & {"transfer", "match"}:
+        cat_pts = 25
     elif categories & {"international", "cross"}:
         cat_pts = 10
     else:
@@ -400,12 +426,12 @@ def score_topic(t):
             audience_pts += 10
     audience_pts = min(audience_pts, 40)  # cap at 40 (3 big-name mentions max, boosted)
 
-    # 7. Drama/Engagement Signal in title (max 10 pts)
+    # 7. Drama/Engagement Signal in title (max 20 pts)
     drama_pts = 0
     for dw in DRAMA_WORDS:
         if dw in title_lower:
             drama_pts += 5
-    drama_pts = min(drama_pts, 10)
+    drama_pts = min(drama_pts, 20)
 
     # 8. "First Ever" + Stat Boost (max 20 pts) — proven 75K views pattern
     # Matches: "first team", "first player", "first ever", "in history" + any number
@@ -465,7 +491,7 @@ def score_topic(t):
     if any(re.search(p, title_lower_combined) for p in WARNING_PATTERNS):
         warning_pts = 8
 
-    # 12. Star Player Bonus (+20) — data: +39% above baseline, top 5 dominated by star names
+    # 12. Star Player Bonus (+30) — proven +39% above baseline, top 5 dominated by star names
     PROVEN_STARS = [
         r"\bhaaland\b", r"\bmbappe\b", r"\bmessi\b", r"\bkane\b",
         r"\bbellingham\b", r"\bsaka\b", r"\bsalah\b", r"\bvin[i]cius\b",
@@ -476,7 +502,7 @@ def score_topic(t):
     ]
     star_player_pts = 0
     if any(re.search(p, title_lower) for p in PROVEN_STARS):
-        star_player_pts = 20
+        star_player_pts = 30
 
     # 13. Conflict Hook Bonus (+10) — data: conflict avg 50,937v vs baseline 41,152v
     CONFLICT_KW = [

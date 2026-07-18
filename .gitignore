@@ -10,4 +10,5 @@ __pycache__/
 # Runtime state files
 staging/*.json
 article_cache.json
+.trends_cache.json
 declare/

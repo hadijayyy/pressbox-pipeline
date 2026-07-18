@@ -5,14 +5,16 @@ for _p, _m in [("requests","requests"),("httpx","httpx"),("beautifulsoup4","bs4"
     try: __import__(_m)
     except ImportError: _sp.check_call([_sys.executable,"-m","pip","install","--quiet","--root-user-action=ignore",_p],stdout=_sp.DEVNULL,stderr=_sp.DEVNULL)
 
-import html as html_mod, json, os, re, struct, sys, time
+import html as html_mod, json, os, re, sys, time
 from datetime import datetime, timezone, timedelta
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 
 from pressbox_common import WIB, HOME, POSTED, load_env, log, clean_words, is_similar, classify_topic_type
 from pressbox_scoring import score_topic as base_score_topic
 import requests
 from bs4 import BeautifulSoup
+# External hot topic detection
+import google_trends
 
 # ── Config ──────────────────────────────────────────────────────────
 DRY_RUN = "--dry-run" in sys.argv
@@ -309,7 +311,6 @@ def detect_hot_topics(topics, window_hours=4):
             continue  # single-source = not hot
 
         # Count unique sources
-        sources = set(m[0].get("source", "") for m in members)
         count = len(members)
 
         # Source tier diversity bonus
@@ -350,6 +351,36 @@ def detect_hot_topics(topics, window_hours=4):
             # Find title for this URL
             title = next((t.get("title","")[:50] for t in topics if t.get("url") == url), "?")
             log(f"   🔥 {title}... (hotness={score:.1f})")
+
+    # 5. Google Trends boost: match trending queries to article titles
+    try:
+        trends_data = google_trends.fetch_google_trends()
+        if trends_data:
+            football_keywords = {"football","soccer","world cup","premier league","champions league","la liga",
+                "serie a","bundesliga","ligue 1","transfer","player","manager","goal","match","stadium"}
+            matched = 0
+            for t in trends_data:
+                tq = t["query"].lower().strip()
+                trend_score = t["score"]
+                tq_words = set(tq.split())
+                is_football = bool(tq_words & football_keywords) or any(
+                    tq.find(k) >= 0 for k in ["vs ","fc ","utd ","afc ","cf "]
+                )
+                for topic in topics:
+                    title = topic.get("title", "").lower()
+                    url = topic.get("url", "")
+                    if not url:
+                        continue
+                    if tq in title or any(tq.find(w) >= 0 for w in title.split() if len(w) > 3):
+                        boost = min(8.0, trend_score / 200.0) if is_football else min(3.0, trend_score / 500.0)
+                        if boost > 0.5:
+                            hotness[url] = max(hotness.get(url, 0), boost)
+                            matched += 1
+                            log(f"   📈 Google Trends match: '{t['query']}' -> boost +{boost:.1f}")
+            if matched:
+                log(f"   📈 Google Trends: {matched}/{len(trends_data)} trends matched")
+    except Exception as e:
+        log(f"   ⚠️ Google Trends fetch failed: {e}")
 
     return hotness
 
@@ -660,6 +691,21 @@ _COMMERCIAL = ["snap up","buy now","deal","discount","shop","price drop","sale",
                "bargain","save £","save $","off rrp","% off","for £","for $","amazon","ebay",
                "where to buy","get yours","order now","delivery","free shipping","stock up"]
 _WOMEN = ["women","women's","womens","female","lionaesses","nwsl","wsl"]
+# Post-WC garbage topics — low-value content that floods feed after major tournament ends
+_POSTWC_GARBAGE = [
+    # Prediction / preview (engagement trap — no real story)
+    "prediction", "who will win", "match preview", "preview:",
+    # Referee articles (niche, low engagement)
+    "who is the referee", "referee for", "ref confirmed", "referee confirmed",
+    # Kick-off / TV guide
+    "what time does", "what time is", "kick-off time", "kickoff time",
+    # FAQ-style questions
+    "can you get 20", "do players miss", "quiz", "episode",
+    # Dead rubber formats
+    "player ratings", "how england could line up", "5 things",
+    # Kits / merchandise (niche)
+    "kit", "jersey", "boots",
+]
 
 
 def _classify_hook(title_lower):
@@ -704,6 +750,10 @@ def filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_su
         if any(kw in tl for kw in _COMMERCIAL): continue
         # Filter out live commentary/live-blog pages
         if '/live/' in url or '/live-blog/' in url or '/quiz/' in url: continue
+        # Post-WC garbage filter — skip low-value content that kills engagement
+        if any(kw in tl for kw in _POSTWC_GARBAGE):
+            log(f"   🗑️ Post-WC garbage: skipped '{title[:60]}'")
+            continue
         # Sensitive content
         if _match_sensitive(tl) or _match_sensitive(desc): continue
         # Dedup
@@ -750,7 +800,14 @@ def filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_su
             else:
                 s += 10  # just mentions team name, not football context
                 log(f"   ⚠️ wc_related reduced: +10 (no football context) for '{title[:50]}'")
-        if t.get("transfer_related"): s += 10
+        if t.get("transfer_related"): s += 15
+        # Controversy/drama topic type bonus — proven viral format
+        if tt == "controversy" or tt == "fifa_political" or tt == "manager_sack":
+            s += 15
+            log(f"   📈 Controversy boost: +15 for '{title[:50]}'")
+        # Penalty for generic content (no topic type = low engagement)
+        if tt and tt == "other":
+            s -= 10
         # Niche topic penalty — low engagement content that happens to mention big teams
         _niche_kw = ["kit launch","kit reveal","jersey","boots","pink boots","kit deal",
                      "boot deal","stadium rules","ticket prices","travel guide",
@@ -1057,12 +1114,15 @@ def _count_sentences(text):
     return len([s for s in re.split(r'(?<=[.!?])\s+', text.strip()) if len(s.strip()) > 5])
 
 def _select_viral_pattern(topic, article_text):
-    """Select Pattern A (scandal/nobody's talking) or B (paradox/warning) based on article content."""
+    """Select pattern: A (rule-break), C (detail/emotion), D (commentary),
+    E (pressure cooker), F (behind-the-scenes).
+    Patterns E+F cover content that ranked highest in real performance data."""
     title = (topic.get("title") or "").lower()
     text = article_text.lower()[:2000]
     combined = title + " " + text
+    import re as _re
     
-    # Pattern A signals (Rule-Break primary): authority violates own rules, scandal
+    # Pattern A signals (Rule-Break): authority violates own rules, scandal
     rule_break_words = ["rule", "regulation", "tradition", "golden rule", "broke its own",
                         "violated", "waived", "ignored its own", "bent the rules",
                         "loophole", "exception", "exemption", "contradicts", "fast-tracked",
@@ -1073,26 +1133,84 @@ def _select_viral_pattern(topic, article_text):
     scandal_score = sum(2 for w in rule_break_words if w in combined) + \
                     sum(1 for w in scandal_words if w in combined)
     
-    # Pattern B signals (deprecated — kept for backward compat)
-    paradox_words = ["despite", "while barely", "yet somehow", "paradox", "irony",
-                     "without", "only touched", "minimal", "fewest", "least",
-                     "but only", "first in history", "record-breaking"]
-    paradox_score = sum(1 for w in paradox_words if w in combined)
+    # Pattern D signals: commentary/opinion — someone famous said something
+    commentary_words = ["slam", "criticise", "criticize", "attack", "comment", "opinion",
+                        "says", "claims", "blasts", "hits out", "tells", "reveals",
+                        "defends", "backtracks", "apologises", "apologizes", "admits",
+                        "reacts", "hits back", "fires back", "calls out"]
+    commentary_score = sum(1 for w in commentary_words if w in combined)
     
-    # Pattern C signals: specific numbers, financial amounts, human interest, emotional weight
+    # Pattern C signals: specific numbers, financial amounts, human interest
     detail_words = ["£", "$", "fee", "cost", "price", "pay", "million", "thousand",
                     "visa", "banned", "denied", "blocked", "refused", "mother", "father",
                     "family", "cry", "tears", "heart", "sacrifice", "hero", "legend"]
     detail_score = sum(1 for w in detail_words if w in combined)
     
-    # Check for specific numbers/amounts
-    import re as _re
     has_specific_number = bool(_re.search(r'\d+[\d,.]*\s*(?:£|$|million|thousand|k\b)', combined))
     if has_specific_number:
         detail_score += 3  # Strong signal for Pattern C
     
-    # Decision: rule-break/scandal wins if higher
-    if scandal_score >= detail_score:
+    # Pattern E signals (Pressure Cooker): player/manager under pressure, reactions, mind games
+    # Based on top performers: "Tuchel NOT happy", "Haaland fumes", "Kane speaks out"
+    pressure_words = ["not happy", "fumes", "fuming", "under fire", "under pressure", "pressure",
+                      "speaks out", "breaks silence", "addresses", "responds to", "reacts",
+                      "defiant", "fires back", "warning", "not impressed", "frustrated",
+                      "frustration", "furious", "rage", "disappointed", "disappointment",
+                      "ultimatum", "demands", "demand", "refuse", "refuses", "refused",
+                      "considering future", "wants out", "wants to leave", "future uncertain",
+                      "talks underway", "deal close", "agree", "agreed", "rejected", "reject"]
+    # Tension context — headlines with "NOT happy/under fire/fumes" = strong E signal
+    tension_words = ["fume", "furious", "not happy", "under fire", "speaks out", "breaks silence"]
+    tension_match = sum(2 for w in tension_words if w in title)
+    pressure_score = sum(1 for w in pressure_words if w in combined) + tension_match
+    
+    # Pattern F signals (Behind-the-Scenes): logistics, admin, referees, off-field drama
+    # Based on top performers: "hotel change", "VAR decision", "air miles", "ref questions"
+    bts_words = ["hotel", "travel", "stadium", "weather", "referee", "ref", "var",
+                 "injury", "squad", "lineup", "starting xi", "selection", "tactics",
+                 "formation", "change", "changed", "decision", "decided", "logistics",
+                 "fifa", "uefa", "fa", "premier league", "administration", "rule",
+                 "investigation", "probe", "banned", "ban", "suspended", "suspension",
+                 "fine", "fined", "agent", "contract", "release clause", "option",
+                 "medical", "fitness", "condition", "training"]
+    bts_score = sum(1 for w in bts_words if w in combined)
+    # Strong F signal: logistics/admin focus in headline
+    logistics_title = ["why", "how", "what next", "reasons", "behind", "inside",
+                       "secret", "revealed", "explained"]
+    had_bts_title = sum(1 for w in logistics_title if w in title) >= 2
+    if had_bts_title:
+        bts_score += 2
+    
+    # Grounding check: does body text ACTUALLY contain rule words?
+    body_rule_score = sum(2 for w in rule_break_words if w in text)
+    
+    # Priority: E/F first when they score high (they outperform A in real data)
+    # Pattern E: Pressure Cooker (634K, 601K, 403K, 319K views in real data)
+    if pressure_score >= 4 and pressure_score > max(scandal_score, detail_score, commentary_score, bts_score):
+        return "e"
+    
+    # Pattern F: Behind-the-Scenes (536K, 487K, 226K views in real data)
+    if bts_score >= 5:
+        # Logistics/admin story that's not a scandal
+        if scandal_score < 3:
+            return "f"
+    
+    # Pattern D: commentary article with no actual rule violation in body
+    if commentary_score >= 3 and body_rule_score < 2 and scandal_score < 3:
+        if detail_score >= commentary_score and detail_score >= scandal_score:
+            return "c"
+        return "d"
+    
+    # Pattern E lower threshold: strong tension even if mixed
+    if pressure_score >= 3 and pressure_score >= max(scandal_score, detail_score, commentary_score, bts_score):
+        return "e"
+    
+    # Pattern F lower threshold: strong logistics signal
+    if bts_score >= 4 and bts_score >= max(scandal_score, pressure_score):
+        return "f"
+    
+    # Decision: rule-break wins unless detail/emotion story clearly stronger
+    if scandal_score >= max(detail_score, commentary_score, pressure_score, bts_score) or (scandal_score >= 2 and scandal_score > detail_score - 2):
         return "a"
     else:
         return "c"
@@ -1204,8 +1322,18 @@ Audience is casual football fans. They know big names and big clubs but don't tr
 
 Goal: share "meaty" insights/takes from this football news, packaged casually, honestly, straight-talking — like a fan who just read the news and is reacting on Threads, not a club press office or a mouthpiece for the media.
 
-## 3. STORY SELECTION\nIf the article covers more than one incident, controversy, or storyline, pick ONE to build the post around.\n\nPRIORITY ORDER (highest first):\n1. Authority-bends-its-own-rules: FIFA/UEFA/FA/PL/IFAB violates, bends, or contradicts its own rule, regulation, or tradition for a specific match/team/player — this format generates 12M+ views\n2. Controversy/scandal: clash, rift, feud, behind-the-scenes drama\n3. Statistical anomaly: "despite X, Y happened" — specific numbers\n4. Human interest: emotional story about a player's sacrifice, family, journey\n\nOther storylines can get a one-sentence mention as context in slides 2-3, but don't develop them. One post = one story.
+## 3. STORY SELECTION
+If the article covers more than one incident, controversy, or storyline, pick ONE to build the post around.
 
+PRIORITY ORDER (highest first):
+1. Pressure cooker: player/manager under fire, NOT happy, speaks out, defiant response, mind games, transfer ultimatum — these generate 600K+ views
+2. Behind-the-scenes: logistics, hotel drama, VAR controversy, referee decisions, fitness/injury updates, admin rules
+3. Authority-bends-its-own-rules: FIFA/UEFA/FA/PL/IFAB violates, bends, or contradicts its own rule for a specific match/team/player
+4. Controversy/scandal: clash, rift, feud, off-field drama
+5. Statistical anomaly: "despite X, Y happened" — specific numbers
+6. Human interest: emotional story about a player's sacrifice, family, journey
+
+Other storylines can get a one-sentence mention as context in slides 2-3, but don't develop them. One post = one story.
 ## 4. TASK
 From the article content, find the 5 strongest insights using this filter (rank them, don't just list):
 1. Counter-intuitive / challenges common fan assumptions (about a player, tactic, transfer, club decision, etc.)
@@ -1233,7 +1361,7 @@ Return ONLY valid JSON, no other text:
 {"slide_1":"", "slide_2":"", "slide_3":"", "slide_4":"", "slide_5":"", "slide_6":"", "caption":"", "cover_image_keywords":""}
 
 Within one slide: each sentence separated by \n\n (double newline)
-The last slide (Slide 6) must close with a FORCED-CHOICE binary question. NOT yes/no. Format: "Option A or Option B?" — forces users to pick a side and reply. Example: "Engineering nightmare or sponsor snub?"
+The last slide (Slide 6) must close with a FORCED-CHOICE binary question. NOT yes/no. NOT generic "Option A or Option B". Must use specific names, venues, or irony from the story. Example: "Engineering nightmare or sponsor snub?" — this is specific, not "Option A or B".
 
 ## 7. EXECUTION & EXCLUSION
 Tone: Raw, unpolished, casual. FORBIDDEN:
@@ -1243,17 +1371,36 @@ Tone: Raw, unpolished, casual. FORBIDDEN:
 - Motivational closing lines ("Hope this helps!", "Come on you reds!")
 - Em dash; use commas, periods, or new sentences.
 - Generic sports-blog phrasing ("in the world of football today", "fans everywhere are talking about")
-- "link in bio." Never fabricate quotes.
+- "link in bio." Never fabricate quotes.\n- GENERIC BINARY QUESTION: If your Slide 6 uses "Option A or Option B" without specific names/venues/irony, REGENERATE. The winning formula uses specific terms like "engineering nightmare or sponsor snub?", not "Option A or Option B?"
 
 ### Slide 1 (Hook) — VIRAL HEADLINE:\n- EXACT format: "[FIFA/UEFA/FA/PL/IFAB] just [broke/violated/waived/ignored] its own [rule/regulation/tradition] for [Team A] vs [Team B]. [Specific concrete detail] — [Option A] or [Option B]?"\n- Example: "FIFA just broke its own golden rule for England vs Argentina. Mercedes-Benz logo stays — engineering nightmare or sponsor snub?"\n- MAX 2 sentences. Under 25 words.\n- NO intro fluff. NO "Here's why". Straight to the rule-break + binary question.
 
 ### Slides 2-6 (Body):
-- EXACTLY 3 lines per slide (2-3 sentences, 1 line each, separated by \n\n). Don't use fewer — tight rhythm keeps readers scrolling.
+- 2-3 sentences per slide, separated by \n\n. One vivid detail per sentence.
 - 1 new insight per slide, no filler, no repeating previous points
+- USE SPECIFIC NUMBERS: exact weights, lengths, fees, dates, ages from the article. Vague = dead.
 - Paraphrase quotes from the article, don't copy-paste original sentences
-- Attribution: Mention the news source (outlet name) at least once in one of the slides, for credibility
+- Attribution: Name the news outlet (e.g. "Goal reports...", "The Mirror says...") at least once — adds credibility.
+- Each slide must reveal something new: a physical detail, a stakeholder affected, a historical precedent, an ironic angle.
 
-### Arc Structure (slide order) — VIRAL FORMAT:\nRule Break arc. Slide order is FIXED — don't rearrange.\nS1 = HOOK: "Authority breaks own rule" headline. MUST follow format: "FIFA/UEFA/FA/PL/IFAB just broke/violated/waived/ignored its own rule/regulation/tradition for Team A vs Team B. Specific detail — Option A or Option B?"\nS2 = THE RULE: What the rule says. Use exact phrasing if available from the article. Short, clear.\nS3 = THE VIOLATION: What happened. Names, dates, specific actions. The incident.\nS4 = THE DILEMMA: Two sides. Option A = follow the rule (consequences), Option B = break the rule (consequences). Make both sides feel reasonable.\nS5 = THE STAKES: Why this matters to fans. Money, fairness, competitive advantage, history, precedent.\nS6 = DEBATE: Forced-choice binary question. NOT yes/no. "Option A or Option B?"\n\nThis arc is proven to generate 12M+ views on football Threads. Follow it exactly.
+### Arc Structure (slide order) — VIRAL FORMAT (parkthebus proven formula, Pattern A ONLY):\nThis arc generates 12M+ views. Follow the SLIDE-BY-SLIDE instructions exactly. Do NOT use generic "Option A or Option B" — each slide must advance the story.\n\nS1 = HOOK: "Authority breaks its own [rule/ethos/tradition] for [Team A vs Team B]. [Specific concrete detail] — [Binary Q with irony/venue twist]".\nEXACT formula: "[FIFA/UEFA/FA/PL/IFAB] just [broke/violated/waived/ignored] its own [rule/regulation/tradition/golden rule] for [Team A] vs [Team B]. [One concrete, specific detail — not generic]. — [Option A] or [Option B]?"\nThe binary question must be specific to the story, NOT generic. Use irony, venue names, or unexpected angles.\nExample: "FIFA just broke its own golden rule for England vs Argentina. The Mercedes-Benz logo stays — engineering nightmare or sponsor snub?"\nMAX 2 sentences.\n\nS2 = SPECIFIC PHYSICAL DETAIL: Pick ONE vivid detail from the article — size, dimensions, quote, number, timeline. NOT "what the rule says". Make the reader imagine the scene.\nStructure: [Fact/stat]. [Quote from source if available]. [Consequence in plain language].\nUse exact numbers, measurements, and quotes from the article.\nExample: "Atlanta Stadium\'s roof has eight 500-ton petals, each 220ft long. Covering the logo? \'Not just complicated - impossible,\' said the VP."\n\nS3 = LORE + CONTEXT: Why this matters historically. Fill in what the reader needs to understand the significance.\nStructure: [The rule/policy that exists]. [Official sponsors affected]. [Why this is a first/precedent].\nExample: "FIFA\'s clean-stadium policy bans all non-sponsor branding. Hyundai and Kia are official partners. This exemption is a first for the World Cup."\n\nS4 = STAKES ESCALATION: Raise the tension. What\'s happening in the background? Who benefits/who loses?\nStructure: [Background context]. "But the real [heat/drama/tension]?" [Consequences for stakeholders].\nExample: "The roof\'s been shut all tournament - AC keeps temps steady. But the real heat? FIFA\'s sponsors watching their rivals get free ad space."\n\nS5 = TWIST + SOURCE ATTRIBUTION: Name the outlet source, add the ironic angle.\nStructure: "[Outlet] reports this is the first time [authority] [bent/broke] its own [rule] for [specific reason]. The reason? [Specific justification from article] — NOT [the obvious explanation]."\nExample: "Goal reports this is the first time FIFA\'s bent its own rules for a venue. The reason? \'Major engineering problems\' - not mercy for Mercedes."\n\nS6 = FINAL BINARY QUESTION: Tie it back to the venue, location, or irony of the situation. NOT a generic \"Option A or B\". Use the actual venue or team names.\nStructure: "[Venue/team/stadium irony fact]. Will [fans/players/world] [notice/care/sweat], or is [authority] the only one [feeling the pressure]?"\nExample: "England vs Argentina in a stadium named after a car brand. Will fans even notice, or is FIFA the only one sweating?"
+
+
+### Pattern E — Pressure Cooker arc (player/manager under fire):
+S1 = HOOK: "[Player/Manager] [not happy/fumes/speaks out] after [event]. [Specific quote or reaction] — [Binary question about future/consequences]"
+S2 = TENSION CONTEXT: What triggered the reaction. The specific incident, decision, or comment from the article.
+S3 = WHO'S INVOLVED: Other parties affected — teammates, board, fans, media.
+S4 = STAKES: What happens next if tension escalates. Job on the line? Transfer request? Board meeting?
+S5 = WHAT'S UNIQUE: Why this reaction matters more than usual — history, contract situation, timing.
+S6 = FINAL BINARY: "[Option specific to this tension situation] or [option specific to this tension situation]?" — NOT generic.
+
+### Pattern F — Behind-the-Scenes arc (logistics, admin, refs, off-field):
+S1 = HOOK: "Why [team/authority] [did/made/decided] [specific thing] for [match/player]. [Specific detail] — [Binary question]"
+S2 = THE SITUATION: What happened, when, where. Specific logistics detail.
+S3 = WHY IT MATTERS: Impact on the match, players, or tournament.
+S4 = WHO BENEFITS/WHO LOSES: Advantage or disadvantage created by this situation.
+S5 = THE REAL STORY: What this reveals about the team, tournament, or organization behind the scenes.
+S6 = FINAL BINARY: Will [factor] affect [result], or is it just [dismissive explanation]?
 
 ### Caption Rules:
 2 lines max. First line = headline format (same as Slide 1 hook). Second line = the binary question.
@@ -1286,7 +1433,7 @@ Every fact must come from the article. Never invent quotes, transfer fees, or in
 
 9. NO INVENTED INVOLVEMENT. Never add people/agents/managers not mentioned in the article. If the article doesn't name Mourinho, you cannot mention Mourinho. If the article doesn't mention an agent, you cannot mention an agent.
 
-10. PRESERVE HEDGING. If the article says 'looks likely', 'reportedly', 'according to sources', 'I assume' — keep that uncertainty. Never upgrade hedges to certainties. 'Looks likely to stay' ≠ 'won't leave'. 'I assume he won't stand in the way' ≠ 'Red Bull won't block him'.
+10. PRESERVE HEDGING. If the article says 'looks likely', 'reportedly', 'according to sources', 'I assume' — keep that uncertainty. Never upgrade hedges to certainties. 'Looks likely to stay' ≠ 'won't leave'. 'I assume he won't stand in the way' ≠ 'Red Bull won't block him'.\n\n11. EXTERNAL KNOWLEDGE (IRONY/VENUE/CLUB HISTORY): You may use well-known external facts about the venue, stadium name, club history, or famous moments (e.g. "stadium named after a car brand") ONLY for the irony angle in S6. Never invent external facts. If you're not 100% sure a fact is common knowledge, skip it. No obscure stats, no historical dates not in the article. Stick to what any casual fan would know: famous players, stadium names, iconic matches.
 
 ## 8.5 NUMBER TRUTH RULES — STRICT (ZERO TOLERANCE)
 1. ONLY use numbers that appear verbatim in the article above or in the FACTUAL REFERENCE DATA section below.
@@ -1304,23 +1451,23 @@ Don't use: You won't believe... / In today's football world... / Sources say... 
 
 ## 10. WORKED EXAMPLE (VIRAL FORMAT)
 
-Input: Mirror.co.uk. Manchester United just got 3 of its 5 injured defenders back. But the Premier League denied United's request to postpone the Arsenal match. The rule says a club can request postponement if COVID/fatigue leave them with fewer than 14 available senior players. United had 12. PL said no — citing integrity of the fixture schedule. Arsenal's next game is in the Champions League.
+Input: Goal.com. FIFA has been forced to relax its own branding regulations for the World Cup semi-final between England and Argentina at Atlanta Stadium (Mercedes-Benz Stadium). The Mercedes-Benz logo on the stadium roof cannot be covered due to engineering constraints — the roof has eight retractable petals, each weighing 500 tons and measuring 220 feet. FIFA\'s clean stadium policy normally bans non-sponsor branding. Official mobility sponsors Hyundai and Kia are affected. This is the first time FIFA has bent its own rules for a venue. The reason cited: major engineering problems.
 
 Output:
 {
-  "slide_1": "PL just denied its own postponement rule for Man United vs Arsenal. 12 available players \u2014 14 required \u2014 integrity or inconsistency?",
-  "slide_2": "PL Rule 4.6: clubs can postpone if fewer than 14 senior players available. United had 12. The rule says yes.",
-  "slide_3": "PL said no. Statement cited fixture schedule integrity. Same rule Bayern got approved for last season.",
-  "slide_4": "Option A: Protect fixture calendar, avoid backlog. Option B: Apply the rule as written \u2014 12 < 14.",
-  "slide_5": "Arsenal play UCL in 4 days. United play with half a defense. One team risks its season, the other doesn't.",
-  "slide_6": "Follow the rule or protect the schedule \u2014 which matters more?",
-  "caption": "PL just denied its own postponement rule for Man United vs Arsenal.\\n12 available players \u2014 14 required \u2014 integrity or inconsistency?",
-  "cover_image_keywords": "Man United Arsenal Premier League fixture tension"
+  "slide_1": "FIFA just broke its own golden rule for England vs Argentina. The Mercedes-Benz logo stays — engineering nightmare or sponsor snub?",
+  "slide_2": "Atlanta Stadium\'s roof has eight 500-ton petals, each 220ft long. Covering the logo? \'Not just complicated - impossible,\\' said the VP.",
+  "slide_3": "FIFA\'s clean-stadium policy bans all non-sponsor branding. Hyundai and Kia are official partners. This exemption is a first for the World Cup.",
+  "slide_4": "The roof\'s been shut all tournament - AC keeps temps steady. But the real heat? FIFA\'s sponsors watching their rivals get free ad space.",
+  "slide_5": "Goal reports this is the first time FIFA\'s bent its own rules for a venue. The reason? \'Major engineering problems\' - not mercy for Mercedes.",
+  "slide_6": "England vs Argentina in a stadium named after a car brand. Will fans even notice, or is FIFA the only one sweating?",
+  "caption": "FIFA just broke its own golden rule for England vs Argentina.\\nThe Mercedes-Benz logo stays — engineering nightmare or sponsor snub?",
+  "cover_image_keywords": "Atlanta Stadium Mercedes-Benz logo roof World Cup"
 }"""
 
     ref_data = _build_reference_data()
     source_name = source or url.split("/")[2] if url else ""
-    pattern_label = {'a':'Rule-Break (scandal)', 'b':'Paradox', 'c':'Detail+Emotion'}.get(pattern, 'Detail+Emotion')
+    pattern_label = {'a':'Rule-Break (scandal)', 'b':'Paradox', 'c':'Detail+Emotion', 'd':'Commentary', 'e':'Pressure-Cooker', 'f':'Behind-the-Scenes'}.get(pattern, 'Detail+Emotion')
     user = f"Title: {title}\n\nViral Pattern selected: {pattern_label}\n\n{ref_data}\n\nBody:\n{article_text[:8000]}\n\nSource: {source_name}"
     if evaluator_feedback:
         user += f"\n\n## ⚠️ EVALUATOR REJECTED YOUR PREVIOUS ATTEMPT — FIX THESE ERRORS:\n{evaluator_feedback}\nRegenerate ALL 6 slides. Do NOT repeat the errors above."
@@ -1378,10 +1525,8 @@ Output:
                         text = re.sub(r'(?<!Mr)(?<!Mrs)(?<!Ms)(?<!Dr)(?<!St)(?<!vs)(?<!Jr)(?<!Sr)(?<!Prof)([.?!])\s+(?=[A-Z])', r'\1\n', text)
                         slides.append({"title": f"S{i}", "content": text})
                 caption = data.get("caption", "").strip()
-                cover_keywords = data.get("cover_image_keywords", "").strip()
                 hashtags = data.get("hashtags", "").strip()
             except (json.JSONDecodeError, KeyError, TypeError) as e:
-                log(f"   ⚠️ JSON parse failed ({e}), trying plain text fallback")
                 # Fallback: try old "Slide N:" format
                 content = re.sub(r'\*\*Slide\s+(\d)\s*:\*\*', r'Slide \1:', content)
                 slide_pattern = re.compile(r'(?:^|\n)\s*Slide\s+(\d)\s*:\s*\n(.*?)(?=\n\s*Slide\s+\d\s*:|\Z)', re.DOTALL | re.IGNORECASE)
@@ -1492,6 +1637,7 @@ def track_post(title, url, source, root_id, permalink, hotness_score=0):
         "title": title, "url": url, "source": source,
         "post_id": root_id, "permalink": permalink,
         "posted_at": datetime.now(WIB).isoformat(),
+        "published_ts": time.time(),
     }
     if hotness_score:
         entry["hotness_score"] = round(hotness_score, 2)
@@ -1514,7 +1660,7 @@ def _self_check():
         "_extract_proper_nouns", "_extract_stages",
         "_match_sensitive", "_http", "_build_reference_data",
         "_count_sentences",
-        "log", "check_cooldown",
+        "log",
     ]
     missing = [n for n in required if n not in globals()]
     if missing:
@@ -1526,29 +1672,9 @@ def _self_check():
 
 # ── MAIN ────────────────────────────────────────────────────────────
 
-def check_cooldown(minutes=15):
-    """Skip if posted too recently."""
-    try:
-        with open(POSTED) as f:
-            topics = json.load(f).get("topics", [])
-        if not topics: return False
-        recent = sorted(topics, key=lambda x: x.get("posted_at",""), reverse=True)[:1]
-        posted = recent[0].get("posted_at","")
-        if posted:
-            dt = datetime.fromisoformat(posted)
-            if (datetime.now(WIB) - dt).total_seconds() < minutes * 60:
-                return True
-    except (FileNotFoundError, json.JSONDecodeError, ValueError): pass
-    return False
-
 def main():
     START = time.time()
     log("=== PRESSBOX MVP ===")
-
-    # Cooldown check (skip dry-run)
-    if not DRY_RUN and check_cooldown(15):
-        print("⏸️ Skip — baru posting < 15 menit lalu.", flush=True)
-        return
 
     # 0. Init Threads poster (for metrics)
     token, user_id = load_threads_token()
@@ -1699,7 +1825,7 @@ def main():
 
         t0 = time.time()
         pattern = _select_viral_pattern(best, article_text)
-        pattern_name = {'a': 'A (Rule-Break)', 'b': 'B (deprecated)', 'c': 'C (Detail+Emotion)'}[pattern]
+        pattern_name = {'a': 'A (Rule-Break)', 'b': 'B (deprecated)', 'c': 'C (Detail+Emotion)', 'd': 'D (Commentary)', 'e': 'E (Pressure-Cooker)', 'f': 'F (Behind-the-Scenes)'}[pattern]
         log(f"   🎯 Viral pattern: {pattern_name}")
         hooks_str = ", ".join(hooks) if isinstance(hooks, list) else hooks
         eval_feedback = ""
@@ -1814,13 +1940,9 @@ def main():
     )
 
     # Summary report (stdout → delivered to Telegram topic 20467)
-    hook_type = best.get("_hook_type", "unknown")
-    src = best.get("source", "unknown")
     slide_count = len(slides)
-    slide_preview = slides[0]["content"][:120] if slides else "N/A"
     now = datetime.now(timezone(timedelta(hours=7)))
     wib = now.strftime("%H:%M WIB, %d %b %Y")
-    post_count = len(json.load(open(POSTED)).get("topics", []))
     report = f"""✅ Posted @ {wib}
 {best['title'][:100]}
 Score: {score} | {slide_count} slides | {total:.1f}s
