@@ -164,13 +164,12 @@ AMBIGUOUS_EXCLUDES = ["liga"]
 # Source: goal.com avg 58K views — 2.1x BBC (42K), 2.1x fourfourtwo (27K)
 # So super tier gets +15, tier 1 = +10, tier 2 = +5
 SOURCE_TIER_SUPER = [
-    "goal.com", "goal",
 ]
 
 SOURCE_TIER_1 = [
     "bbc sport", "sky sports", "the athletic", "guardian football",
     "espn fc", "football italia", "90min", "fabrizio romano",
-    "transfermarkt",
+    "transfermarkt", "goal.com", "goal",
 ]
 
 SOURCE_TIER_2 = [
@@ -232,11 +231,11 @@ BIG_TEAMS_RE = [re.compile(r'\b' + re.escape(t) + r'\b') for t in BIG_TEAMS]
 
 # High-engagement drama words in title (not body — title drives clicks)
 DRAMA_WORDS = [
-    "locked out", "fatal", "no way out", "slams", "blasts", "hits out",
-    "furious", "outraged", "banned", "sacked", "revolt", "mutiny",
+    "locked out", "fatal", "no way out",
+    "row",
     "explosive", "shocking", "destroyed", "humiliated", "battered",
-    "war of words", "bust-up", "rift", "scandal", "controversy",
-    "refuses", "walks out", "storms off", "under pressure",
+    "war of words", "bust-up", "rift", "scandal",
+    "refuses", "walks out", "storms off",
     "collapsed", "disaster", "nightmare", "crisis",
     "fate confirmed", "forced", "denied", "disagrees", "rivals",
     "under fire", "disastrous", "catastrophic", "collapse",
@@ -344,7 +343,7 @@ def has_specific_data(text):
 
 # ─── MAIN SCORING FUNCTION ──────────────────────────────────────────────────
 
-def score_topic(t):
+def score_topic(t: dict) -> int:
     """Score article 0-100 for football content (Pressbox pipeline).
 
     Components:
@@ -421,10 +420,12 @@ def score_topic(t):
     # 6. Audience Reach Boost (max 30 pts) — big teams/nations/players = massive audience
     audience_pts = 0
     title_lower = title.lower()
-    for pat in BIG_TEAMS_RE:
-        if pat.search(combined.lower()):
-            audience_pts += 10
-    audience_pts = min(audience_pts, 40)  # cap at 40 (3 big-name mentions max, boosted)
+    combined_lower = combined.lower()
+    matched_entities = set()
+    for pat, name in zip(BIG_TEAMS_RE, BIG_TEAMS):
+        if pat.search(combined_lower):
+            matched_entities.add(name)
+    audience_pts = min(len(matched_entities) * 10, 40)
 
     # 7. Drama/Engagement Signal in title (max 20 pts)
     drama_pts = 0

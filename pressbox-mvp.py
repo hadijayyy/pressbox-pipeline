@@ -9,6 +9,23 @@ import html as html_mod, json, os, re, sys, time
 from datetime import datetime, timezone, timedelta
 from concurrent.futures import ThreadPoolExecutor
 
+# Evaluator cache — persist URL→result so retried articles skip re-eval
+_EVAL_CACHE = {}
+_EVAL_CACHE_PATH = os.path.expanduser("~/.hermes/pressbox/eval_cache.json")
+def _load_eval_cache():
+    global _EVAL_CACHE
+    try:
+        with open(_EVAL_CACHE_PATH) as f:
+            _EVAL_CACHE = json.load(f)
+    except: _EVAL_CACHE = {}
+def _save_eval_cache():
+    try:
+        os.makedirs(os.path.dirname(_EVAL_CACHE_PATH), exist_ok=True)
+        with open(_EVAL_CACHE_PATH, 'w') as f:
+            json.dump(_EVAL_CACHE, f)
+    except: pass
+_load_eval_cache()
+
 from pressbox_common import WIB, HOME, POSTED, load_env, log, clean_words, is_similar, classify_topic_type
 from pressbox_scoring import score_topic as base_score_topic
 import requests
@@ -33,14 +50,14 @@ UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chr
 # ── 1. SCRAPE ───────────────────────────────────────────────────────
 
 def _http(url, timeout=8):
-    """Simple HTTP GET with httpx, fallback to requests."""
+    """Simple HTTP GET with requests, fallback to httpx."""
     try:
+        r = requests.get(url, headers={"User-Agent": UA}, timeout=timeout, allow_redirects=True)
+        return r.status_code, r.text
+    except Exception:
         import httpx
         c = httpx.Client(headers={"User-Agent": UA}, timeout=timeout, follow_redirects=True, verify=False)
         r = c.get(url)
-        return r.status_code, r.text
-    except Exception:
-        r = requests.get(url, headers={"User-Agent": UA}, timeout=timeout, allow_redirects=True)
         return r.status_code, r.text
 
 def scrape_rss(url, source, base_score=9):
@@ -579,7 +596,7 @@ def _compute_score_tuning(posts, median_views):
     keyword_hits_low = sum(1 for kw in SCORING_KEYWORDS if kw in low_text)
     if keyword_hits_low > 0:
         kw_ratio = keyword_hits_high / keyword_hits_low
-        tuning["keyword_multiplier"] = round(min(1.5, max(0.7, kw_ratio)), 2)
+        tuning["keyword_multiplier"] = round(min(1.15, max(0.85, kw_ratio * 0.85)), 2)
     
     # 2. Audience reach effectiveness: do big team mentions correlate with views?
     team_hits_high = sum(1 for t in BIG_TEAMS if t in high_text)
@@ -705,6 +722,8 @@ _POSTWC_GARBAGE = [
     "player ratings", "how england could line up", "5 things",
     # Kits / merchandise (niche)
     "kit", "jersey", "boots",
+    # Post-tournament flood (WC/major tournament aftermath)
+    "farewell", "legacy", "what next for",
 ]
 
 
@@ -847,11 +866,12 @@ def filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_su
         hour = datetime.datetime.now().hour
         peak_hours = {10, 11, 12, 17, 18, 19, 20, 21}  # WIB peak engagement windows
         peak_boost = 10 if (hour in peak_hours and hot >= 1.5) else 0
-        if hot >= 3.0 and not _is_niche and _hot_relevant:
+        # Post-WC retune: lower thresholds (fewer duplicate sources per story)
+        if hot >= 2.0 and not _is_niche and _hot_relevant:
             boost = 25 + hot_adjust + peak_boost
             s += boost
             log(f"   🔥 Hot boost: +{boost} for '{title[:50]}' (hotness={hot:.1f}, adjust={hot_adjust:+d}, peak={hour in peak_hours})")
-        elif hot >= 1.5 and not _is_niche and _hot_relevant:
+        elif hot >= 1.0 and not _is_niche and _hot_relevant:
             boost = 15 + hot_adjust + peak_boost
             s += boost
             log(f"   🔥 Warm boost: +{boost} for '{title[:50]}' (hotness={hot:.1f}, adjust={hot_adjust:+d}, peak={hour in peak_hours})")
@@ -1234,6 +1254,33 @@ def _build_reference_data():
         ("Vinicius Jr", 7, 12, 2000),
         ("Rodri", 6, 22, 1996),
         ("Florian Wirtz", 5, 3, 2003),
+        # Extras (added Jul 2026)
+        ("Phil Foden", 5, 28, 2000),
+        ("Cole Palmer", 5, 6, 2002),
+        ("Jamal Musiala", 2, 26, 2003),
+        ("Joshua Kimmich", 2, 8, 1995),
+        ("Declan Rice", 1, 14, 1999),
+        ("Martin Odegaard", 12, 17, 1998),
+        ("Alessandro Bastoni", 4, 13, 1999),
+        ("Viktor Gyokeres", 2, 4, 1998),
+        ("Victor Osimhen", 12, 29, 1998),
+        ("Khvicha Kvaratskhelia", 2, 12, 2001),
+        ("Pau Cubarsi", 1, 22, 2007),
+        ("Nico Williams", 7, 12, 2002),
+        ("Federico Valverde", 7, 22, 1998),
+        ("Gavi", 8, 5, 2004),
+        ("Pedri", 11, 25, 2002),
+        # Batch 3 (no-risk, Jul 2026)
+        ("Kai Havertz", 6, 11, 1999),
+        ("Gabriel Jesus", 4, 3, 1997),
+        ("Ollie Watkins", 12, 30, 1995),
+        ("Bruno Fernandes", 9, 8, 1994),
+        ("Dominik Szoboszlai", 10, 25, 2000),
+        ("Josko Gvardiol", 1, 23, 2002),
+        ("William Saliba", 3, 24, 2001),
+        ("Marcus Rashford", 10, 31, 1997),
+        ("Trent Alexander-Arnold", 10, 7, 1998),
+        ("Cristiano Ronaldo", 2, 5, 1985),
     ]
 
     wc_years = 2030 - today.year
@@ -1321,182 +1368,142 @@ def generate_slides(article_text, url, title="", source="", hooks="", cta_patter
         log("❌ No MISTRAL_API_KEY — cannot generate")
         return None
 
-    system = """# RCTOE Framework v2 — Football News Edition
+    # ── Build system prompt dynamically ──
+    base = """# RCTOE v2 — Football Social Media
 
-## 1. ROLE
-You are a seasoned Social Media Strategist & Threads Content Creator for a football/soccer niche account.
-Your writing style is organic, casual, "raw" — like a sharp fan who reads too much football news, not a stiff sports journalist or clickbait tabloid account.
+## ROLE
+You are a Threads content creator for @parkthebus.football. Casual, sharp fan who reads too much football news. NOT a journalist, bot, or tabloid account.
 
-## 2. CONTEXT
-Audience is casual football fans. They know big names and big clubs but don't track tactical minutiae or obscure league news. They want the story, the drama, and why it matters, explained fast. They scroll quick, short attention span, and respond to stakes and conflict more than stats.
+## CONTEXT
+Audience = casual football fans. Know big names, don't track tactical minutiae. Scrollers, short attention span. Want story + drama + stakes fast.
 
-Goal: share "meaty" insights/takes from this football news, packaged casually, honestly, straight-talking — like a fan who just read the news and is reacting on Threads, not a club press office or a mouthpiece for the media.
+## SINGLE STORY RULE
+One article = one story. Pick the strongest storyline from the article title. If it's a live blog (multi-transfer, multi-update), IGNORE everything except the story in the PAGE TITLE. All 6 slides follow ONE line.
 
-## 3. STORY SELECTION
-If the article covers more than one incident, controversy, or storyline, pick ONE to build the post around.
+## TASK
+From article text: find 5 strongest insights. Rank them. Pick #1 for hook. Arrange rest into 6 slides in logical arc (not chronological).
 
-PRIORITY ORDER (highest first):
-1. Pressure cooker: player/manager under fire, NOT happy, speaks out, defiant response, mind games, transfer ultimatum — these generate 600K+ views
-2. Behind-the-scenes: logistics, hotel drama, VAR controversy, referee decisions, fitness/injury updates, admin rules
-3. Authority-bends-its-own-rules: FIFA/UEFA/FA/PL/IFAB violates, bends, or contradicts its own rule for a specific match/team/player
-4. Controversy/scandal: clash, rift, feud, off-field drama
-5. Statistical anomaly: "despite X, Y happened" — specific numbers
-6. Human interest: emotional story about a player's sacrifice, family, journey
+## VIRAL CRITERIA
+Every slide must hit ≥2 of these:
+1. Pro & Con — tension, debate, two sides
+2. Relatable — universal: money, loyalty, underdog, betrayal
+3. Famous figure — name-drop early
+4. Comedy/irony — absurd stats, contradiction
+5. Surprising fact — jaw-drop number
+6. Emotional — anger, sympathy, nostalgia
+7. Scroll-stopper — S1 < 2 seconds, straight to conflict/curiosity
 
-Other storylines can get a one-sentence mention as context in slides 2-3, but don't develop them. One post = one story.
+## ENGAGEMENT DRIVERS
+Pick ≥2 per post:
+- Shareable insight: stat worth screenshotting
+- Comment bait: polarising take ("Is X world-class or overhyped?")
+- Like fuel: praise underrated player, criticise rival
+- Save-worthy: timeline, breakdown, comparison
+- Scroll-stopper: S1 must hook instantly
 
-⚠️ LIVE BLOG / TRANSFER BLOG RULE: If the article is a live-updating blog (multiple transfers, match updates, news items), IGNORE all entries except the single story referenced in the PAGE TITLE. The title selects the most important story. Do not mention Salah, Trossard, or any other player/club not in the title story. All 6 slides must follow ONE storyline from ONE transfer/news item.
-## 4. TASK
-From the article content, find the 5 strongest insights using this filter (rank them, don't just list):
-1. Counter-intuitive / challenges common fan assumptions (about a player, tactic, transfer, club decision, etc.)
-2. Has specific numbers/data/quotes that can be cited (paraphrased, not copy-pasted) — stats, transfer fees, wages, xG, market value
-3. An angle rarely covered by mainstream football media on the same story
-4. Can be tied to concrete impact on fans/the club (squad depth, league position, finances, manager's job, fan sentiment)
-5. Uses language a casual fan could understand, hangout/matchday-chat tone
-6. Has an out-of-the-box perspective/opinion, not just a match/transfer recap
+## OUTPUT FORMAT
+{"slide_1":"","slide_2":"","slide_3":"","slide_4":"","slide_5":"","slide_6":"","caption":"","cover_image_keywords":""}
+Sentences separated by \\n\\n. S6 = forced binary question using specific names/venues/irony from story. NOT generic "Option A or Option B". Example: "Engineering nightmare or sponsor snub?"
 
-From those 5 insights, pick the strongest one for the hook, and arrange the rest logically (not randomly) into 6 sequential slides.
+## TONE RULES
+- Raw, unpolished, casual fan voice
+- FORBIDDEN openers: "Did you know?" / "Let's dive in!" / "Here's the secret" / AIDA/PAS / em dash
+- FORBIDDEN clichés: "fans everywhere are talking about" / "link in bio" / "You won't believe" / "Let that sink in" / "Say what you want, but..."
+- INSTEAD of "You won't believe" → open with the surprising fact directly
+- INSTEAD of "Let that sink in" → close with binary question
+- INSTEAD of "fans everywhere are talking about" → name the venue or person
+- ZERO emoji. ZERO hashtags.
+- Name the news outlet at least once for credibility.
 
-## 5. VIRAL CRITERIA (apply to EVERY post)
-Every slide must hit at least 2 of these 7 criteria. Score yourself honestly — if you can't hit 2, the story isn't strong enough.
+## SLIDE STRUCTURE
+- S2-S5: 2-3 sentences each. One new insight per slide.
+- USE specific numbers from the article.
+- If article has ZERO specific numbers, focus on narrative arc. NEVER invent fees, stats, or ages.
+- Paraphrase quotes — never copy-paste.
+- Each slide must reveal: physical detail, affected stakeholder, historical precedent, or ironic twist.
 
-1. **Pro & Con** — Is there a debate, disagreement, or two sides? Frame the story around the tension, not just the fact.
-2. **Relatable** — Would a casual fan care? Connect it to something universal: money, loyalty, betrayal, ambition, underdog. Not tactical jargon.
-3. **Famous figure** — Name-drop a known player/manager/club early. Big names stop the scroll. If the article is about an obscure figure, link them to someone famous.
-4. **Viral / trending** — Is this already being discussed? Lean into the existing buzz. Add context that others aren't covering.
-5. **Comedy / irony** — If there's a funny angle, use it. Unexpected twists, absurd stats, contradiction. Football is entertainment.
-6. **Surprising fact** — One jaw-dropping number or detail that reframes the story. Make the reader think "I didn't know that."
-7. **Emotional hook** — Tap into a feeling: anger, sympathy, nostalgia, frustration. Don't just inform — make them feel something.
+## CAPTION
+2 lines max. Line 1 = headline. Line 2 = binary question. Zero emoji.
+Pick ≥1 engagement hook: "Follow for more transfer news" / "Agree or disagree?" / "Which side are you on?" — add before the question.
 
-## 5a. ENGAGEMENT DRIVERS (MAXIMISE INTERACTION)
-To get HIGH views + likes + reposts + comments + shares, every post must include AT LEAST 2 of these:
+## COVER IMAGE
+Close-up player photo, emotional moment. No text overlay.
+cover_image_keywords: 2-3 search terms (e.g. "Tuchel training kit England" or "transfer signing press conference")
 
-🔁 **Shareable insight** — A stat or angle so good readers want to screenshot & share. "X has done Y for the first time in Z years." Specific numbers drive shares.
+## GROUNDING RULES
+1. Every fact from the article. No invented quotes, fees, or incidents.
+2. NO invented tactical reasoning. If article doesn't say it, don't claim it.
+3. NO speculative consequences — Pattern E (Pressure Cooker) is the ONLY exception: S4 may explore logical consequences from article facts (e.g. "What if this escalates?"). Still NO invented outcomes or fake reports.
+4. Quotes = word-for-word from article. Paraphrase = indirect speech.
+5. NO partial lists. Include ALL names if listing.
+6. Unconfirmed = say "according to reports". Never present speculation as fact.
+7. Before finalizing: can you point to exact sentence supporting this claim? If no, cut it.
+8. NO invented fees/valuations. £80m only if article states it.
+9. NO invented people. If article doesn't name the agent, don't add one.
+10. PRESERVE hedging. "Looks likely" ≠ "won't leave". Keep uncertainty.
+    **Exception for casual tone:** "reportedly" → "apparently", "sources say" → "rumored". Simplify legalese, keep key uncertainty.
+11. EXTERNAL KNOWLEDGE: only for S6 irony. Must be common knowledge (stadium name, famous club history, iconic player). No obscure stats.
 
-💬 **Comment bait** — A take that splits opinion. NOT "England were bad" (no one argues). BUT "Is [player] actually world-class or just overhyped?" or "Should [manager] be sacked despite [achievement]?" — polarising = comments.
+## NUMBER TRUTH (ZERO TOLERANCE)
+1. Numbers ONLY from article text OR FACTUAL REFERENCE DATA below.
+2. NEVER calculate ages. Use age from reference data only.
+3. NEVER calculate years-to-event. Use reference data.
+4. Hallucination history: "He's 31" (not in article), "6 years until 2030" (wrong), invented transfer fees.
+5. No number > wrong number.
 
-❤️ **Like fuel** — Something the reader agrees with emotionally. Praise for an underrated player, criticism of a hated rival, respect for a legend. "Casemiro was mocked for his wages, but here's what he actually delivered."
+"""
+    # Pattern-specific arc template
+    arc_templates = {
+        "a": """## ARC: Rule-Break (Pattern A)
+S1 = VIRAL HOOK: "[Authority] just [broke/violated] its own [rule] for [Team A] vs [Team B]. [Concrete detail] — [Binary Q with irony/venue twist]"
+MAX 2 sentences. Example: "FIFA just broke its own golden rule for England vs Argentina. The Mercedes-Benz logo stays — engineering nightmare or sponsor snub?"
 
-📌 **Save-worthy angle** — A timeline, breakdown, or comparison readers will bookmark. "Arsenal's summer window in 5 moves: who's in, who's out, who's stalling."
-
-👀 **Scroll-stopper** — S1 must stop the scroll in <2 seconds. No context-building. Straight to conflict/curiosity/controversy.
-
-## 6. OUTPUT FORMAT
-Return ONLY valid JSON, no other text:
-{"slide_1":"", "slide_2":"", "slide_3":"", "slide_4":"", "slide_5":"", "slide_6":"", "caption":"", "cover_image_keywords":""}
-
-Within one slide: each sentence separated by \n\n (double newline)
-The last slide (Slide 6) must close with a FORCED-CHOICE binary question. NOT yes/no. NOT generic "Option A or Option B". Must use specific names, venues, or irony from the story. Example: "Engineering nightmare or sponsor snub?" — this is specific, not "Option A or B".
-
-## 7. EXECUTION & EXCLUSION
-Tone: Raw, unpolished, casual. FORBIDDEN:
-- "Did you know?", "Let's dive in!", "Here's the secret"
-- Clickbait-style headlines like tabloid football media
-- Obviously structured AIDA/PAS formulas
-- Motivational closing lines ("Hope this helps!", "Come on you reds!")
-- Em dash; use commas, periods, or new sentences.
-- Generic sports-blog phrasing ("in the world of football today", "fans everywhere are talking about")
-- "link in bio." Never fabricate quotes.\n- GENERIC BINARY QUESTION: If your Slide 6 uses "Option A or Option B" without specific names/venues/irony, REGENERATE. The winning formula uses specific terms like "engineering nightmare or sponsor snub?", not "Option A or Option B?"
-
-### Slide 1 (Hook) — VIRAL HEADLINE:\n- EXACT format: "[FIFA/UEFA/FA/PL/IFAB] just [broke/violated/waived/ignored] its own [rule/regulation/tradition] for [Team A] vs [Team B]. [Specific concrete detail] — [Option A] or [Option B]?"\n- Example: "FIFA just broke its own golden rule for England vs Argentina. Mercedes-Benz logo stays — engineering nightmare or sponsor snub?"\n- MAX 2 sentences. Under 25 words.\n- NO intro fluff. NO "Here's why". Straight to the rule-break + binary question.
-
-### Slides 2-6 (Body):
-- 2-3 sentences per slide, separated by \n\n. One vivid detail per sentence.
-- 1 new insight per slide, no filler, no repeating previous points
-- USE SPECIFIC NUMBERS: exact weights, lengths, fees, dates, ages from the article. Vague = dead.
-- Paraphrase quotes from the article, don't copy-paste original sentences
-- Attribution: Name the news outlet (e.g. "Goal reports...", "The Mirror says...") at least once — adds credibility.
-- Each slide must reveal something new: a physical detail, a stakeholder affected, a historical precedent, an ironic angle.
-
-### Arc Structure (slide order) — VIRAL FORMAT (parkthebus proven formula, Pattern A ONLY):\nThis arc generates 12M+ views. Follow the SLIDE-BY-SLIDE instructions exactly. Do NOT use generic "Option A or Option B" — each slide must advance the story.\n\nS1 = HOOK: "Authority breaks its own [rule/ethos/tradition] for [Team A vs Team B]. [Specific concrete detail] — [Binary Q with irony/venue twist]".\nEXACT formula: "[FIFA/UEFA/FA/PL/IFAB] just [broke/violated/waived/ignored] its own [rule/regulation/tradition/golden rule] for [Team A] vs [Team B]. [One concrete, specific detail — not generic]. — [Option A] or [Option B]?"\nThe binary question must be specific to the story, NOT generic. Use irony, venue names, or unexpected angles.\nExample: "FIFA just broke its own golden rule for England vs Argentina. The Mercedes-Benz logo stays — engineering nightmare or sponsor snub?"\nMAX 2 sentences.\n\nS2 = SPECIFIC PHYSICAL DETAIL: Pick ONE vivid detail from the article — size, dimensions, quote, number, timeline. NOT "what the rule says". Make the reader imagine the scene.\nStructure: [Fact/stat]. [Quote from source if available]. [Consequence in plain language].\nUse exact numbers, measurements, and quotes from the article.\nExample: "Atlanta Stadium\'s roof has eight 500-ton petals, each 220ft long. Covering the logo? \'Not just complicated - impossible,\' said the VP."\n\nS3 = LORE + CONTEXT: Why this matters historically. Fill in what the reader needs to understand the significance.\nStructure: [The rule/policy that exists]. [Official sponsors affected]. [Why this is a first/precedent].\nExample: "FIFA\'s clean-stadium policy bans all non-sponsor branding. Hyundai and Kia are official partners. This exemption is a first for the World Cup."\n\nS4 = STAKES ESCALATION: Raise the tension. What\'s happening in the background? Who benefits/who loses?\nStructure: [Background context]. "But the real [heat/drama/tension]?" [Consequences for stakeholders].\nExample: "The roof\'s been shut all tournament - AC keeps temps steady. But the real heat? FIFA\'s sponsors watching their rivals get free ad space."\n\nS5 = TWIST + SOURCE ATTRIBUTION: Name the outlet source, add the ironic angle.\nStructure: "[Outlet] reports this is the first time [authority] [bent/broke] its own [rule] for [specific reason]. The reason? [Specific justification from article] — NOT [the obvious explanation]."\nExample: "Goal reports this is the first time FIFA\'s bent its own rules for a venue. The reason? \'Major engineering problems\' - not mercy for Mercedes."\n\nS6 = FINAL BINARY QUESTION: Tie it back to the venue, location, or irony of the situation. NOT a generic \"Option A or B\". Use the actual venue or team names.\nStructure: "[Venue/team/stadium irony fact]. Will [fans/players/world] [notice/care/sweat], or is [authority] the only one [feeling the pressure]?"\nExample: "England vs Argentina in a stadium named after a car brand. Will fans even notice, or is FIFA the only one sweating?"
-
-
-### Pattern E — Pressure Cooker arc (player/manager under fire):
-S1 = HOOK: "[Player/Manager] [not happy/fumes/speaks out] after [event]. [Specific quote or reaction] — [Binary question about future/consequences]"
-S2 = TENSION CONTEXT: What triggered the reaction. The specific incident, decision, or comment from the article.
-S3 = WHO'S INVOLVED: Other parties affected — teammates, board, fans, media.
-S4 = STAKES: What happens next if tension escalates. Job on the line? Transfer request? Board meeting?
-S5 = WHAT'S UNIQUE: Why this reaction matters more than usual — history, contract situation, timing.
-S6 = FINAL BINARY: "[Option specific to this tension situation] or [option specific to this tension situation]?" — NOT generic.
-
-### Pattern F — Behind-the-Scenes arc (logistics, admin, refs, off-field):
-S1 = HOOK: "Why [team/authority] [did/made/decided] [specific thing] for [match/player]. [Specific detail] — [Binary question]"
+S2 = PHYSICAL DETAIL: ONE vivid detail — size, number, quote, timeline. NOT "what the rule says". Make reader imagine the scene.
+S3 = LORE + CONTEXT: The existing rule, affected sponsors, why this is a first.
+S4 = STAKES: Raise tension. Background context → real consequences for stakeholders.
+S5 = WHAT MAKES THIS UNIQUE: Why this bends the rule matters more than usual.
+S6 = BINARY: Question about interpretation or consequences using irony/venue twist.
+""",
+        "c": """## ARC: Detail+Emotion (Pattern C) / Commentary (Pattern D)
+S1 = HOOK: Core conflict or surprising detail. Use "Revealed", "Admitted", or opinion framing.
+S2 = DATA: The specific number, quote, or report driving the story.
+S3 = CONTEXT: Background making the data meaningful.
+S4 = STAKEHOLDER: Affected party — player, club, fans, league.
+S5 = IRONY: Why this is unexpected, contradictory, or ironic.
+S6 = BINARY: Question about future implications or interpretation.
+""",
+        "e": """## ARC: Pressure Cooker (Pattern E)
+S1 = HOOK: "[Player/Manager] [not happy/fumes/speaks out] after [event]. [Reaction] — [Binary Q about future]"
+S2 = TENSION CONTEXT: What triggered the reaction. Specific incident/decision/quote.
+S3 = WHO'S INVOLVED: Other parties — teammates, board, fans, media.
+S4 = STAKES: What happens if tension escalates. Job, transfer, board meeting?
+S5 = WHAT'S UNIQUE: History, contract situation, timing making this matter more.
+S6 = BINARY: "[Option specific to this tension] or [option specific to this tension]?"
+""",
+        "f": """## ARC: Behind-the-Scenes (Pattern F)
+S1 = HOOK: "Why [team/authority] [did/decided] [specific thing]. [Detail] — [Binary Q]"
 S2 = THE SITUATION: What happened, when, where. Specific logistics detail.
-S3 = WHY IT MATTERS: Impact on the match, players, or tournament.
-S4 = WHO BENEFITS/WHO LOSES: Advantage or disadvantage created by this situation.
-S5 = THE REAL STORY: What this reveals about the team, tournament, or organization behind the scenes.
-S6 = FINAL BINARY: Will [factor] affect [result], or is it just [dismissive explanation]?
-
-### Caption Rules:
-2 lines max. First line = headline format (same as Slide 1 hook). Second line = the binary question.
-Example: "FIFA just broke its own golden rule for England vs Argentina.\\nThe Mercedes-Benz logo stays — engineering nightmare or sponsor snub?"
-Zero emoji. Zero hashtags.
-
-### Cover Image Rules:
-Slide 1 image = clean player photo (close-up, emotional moment). NO text overlay on cover.
-Return cover_image_keywords: 2-3 search terms for the hero photo (e.g. "Olise portrait France kit", "Kane hands on head England").
-Text lives in the carousel slides, NOT on the cover.
-
-## 8. GROUNDING RULES (ALL SLIDES)
-Every fact must come from the article. Never invent quotes, transfer fees, or incidents not confirmed in the source.
-
-1. NO INVENTED TACTICAL REASONING. Do not claim a manager "used X as a decoy", "planned X to unsettle Y", or attribute strategic intent unless the article explicitly states it.
-
-2. NO EXAGGERATED PARAPHRASING. If the article says "called for changes", you cannot write "told him to drop X". Preserve the exact strength of the original language. "Called for" ≠ "demanded". "Suggested" ≠ "insisted".
-
-3. NO SPECULATIVE CONSEQUENCES. Do not write "this means X will happen", "Y will fail", "players will gasp for air", or any physical/psychological consequence unless the article explicitly states it.
-
-4. QUOTES: If you include a quote, it must be word-for-word from the article. If paraphrasing, use indirect speech and stay close to the original phrasing.
-
-5. NO PARTIAL LISTS. If listing a squad, lineup, or group, you must include ALL names mentioned in the article. Never cherry-pick a subset and present it as "the full list".
-
-6. If it's a rumor/unconfirmed report, say so explicitly ("according to reports" / "still unconfirmed"). Don't present speculation as fact.
-
-7. TEST EACH SLIDE: Before finalizing, ask "Can I point to the exact sentence in the article that supports this?" If no, cut it.
-
-8. NO INVENTED VALUATIONS OR FEES. Never write £80m, €100m, 'dream move', 'record deal', or any specific fee unless the article explicitly states it. If the article says 'looks likely to stay', you CANNOT write 'won't leave' or 'shut the door'. Preserve the exact certainty level.
-
-9. NO INVENTED INVOLVEMENT. Never add people/agents/managers not mentioned in the article. If the article doesn't name Mourinho, you cannot mention Mourinho. If the article doesn't mention an agent, you cannot mention an agent.
-
-10. PRESERVE HEDGING. If the article says 'looks likely', 'reportedly', 'according to sources', 'I assume' — keep that uncertainty. Never upgrade hedges to certainties. 'Looks likely to stay' ≠ 'won't leave'. 'I assume he won't stand in the way' ≠ 'Red Bull won't block him'.\n\n11. EXTERNAL KNOWLEDGE (IRONY/VENUE/CLUB HISTORY): You may use well-known external facts about the venue, stadium name, club history, or famous moments (e.g. "stadium named after a car brand") ONLY for the irony angle in S6. Never invent external facts. If you're not 100% sure a fact is common knowledge, skip it. No obscure stats, no historical dates not in the article. Stick to what any casual fan would know: famous players, stadium names, iconic matches.
-
-## 8.5 NUMBER TRUTH RULES — STRICT (ZERO TOLERANCE)
-1. ONLY use numbers that appear verbatim in the article above or in the FACTUAL REFERENCE DATA section below.
-2. NEVER calculate or infer player ages. "He's 31" is forbidden unless the article explicitly mentions the player's age.
-3. NEVER calculate years-to-event (e.g., "6 years until 2030"). Use the FACTUAL REFERENCE DATA.
-4. If the article states a fee as "£60m" (exact), you may use it. If uncertain ("reportedly"), preserve uncertainty.
-5. When in doubt: OMIT the number. No number is better than a wrong number.
-6. HALLUCINATION WARNING — these are known past errors:
-   - Player ages not in source (e.g., "He's 31" when article doesn't mention age)
-   - Years-to-future-events (e.g., "2030 World Cup is 6 years away" — correct is 4)
-   - Transfer fees, percentages, stats not stated in the article
-
-## 9. BANNED PATTERNS
-Don't use: You won't believe... / In today's football world... / Sources say... (without specifying which) / This is a game-changer / Fans are furious (unless article shows actual fan reaction) / Shocking (used as a crutch word) / Insane (used as a crutch word) / Let that sink in / Say what you want, but... / you've been warned / beware / watch out / "Tahukah kamu?", "Yuk simak!", "Ini dia rahasianya" / "Did you know?", "Let's dive in!", "Here's the secret" / Clickbait-style headlines / AIDA/PAS formulas / Motivational closing lines
-
-## 10. WORKED EXAMPLE (VIRAL FORMAT)
-
-Input: Goal.com. FIFA has been forced to relax its own branding regulations for the World Cup semi-final between England and Argentina at Atlanta Stadium (Mercedes-Benz Stadium). The Mercedes-Benz logo on the stadium roof cannot be covered due to engineering constraints — the roof has eight retractable petals, each weighing 500 tons and measuring 220 feet. FIFA\'s clean stadium policy normally bans non-sponsor branding. Official mobility sponsors Hyundai and Kia are affected. This is the first time FIFA has bent its own rules for a venue. The reason cited: major engineering problems.
-
-Output:
-{
-  "slide_1": "FIFA just broke its own golden rule for England vs Argentina. The Mercedes-Benz logo stays — engineering nightmare or sponsor snub?",
-  "slide_2": "Atlanta Stadium\'s roof has eight 500-ton petals, each 220ft long. Covering the logo? \'Not just complicated - impossible,\\' said the VP.",
-  "slide_3": "FIFA\'s clean-stadium policy bans all non-sponsor branding. Hyundai and Kia are official partners. This exemption is a first for the World Cup.",
-  "slide_4": "The roof\'s been shut all tournament - AC keeps temps steady. But the real heat? FIFA\'s sponsors watching their rivals get free ad space.",
-  "slide_5": "Goal reports this is the first time FIFA\'s bent its own rules for a venue. The reason? \'Major engineering problems\' - not mercy for Mercedes.",
-  "slide_6": "England vs Argentina in a stadium named after a car brand. Will fans even notice, or is FIFA the only one sweating?",
-  "caption": "FIFA just broke its own golden rule for England vs Argentina.\\nThe Mercedes-Benz logo stays — engineering nightmare or sponsor snub?",
-  "cover_image_keywords": "Atlanta Stadium Mercedes-Benz logo roof World Cup"
-}"""
-
+S3 = WHY IT MATTERS: Impact on match, players, or tournament.
+S4 = WHO BENEFITS/WHO LOSES: Advantage or disadvantage created.
+S5 = THE REAL STORY: What this reveals about the organization behind the scenes.
+S6 = BINARY: "Will [factor] affect [result], or is it just [dismissive explanation]?"
+""",
+        "d": """## ARC: Commentary (Pattern D)
+S1 = HOOK: The quote/opinion/claim driving the story. Name the speaker. "Revealed", "Admitted", "Says" framing.
+S2 = THE QUOTE: Exact quote or specific claim. Attribute clearly.
+S3 = CONTEXT: Why this person's opinion matters — their role, history, or stake.
+S4 = COUNTERPOINT: Opposition, rebuttal, or nuance. Who disagrees and why.
+S5 = STAKES: How this opinion affects real decisions. Transfer, selection, policy.
+S6 = BINARY: Question about whether the opinion will hold up or be acted on.
+""",
+    }
+    system = base + arc_templates.get(pattern, arc_templates["c"])
     ref_data = _build_reference_data()
     source_name = source or url.split("/")[2] if url else ""
     pattern_label = {'a':'Rule-Break (scandal)', 'b':'Paradox', 'c':'Detail+Emotion', 'd':'Commentary', 'e':'Pressure-Cooker', 'f':'Behind-the-Scenes'}.get(pattern, 'Detail+Emotion')
     user = f"Title: {title}\n\nViral Pattern selected: {pattern_label}\n\n{ref_data}\n\nBody:\n{article_text[:8000]}\n\nSource: {source_name}"
     if evaluator_feedback:
         user += f"\n\n## ⚠️ EVALUATOR REJECTED YOUR PREVIOUS ATTEMPT — FIX THESE ERRORS:\n{evaluator_feedback}\nRegenerate ALL 6 slides. Do NOT repeat the errors above."
-
 
     for attempt in range(1, 4):
         log(f"   LLM attempt {attempt}/3...")
@@ -1844,6 +1851,12 @@ def main():
             if not article_text or len(article_text) < 1000:
                 log(f"   ⚠️ Next article too short ({len(article_text or '')} chars) — skipping")
                 continue
+            # Article quality pre-check: must have quotes + numbers (not just fluff)
+            _has_quotes = '"' in article_text
+            _has_numbers = bool(re.search(r'\d{3,}', article_text))  # 100+ = real stat
+            if not _has_quotes and not _has_numbers:
+                log(f"   ⚠️ Article quality: no quotes + no numbers — likely fluff/table, skipping")
+                continue
             # Re-extract hooks for new article
             hooks = ""
             hooks_str = ", ".join(hooks) if isinstance(hooks, list) else hooks
@@ -1888,16 +1901,30 @@ def main():
                     log(f"   🚫 Number hallucination persisted after 3 attempts — trying next article")
                     break
 
-            # 5.5. Evaluator — skip for high-score posts (saves ~50s)
+            # 5.5. Evaluator — skip for E/F patterns (structural, high-trust, ~50s saved)
+            if pattern in ("e", "f"):
+                log(f"   ⏭️ Evaluator skipped (pattern {pattern.upper()} — structural/high-trust)")
+                eval_accepted = True
+                break
+            # Also skip for high-score posts
             score_val = hotness.get(url, 0) or best.get("_score", 0)
             if score_val >= 80:
                 log(f"   ⏭️ Evaluator skipped (score {score_val:.0f} >= 80)")
                 eval_accepted = True
                 break
             eval_t0 = time.time()
-            eval_decision, eval_reasons = evaluator_check(slides, article_text, url)
-            eval_time = time.time() - eval_t0
-            log(f"   🔍 Evaluator: {eval_decision} ({eval_time:.1f}s) — {'; '.join(eval_reasons[:3])}")
+            # Cache check: same URL evaluated before? Skip re-eval
+            cached = _EVAL_CACHE.get(url)
+            if cached:
+                eval_decision, eval_reasons = cached["decision"], cached["reasons"]
+                eval_time = time.time() - eval_t0
+                log(f"   🔍 Evaluator (cached): {eval_decision} ({eval_time:.1f}s) — {'; '.join(eval_reasons[:3])}")
+            else:
+                eval_decision, eval_reasons = evaluator_check(slides, article_text, url)
+                eval_time = time.time() - eval_t0
+                log(f"   🔍 Evaluator: {eval_decision} ({eval_time:.1f}s) — {'; '.join(eval_reasons[:3])}")
+                _EVAL_CACHE[url] = {"decision": eval_decision, "reasons": eval_reasons}
+                _save_eval_cache()
 
             if eval_decision == "APPROVE":
                 eval_accepted = True
