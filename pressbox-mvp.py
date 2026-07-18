@@ -1246,8 +1246,15 @@ def _build_reference_data():
     for name, m, d, y in players:
         age = today.year - y
         if (today.month, today.day) < (m, d):
-            age -= 1  # birthday not yet this year
+            age -= 1
         lines.append(f"- {name}: {age} (born {d} {_months[m-1]} {y})")
+    lines.append("")
+    lines.append("2030 World Cup ages (use these for future-age questions):")
+    for name, m, d, y in players:
+        age_2030 = 2030 - y
+        if (6, m) < (m, d):  # World Cup is June-July, check birthday falls after
+            age_2030 -= 1
+        lines.append(f"- {name}: ~{age_2030} at 2030 World Cup")
     lines.append("")
     lines.append("RULES for numbers in your output:")
     lines.append("- Every number MUST come from the article OR this reference data.")
@@ -1293,11 +1300,14 @@ def number_grounding_check(slides_text, article_text, ref_text):
         warnings.append(f"NUMBER_HALLUCINATION: '{year}' not in source article")
 
     # Check "X years" / "X-year-old" patterns (ages, durations)
-    for m in re.finditer(r"\b(\d{1,2})\s*(?:year(?:s)?\b|[\- ]year[\- ]old\b)", slides_text, re.IGNORECASE):
+    for m in re.finditer(r"\b(\d{1,2})\s*(?:year(?:s)?\b|[ \-]year[ \-]old\b)", slides_text, re.IGNORECASE):
         num = m.group(1)
         if num in ref_nums:
             continue
         if re.search(r"\b" + re.escape(num) + r"\b", article_lower):
+            continue
+        # Also check if 2030 age appears in computed reference
+        if f"~{num} at 2030" in ref_lower:
             continue
         warnings.append(f"NUMBER_HALLUCINATION: age/duration '{m.group().strip()}' not in source")
 
