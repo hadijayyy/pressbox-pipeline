@@ -1358,6 +1358,19 @@ Every slide must hit at least 2 of these 7 criteria. Score yourself honestly —
 6. **Surprising fact** — One jaw-dropping number or detail that reframes the story. Make the reader think "I didn't know that."
 7. **Emotional hook** — Tap into a feeling: anger, sympathy, nostalgia, frustration. Don't just inform — make them feel something.
 
+## 5a. ENGAGEMENT DRIVERS (MAXIMISE INTERACTION)
+To get HIGH views + likes + reposts + comments + shares, every post must include AT LEAST 2 of these:
+
+🔁 **Shareable insight** — A stat or angle so good readers want to screenshot & share. "X has done Y for the first time in Z years." Specific numbers drive shares.
+
+💬 **Comment bait** — A take that splits opinion. NOT "England were bad" (no one argues). BUT "Is [player] actually world-class or just overhyped?" or "Should [manager] be sacked despite [achievement]?" — polarising = comments.
+
+❤️ **Like fuel** — Something the reader agrees with emotionally. Praise for an underrated player, criticism of a hated rival, respect for a legend. "Casemiro was mocked for his wages, but here's what he actually delivered."
+
+📌 **Save-worthy angle** — A timeline, breakdown, or comparison readers will bookmark. "Arsenal's summer window in 5 moves: who's in, who's out, who's stalling."
+
+👀 **Scroll-stopper** — S1 must stop the scroll in <2 seconds. No context-building. Straight to conflict/curiosity/controversy.
+
 ## 6. OUTPUT FORMAT
 Return ONLY valid JSON, no other text:
 {"slide_1":"", "slide_2":"", "slide_3":"", "slide_4":"", "slide_5":"", "slide_6":"", "caption":"", "cover_image_keywords":""}
