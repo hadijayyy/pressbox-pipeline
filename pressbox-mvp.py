@@ -26,6 +26,53 @@ def _save_eval_cache():
     except: pass
 _load_eval_cache()
 
+# Engagement ring buffer — realtime per-(source, hook) performance tracking
+_ENGAGEMENT_RING = {"posts": []}
+_RING_PATH = os.path.expanduser("~/.hermes/pressbox/engagement_ring.json")
+
+def _load_ring():
+    global _ENGAGEMENT_RING
+    try:
+        with open(_RING_PATH) as f:
+            _ENGAGEMENT_RING = json.load(f)
+    except: _ENGAGEMENT_RING = {"posts": []}
+
+def _save_ring():
+    os.makedirs(os.path.dirname(_RING_PATH), exist_ok=True)
+    with open(_RING_PATH, "w") as f:
+        json.dump(_ENGAGEMENT_RING, f)
+
+def _update_ring(topics):
+    """Pull latest views into ring buffer after metrics refresh."""
+    with_m = [t for t in topics if isinstance(t.get("views"), (int, float)) and t["views"] > 0]
+    new_posts = []
+    for t in with_m[-50:]:
+        source = (t.get("source") or "").lower()
+        title = (t.get("title") or "").lower()
+        hook = _classify_hook(title)
+        tt = classify_topic_type(title)
+        new_posts.append({"source": source, "hook": hook, "topic_type": tt, "views": int(t["views"])})
+    _ENGAGEMENT_RING["posts"] = new_posts[-50:]
+    _save_ring()
+
+def _query_ring(source, hook, topic_type):
+    """Project adjustment based on median views for same (source, hook) combo."""
+    posts = _ENGAGEMENT_RING.get("posts", [])
+    if len(posts) < 5:
+        return 0
+    exact = sorted(p["views"] for p in posts if p["source"] == source and p["hook"] == hook)
+    fallback = sorted(p["views"] for p in posts if p["source"] == source)
+    key = exact if len(exact) >= 2 else (fallback if len(fallback) >= 2 else [])
+    if not key:
+        return 0
+    med = key[len(key)//2]
+    all_v = sorted(p["views"] for p in posts)
+    overall = all_v[len(all_v)//2] or 1
+    r = med / overall
+    return 15 if r >= 1.5 else (5 if r >= 1.0 else (0 if r >= 0.5 else -10))
+
+_load_ring()
+
 from pressbox_common import WIB, HOME, POSTED, load_env, log, clean_words, is_similar, classify_topic_type
 from pressbox_scoring import score_topic as base_score_topic
 import requests
@@ -567,8 +614,9 @@ def get_analytics_summary():
 
     # Score auto-tuning: compute weight adjustments from engagement data
     if len(with_metrics) >= 20:
-        summary["score_tuning"] = _compute_score_tuning(with_metrics, median_views)
+        summary['score_tuning'] = _compute_score_tuning(with_metrics, median_views)
 
+    _update_ring(topics)  # feed latest views into engagement ring buffer
     return summary
 
 def _compute_score_tuning(posts, median_views):
@@ -838,8 +886,8 @@ def filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_su
             log(f"   📉 Niche topic: -30 for '{title[:50]}'")
         # ponytail: legacy topic boost multiplier removed — stale data inflated match_result 3x
         # Dynamic analytics boost (data-driven)
+        hook = _classify_hook(tl)
         if analytics_summary and median_views > 0:
-            hook = _classify_hook(tl)
             if hook in best_hooks[:2]:
                 hook_bonus = 20 if hook == "conflict" else 15  # conflict 4x better in data
                 s += hook_bonus
@@ -849,6 +897,12 @@ def filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_su
             if tt in worst_topics:
                 s -= 20
                 log(f"   📉 Topic penalty: {tt} -20 for '{title[:50]}'")
+
+        # Realtime engagement ring: adjust by (source, hook) past performance
+        ring_adjust = _query_ring(source, hook, tt)
+        if ring_adjust:
+            s += ring_adjust
+            log(f"   📊 Ring: {source}/{hook} → {ring_adjust:+d} for '{title[:50]}'")
 
         # Hot topic boost (multi-source coverage = viral)
         # Skip hot boost for niche topics — they ride trending entity clusters without being newsworthy
