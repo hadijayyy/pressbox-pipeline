@@ -722,6 +722,8 @@ _POSTWC_GARBAGE = [
     "player ratings", "how england could line up", "5 things",
     # Kits / merchandise (niche)
     "kit", "jersey", "boots",
+    # Live/rolling blogs (low effort aggregator)
+    "live", "updates",
     # Post-tournament flood (WC/major tournament aftermath)
     "farewell", "legacy", "what next for",
 ]
@@ -839,8 +841,9 @@ def filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_su
         if analytics_summary and median_views > 0:
             hook = _classify_hook(tl)
             if hook in best_hooks[:2]:
-                s += 15
-                log(f"   📈 Hook boost: {hook} +15 for '{title[:50]}'")
+                hook_bonus = 20 if hook == "conflict" else 15  # conflict 4x better in data
+                s += hook_bonus
+                log(f"   📈 Hook boost: {hook} +{hook_bonus} for '{title[:50]}'")
             
             # Penalize worst-performing topic types
             if tt in worst_topics:
