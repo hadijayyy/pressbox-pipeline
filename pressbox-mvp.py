@@ -1482,7 +1482,8 @@ Sentences separated by \\n\\n. S6 = forced binary question using specific names/
 
 ## CAPTION
 2 lines max. Line 1 = headline. Line 2 = binary question. Zero emoji.
-Pick ≥1 engagement hook: "Follow for more transfer news" / "Agree or disagree?" / "Which side are you on?" — add before the question.
+Pick ≥1 engagement hook: "Agree or disagree?" / "Which side are you on?" — add before the question.
+❌ NO generic "Follow for more". CTA must reference the story: "Who replaces X? Follow for more."
 
 ## COVER IMAGE
 Close-up player photo, emotional moment. No text overlay.
@@ -1502,6 +1503,8 @@ cover_image_keywords: 2-3 search terms (e.g. "Tuchel training kit England" or "t
     **Exception for casual tone:** "reportedly" → "apparently", "sources say" → "rumored". Simplify legalese, keep key uncertainty.
 11. EXTERNAL KNOWLEDGE: only for S6 irony. Must be common knowledge (stadium name, famous club history, iconic player). No obscure stats.
 12. EVERY SLIDE MUST HAVE A TAKE. Max 1 descriptive sentence per slide ("X said Y"). At least 1 sentence with stance: agreement, disagreement, surprise, analysis, irony, or a pointed question. If a slide only reports without judging, rewrite it.
+13. S1 MAX 15 WORDS. Hook must name specific person + specific action/quote. NO vague openings. "Tuchel fumes at England display" ✓. "There has been reaction to..." ✗.
+14. S6 MUST BE DIVISIVE. Name two real options the audience would argue over. Not "Is this good or bad?" but "Tuchel stays or walks?" — options named, debate forced.
 
 ## NUMBER TRUTH (ZERO TOLERANCE)
 1. Numbers ONLY from article text OR FACTUAL REFERENCE DATA below.
