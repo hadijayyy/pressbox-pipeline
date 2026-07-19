@@ -1150,7 +1150,8 @@ def evaluator_check(slides, article_text, url):
         "5. PARTIAL LISTS: article mentions 5 players but slide shows only 3 as 'the lineup' — missing players = misleading\n"
         "6. TONE ISSUES: clickbait that damages credibility, insensitive content\n"
         "7. QUALITY: grammar errors, incoherent flow, too many slides\n"
-        "8. MISLEADING: headline says X but article says Y\n\n"
+        "8. MISLEADING: headline says X but article says Y\n"
+        "9. NO STANCE: slide only reports (\"X said Y\") without any take, analysis, or opinion. Every slide needs a stance.\n\n"
         "RULE: For each slide, can you point to the EXACT sentence in the article that supports every claim? "
         "If a claim requires inference beyond the literal text, flag it.\n\n"
         "Respond in EXACTLY this JSON format:\n"
@@ -1500,6 +1501,7 @@ cover_image_keywords: 2-3 search terms (e.g. "Tuchel training kit England" or "t
 10. PRESERVE hedging. "Looks likely" ≠ "won't leave". Keep uncertainty.
     **Exception for casual tone:** "reportedly" → "apparently", "sources say" → "rumored". Simplify legalese, keep key uncertainty.
 11. EXTERNAL KNOWLEDGE: only for S6 irony. Must be common knowledge (stadium name, famous club history, iconic player). No obscure stats.
+12. EVERY SLIDE MUST HAVE A TAKE. Max 1 descriptive sentence per slide ("X said Y"). At least 1 sentence with stance: agreement, disagreement, surprise, analysis, irony, or a pointed question. If a slide only reports without judging, rewrite it.
 
 ## NUMBER TRUTH (ZERO TOLERANCE)
 1. Numbers ONLY from article text OR FACTUAL REFERENCE DATA below.
