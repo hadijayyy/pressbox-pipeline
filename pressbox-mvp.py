@@ -1562,7 +1562,19 @@ S2 = PHYSICAL DETAIL: ONE vivid detail — size, number, quote, timeline. NOT "w
 S3 = LORE + CONTEXT: The existing rule, affected sponsors, why this is a first.
 S4 = STAKES: Raise tension. Background context → real consequences for stakeholders.
 S5 = WHAT MAKES THIS UNIQUE: Why this bends the rule matters more than usual.
-S6 = BINARY: Question about interpretation or consequences using irony/venue twist.
+S6 = BINARY: Question about interpretation or consequences using irony/venue twist. For sensitive topics (injuries/abuse/discrimination): reflective question per base rules.
+
+""",
+        "b": """## ARC: Contradiction (Pattern B)
+S1 = HOOK: "[Thing] is [claim] — but [contradicting evidence]. [Implication] — [Binary Q]"
+EXACTLY 2 sentences. Example: "Premier League says player welfare comes first. Yet Man Utd played 3 matches in 6 days — while earning £5m per game."
+
+S2 = THE CONTRADICTION: The two opposing facts/claims. Make the gap explicit.
+S3 = EVIDENCE: Data, timeline, or statement proving the contradiction exists.
+S4 = WHY IT MATTERS: Who benefits from the contradiction being exposed.
+S5 = THE REAL STORY: What the contradiction reveals about motives or priorities.
+S6 = BINARY: "Is this [excuse] or [underlying issue]?" — name two interpretations. For sensitive topics (injuries/abuse/discrimination): reflective question per base rules.
+
 """,
         "c": """## ARC: Detail+Emotion (Pattern C)
 S1 = HOOK: Core conflict or surprising detail. Use "Revealed", "Admitted", or opinion framing. EXACTLY 2 sentences.
@@ -1570,7 +1582,7 @@ S2 = DATA: The specific number, quote, or report driving the story.
 S3 = CONTEXT: Background making the data meaningful.
 S4 = STAKEHOLDER: Affected party — player, club, fans, league.
 S5 = IRONY: Why this is unexpected, contradictory, or ironic.
-S6 = BINARY: Question about future implications or interpretation.
+S6 = BINARY: Question about future implications or interpretation. For sensitive topics (injuries/abuse/discrimination): reflective question per base rules.
 """,
         "e": """## ARC: Pressure Cooker (Pattern E)
 S1 = HOOK: "[Player/Manager] [not happy/fumes/speaks out] after [event]. [Reaction] — [Binary Q about future]" EXACTLY 2 sentences.
@@ -1578,7 +1590,7 @@ S2 = TENSION CONTEXT: What triggered the reaction. Specific incident/decision/qu
 S3 = WHO'S INVOLVED: Other parties — teammates, board, fans, media.
 S4 = STAKES: What happens if tension escalates. Job, transfer, board meeting?
 S5 = WHAT'S UNIQUE: History, contract situation, timing making this matter more.
-S6 = BINARY: "[Option specific to this tension] or [option specific to this tension]?"
+S6 = BINARY: "[Option specific to this tension] or [option specific to this tension]?" For sensitive topics (injuries/abuse/discrimination): reflective question per base rules.
 """,
         "f": """## ARC: Behind-the-Scenes (Pattern F)
 S1 = HOOK: "Why [team/authority] [did/decided] [specific thing]. [Detail] — [Binary Q]" EXACTLY 2 sentences.
@@ -1586,7 +1598,7 @@ S2 = THE SITUATION: What happened, when, where. Specific logistics detail.
 S3 = WHY IT MATTERS: Impact on match, players, or tournament.
 S4 = WHO BENEFITS/WHO LOSES: Advantage or disadvantage created.
 S5 = THE REAL STORY: What this reveals about the organization behind the scenes.
-S6 = BINARY: "Will [factor] affect [result], or is it just [dismissive explanation]?"
+S6 = BINARY: "Will [factor] affect [result], or is it just [dismissive explanation]?" For sensitive topics (injuries/abuse/discrimination): reflective question per base rules.
 """,
         "d": """## ARC: Commentary (Pattern D)
 S1 = HOOK: The quote/opinion/claim driving the story. Name the speaker. "Revealed", "Admitted", "Says" framing. EXACTLY 2 sentences.
@@ -1594,13 +1606,13 @@ S2 = THE QUOTE: Exact quote or specific claim. Attribute clearly.
 S3 = CONTEXT: Why this person's opinion matters — their role, history, or stake.
 S4 = COUNTERPOINT: Opposition, rebuttal, or nuance. Who disagrees and why.
 S5 = STAKES: How this opinion affects real decisions. Transfer, selection, policy.
-S6 = BINARY: Question about whether the opinion will hold up or be acted on.
+S6 = BINARY: Question about whether the opinion will hold up or be acted on. For sensitive topics (injuries/abuse/discrimination): reflective question per base rules.
 """,
     }
     system = base + arc_templates.get(pattern, arc_templates["c"])
     ref_data = _build_reference_data()
     source_name = source or url.split("/")[2] if url else ""
-    pattern_label = {'a':'rule_break', 'b':'contradiction', 'c':'straight_news', 'd':'straight_news', 'e':'pressure_cooker', 'f':'straight_news'}.get(pattern, 'straight_news')
+    pattern_label = {'a':'Rule-Break', 'b':'Contradiction', 'c':'Detail+Emotion', 'd':'Commentary', 'e':'Pressure-Cooker', 'f':'Behind-the-Scenes'}.get(pattern, 'Detail+Emotion')
     user = (
         f"<request>\n  <current_date>{datetime.now().strftime('%Y-%m-%d')}</current_date>\n"
         f"  <selected_pattern>{pattern_label}</selected_pattern>\n</request>\n\n"
