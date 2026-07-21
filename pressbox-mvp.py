@@ -1441,8 +1441,9 @@ One article = one story. Pick the strongest storyline from the article title. If
 ## TASK
 From article text: find 5 strongest insights. Rank them. Pick #1 for hook. Arrange rest into 6 slides in logical arc (not chronological).
 
-## VIRAL CRITERIA
-Every slide must hit ≥2 of these:
+## VIRAL CRITERIA + ENGAGEMENT DRIVERS
+Every slide must hit ≥2 criteria. Pick ≥2 drivers per post.
+CRITERIA:
 1. Pro & Con — tension, debate, two sides
 2. Relatable — universal: money, loyalty, underdog, betrayal
 3. Famous figure — name-drop early
@@ -1450,14 +1451,11 @@ Every slide must hit ≥2 of these:
 5. Surprising fact — jaw-drop number
 6. Emotional — anger, sympathy, nostalgia
 7. Scroll-stopper — S1 < 2 seconds, straight to conflict/curiosity
-
-## ENGAGEMENT DRIVERS
-Pick ≥2 per post:
+DRIVERS:
 - Shareable insight: stat worth screenshotting
 - Comment bait: polarising take ("Is X world-class or overhyped?")
 - Like fuel: praise underrated player, criticise rival
 - Save-worthy: timeline, breakdown, comparison
-- Scroll-stopper: S1 must hook instantly
 
 ## OUTPUT FORMAT
 {"slide_1":"","slide_2":"","slide_3":"","slide_4":"","slide_5":"","slide_6":"","caption":"","cover_image_keywords":""}
@@ -1502,7 +1500,7 @@ cover_image_keywords: 2-3 search terms (e.g. "Tuchel training kit England" or "t
     **Exception for casual tone:** "reportedly" → "apparently", "sources say" → "rumored". Simplify legalese, keep key uncertainty.
 11. EXTERNAL KNOWLEDGE: only for S6 irony. Must be common knowledge (stadium name, famous club history, iconic player). No obscure stats.
 12. EVERY SLIDE MUST HAVE A TAKE. Max 1 descriptive sentence per slide ("X said Y"). At least 1 sentence with stance: agreement, disagreement, surprise, analysis, irony, or a pointed question. If a slide only reports without judging, rewrite it.
-13. S1 MAX 15 WORDS. Hook must name specific person + specific action/quote. NO vague openings. "Tuchel fumes at England display" ✓. "There has been reaction to..." ✗.
+13. S1 EXACTLY 2 SENTENCES. Sentence 1 = specific action + who. Sentence 2 = context/stakes/why it matters. Total ≤25 words. NOT bare: "Wiped. Gone. Why?" but dense: "FIFA wiped Paredes' red card — no suspension, no fine. What message does this send?"
 14. S6 MUST BE DIVISIVE. Name two real options the audience would argue over. Not "Is this good or bad?" but "Tuchel stays or walks?" — options named, debate forced.
 15. MAX 15 WORDS PER SENTENCE. Short sentences hit harder. Split long sentences into two.
 
@@ -1518,7 +1516,7 @@ cover_image_keywords: 2-3 search terms (e.g. "Tuchel training kit England" or "t
     arc_templates = {
         "a": """## ARC: Rule-Break (Pattern A)
 S1 = VIRAL HOOK: "[Authority] just [broke/violated] its own [rule] for [Team A] vs [Team B]. [Concrete detail] — [Binary Q with irony/venue twist]"
-MAX 2 sentences. Example: "FIFA just broke its own golden rule for England vs Argentina. The Mercedes-Benz logo stays — engineering nightmare or sponsor snub?"
+EXACTLY 2 sentences. Example: "FIFA just broke its own golden rule for England vs Argentina. The Mercedes-Benz logo stays — engineering nightmare or sponsor snub?"
 
 S2 = PHYSICAL DETAIL: ONE vivid detail — size, number, quote, timeline. NOT "what the rule says". Make reader imagine the scene.
 S3 = LORE + CONTEXT: The existing rule, affected sponsors, why this is a first.
@@ -1526,8 +1524,8 @@ S4 = STAKES: Raise tension. Background context → real consequences for stakeho
 S5 = WHAT MAKES THIS UNIQUE: Why this bends the rule matters more than usual.
 S6 = BINARY: Question about interpretation or consequences using irony/venue twist.
 """,
-        "c": """## ARC: Detail+Emotion (Pattern C) / Commentary (Pattern D)
-S1 = HOOK: Core conflict or surprising detail. Use "Revealed", "Admitted", or opinion framing.
+        "c": """## ARC: Detail+Emotion (Pattern C)
+S1 = HOOK: Core conflict or surprising detail. Use "Revealed", "Admitted", or opinion framing. EXACTLY 2 sentences.
 S2 = DATA: The specific number, quote, or report driving the story.
 S3 = CONTEXT: Background making the data meaningful.
 S4 = STAKEHOLDER: Affected party — player, club, fans, league.
@@ -1535,7 +1533,7 @@ S5 = IRONY: Why this is unexpected, contradictory, or ironic.
 S6 = BINARY: Question about future implications or interpretation.
 """,
         "e": """## ARC: Pressure Cooker (Pattern E)
-S1 = HOOK: "[Player/Manager] [not happy/fumes/speaks out] after [event]. [Reaction] — [Binary Q about future]"
+S1 = HOOK: "[Player/Manager] [not happy/fumes/speaks out] after [event]. [Reaction] — [Binary Q about future]" EXACTLY 2 sentences.
 S2 = TENSION CONTEXT: What triggered the reaction. Specific incident/decision/quote.
 S3 = WHO'S INVOLVED: Other parties — teammates, board, fans, media.
 S4 = STAKES: What happens if tension escalates. Job, transfer, board meeting?
@@ -1543,7 +1541,7 @@ S5 = WHAT'S UNIQUE: History, contract situation, timing making this matter more.
 S6 = BINARY: "[Option specific to this tension] or [option specific to this tension]?"
 """,
         "f": """## ARC: Behind-the-Scenes (Pattern F)
-S1 = HOOK: "Why [team/authority] [did/decided] [specific thing]. [Detail] — [Binary Q]"
+S1 = HOOK: "Why [team/authority] [did/decided] [specific thing]. [Detail] — [Binary Q]" EXACTLY 2 sentences.
 S2 = THE SITUATION: What happened, when, where. Specific logistics detail.
 S3 = WHY IT MATTERS: Impact on match, players, or tournament.
 S4 = WHO BENEFITS/WHO LOSES: Advantage or disadvantage created.
@@ -1551,7 +1549,7 @@ S5 = THE REAL STORY: What this reveals about the organization behind the scenes.
 S6 = BINARY: "Will [factor] affect [result], or is it just [dismissive explanation]?"
 """,
         "d": """## ARC: Commentary (Pattern D)
-S1 = HOOK: The quote/opinion/claim driving the story. Name the speaker. "Revealed", "Admitted", "Says" framing.
+S1 = HOOK: The quote/opinion/claim driving the story. Name the speaker. "Revealed", "Admitted", "Says" framing. EXACTLY 2 sentences.
 S2 = THE QUOTE: Exact quote or specific claim. Attribute clearly.
 S3 = CONTEXT: Why this person's opinion matters — their role, history, or stake.
 S4 = COUNTERPOINT: Opposition, rebuttal, or nuance. Who disagrees and why.
