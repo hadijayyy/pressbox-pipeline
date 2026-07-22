@@ -71,7 +71,6 @@ class TestSkipTopicsMatch:
             ("Mohamed Salah sends Liverpool transfer reminder", "transfer_rumor"),
             ("Egypt beat New Zealand 3-1 in World Cup opener", "match_result"),
             ("Man Utd sack manager after loss", "managerial_change"),
-            ("World Cup 2026 group stage fixtures announced", "tournament_news"),
         ]
         for title, expected_cat in test_cases:
             got = classify_topic_type(title)

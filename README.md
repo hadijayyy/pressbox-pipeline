@@ -60,7 +60,7 @@ Cron: every 60m, watchdog at :15.
 | **E — Pressure Cooker** 🔥 | Player/manager under fire | NOT happy, fumes, speaks out, defiant | **634K** (Bellingham slap) |
 | **F — Behind-the-Scenes** 🏗️ | Logistics, admin, VAR, ref | hotel, travel, fitness, decisions | **536K** (Norway hotel) |
 
-Pattern selection is automatic: keyword + signal detection, not random. E and F are prioritised for post-World Cup football (pressure drama + news).
+Pattern selection is automatic: keyword + signal detection, not random. E and F are prioritised for post-tournament drama/news.
 
 ## Google Trends Integration
 
@@ -110,8 +110,7 @@ Every pipeline run fetches **Google Trends UK RSS** and matches trending queries
 
 | Bonus | Trigger | Points |
 |-------|---------|--------|
-| WC Related | Title has football context | +40 |
-| WC Related (weak) | Only team name | +10 |
+| User Feedback Boost | Hook-type or topic-type performs well | +15 |
 | Transfer Related | Transfer keywords | +10 |
 | Hot Topic | Multi-source cluster (hotness ≥ 3.0) | +25 |
 | Google Trends | Trending query matches article | +0.5~8.0 |
@@ -126,7 +125,6 @@ Every pipeline run fetches **Google Trends UK RSS** and matches trending queries
 
 | Guard | What it does |
 |-------|-------------|
-| WC context check | +40 only if title has football keywords, else +10 |
 | Hot relevance check | Entity must appear in title first half |
 | Niche penalty | -30 for boots/kit/jersey/stadium |
 | Soft cap | Above 100: `100 + (score - 100) × 0.3` |

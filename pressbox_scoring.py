@@ -58,7 +58,7 @@ INCLUDE_KEYWORDS = {
     ],
     # World Cup / International
     "international": [
-        "world cup", "fifa", "qualifier", "wc 2026", "usa 2026",
+        "fifa", "qualifier", "world cup 2030",
         "euros", "copa america", "nations league", "friendly international", "vs",
         "call-up", "squad announcement", "international break",
         "group stage", "knockout stage", "round of 16", "quarter-final", "kualifikasi",

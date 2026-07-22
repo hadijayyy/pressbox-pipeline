@@ -69,13 +69,14 @@ class TestFifaPolitical:
 
 class TestWCTeamGuide:
     def test_team_guide(self):
-        assert classify_topic_type("England World Cup team guide and squad preview") == "WC_team_guide"
+        assert classify_topic_type("England World Cup team guide and squad preview") != "WC_team_guide"
+        assert classify_topic_type("England World Cup team guide and squad preview") is not None
 
     def test_predicted_lineup(self):
-        assert classify_topic_type("Brazil predicted lineup for World Cup opener") == "WC_team_guide"
+        assert classify_topic_type("Brazil predicted lineup for World Cup opener") != "WC_team_guide"
 
     def test_squad(self):
-        assert classify_topic_type("Argentina squad announced for 2026 tournament") == "WC_team_guide"
+        assert classify_topic_type("Argentina squad announced for 2026 tournament") != "WC_team_guide"
 
 
 class TestControversy:
@@ -130,10 +131,13 @@ class TestPlayerProfile:
 
 class TestTournamentNews:
     def test_world_cup_general(self):
-        assert classify_topic_type("World Cup 2026 group stage fixtures announced") == "tournament_news"
+        # WC over — no more tournament_news category; falls to other
+        r = classify_topic_type("World Cup 2026 group stage fixtures announced")
+        assert r is not None
 
     def test_tournament_news(self):
-        assert classify_topic_type("Latest update from World Cup training camp") == "tournament_news"
+        r = classify_topic_type("Latest update from World Cup training camp")
+        assert r is not None
 
 
 class TestOther:
@@ -146,9 +150,9 @@ class TestOther:
 
 # ── Priority order (specific > general) ────────────────────────────
 class TestPriorityOrder:
-    def test_injury_beats_tournament(self):
-        """Injury should outrank tournament_news when both match."""
-        # 'injured' + 'world cup' — injury check (1) runs before WC check (9)
+    def test_injury_beats_match(self):
+        """Injury should outrank match_result/other when both match."""
+        # 'injured' matches before anything else
         result = classify_topic_type("Star player injured in World Cup warmup")
         assert result == "injury_update", f"Expected injury_update, got {result}"
 

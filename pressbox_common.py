@@ -114,7 +114,6 @@ _POLITICAL_KW = {"ban", "banned", "banne", "protest", "visa", "travel",
                  "trump", "government", "policy", "staff denied", "oppressed",
                  "u-turn", "backlash", "boo", "booed", "complaint", "fifa",
                  "iran", "political", "diplomat", "sanction", "restrict"}
-_GUIDE_KW = {"guide", "preview", "squad", "team guide", "lineup", "predicted"}
 _CONTROVERSY_KW = {"controversy", "scandal", "racism", "racist", "abuse",
                    "hate symbol", "var official"}
 _TACTICAL_KW = {"tactical", "formation", "system", "analysis", "pressing",
@@ -130,18 +129,14 @@ def classify_topic_type(text):
     if not text:
         return "other"
     lower = text.lower()
-    is_wc = any(w in lower for w in ["world cup", "wc", "2026", "tournament"])
-
     if any(w in lower for w in _INJURY_KW):
         return "injury_update"
     if any(w in lower for w in _TRANSFER_KW):
         return "transfer_rumor"
     if any(w in lower for w in _MANAGERIAL_KW):
         return "managerial_change"
-    if is_wc and any(w in lower for w in _POLITICAL_KW):
+    if any(w in lower for w in _POLITICAL_KW):
         return "fifa_political"
-    if is_wc and any(w in lower for w in _GUIDE_KW):
-        return "WC_team_guide"
     if any(w in lower for w in _CONTROVERSY_KW):
         return "controversy"
     if any(w in lower for w in _TACTICAL_KW):
@@ -150,6 +145,4 @@ def classify_topic_type(text):
         return "match_result"
     if any(w in lower for w in _PROFILE_KW):
         return "player_profile"
-    if is_wc:
-        return "tournament_news"
     return "other"

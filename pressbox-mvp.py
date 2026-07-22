@@ -754,8 +754,8 @@ _COMMERCIAL = ["snap up","buy now","deal","discount","shop","price drop","sale",
                "bargain","save £","save $","off rrp","% off","for £","for $","amazon","ebay",
                "where to buy","get yours","order now","delivery","free shipping","stock up"]
 _WOMEN = ["women","women's","womens","female","lionaesses","nwsl","wsl"]
-# Post-WC garbage topics — low-value content that floods feed after major tournament ends
-_POSTWC_GARBAGE = [
+# Low-value content filter — skip predictive/generic/fluff topics
+_LOW_VALUE_GARBAGE = [
     # Prediction / preview (engagement trap — no real story)
     "prediction", "who will win", "match preview", "preview:",
     # Referee articles (niche, low engagement)
@@ -770,8 +770,6 @@ _POSTWC_GARBAGE = [
     "kit", "jersey", "boots",
     # Live/rolling blogs (low effort aggregator)
     "live", "updates",
-    # Post-tournament flood (WC/major tournament aftermath)
-    "farewell", "legacy", "what next for",
 ]
 
 
@@ -818,8 +816,8 @@ def filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_su
         # Filter out live commentary/live-blog pages
         if '/live/' in url or '/live-blog/' in url or '/quiz/' in url: continue
         # Post-WC garbage filter — skip low-value content that kills engagement
-        if any(kw in tl for kw in _POSTWC_GARBAGE):
-            log(f"   🗑️ Post-WC garbage: skipped '{title[:60]}'")
+        if any(kw in tl for kw in _LOW_VALUE_GARBAGE):
+            log(f"   🗑️ Low-value: skipped '{title[:60]}'")
             continue
         # Sensitive content
         if _match_sensitive(tl) or _match_sensitive(desc): continue
@@ -843,7 +841,7 @@ def filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_su
                 keyword_bonus = min(s * 0.3, 15)  # cap adjustment to 15 pts
                 s = int(s + keyword_bonus * (kw_mult - 1.0))
             audience_mult = tuning.get("audience_reach_multiplier", 1.0)
-            if audience_mult != 1.0 and t.get("wc_boost"):
+            if audience_mult != 1.0:
                 s = int(s + 10 * (audience_mult - 1.0))
             # Human interest boost from auto-tuning
             hi_mult = tuning.get("human_interest_multiplier", 1.0)
@@ -855,18 +853,6 @@ def filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_su
                     s = int(s + 10 * (hi_mult - 1.0))
                     log(f"   💔 Human interest boost: ×{hi_mult} for '{title[:50]}'")
         # Pipeline bonuses
-        # wc_related: +40 only if title has football context, +10 if just mentions team
-        _wc_context = ["match","beat","win","loss","draw","score","goal","goals",
-                       "qualify","eliminate","starter","lineup","injury","injured",
-                       "transfer","sign","fee","contract","manager","sack","appointed",
-                       "red card","yellow card","penalty","var","offside","suspended",
-                       "captain","debut","hat-trick","brace","comeback","upset"]
-        if t.get("wc_related") or t.get("wc_boost"):
-            if any(kw in tl for kw in _wc_context):
-                s += 40
-            else:
-                s += 10  # just mentions team name, not football context
-                log(f"   ⚠️ wc_related reduced: +10 (no football context) for '{title[:50]}'")
         if t.get("transfer_related"): s += 15
         # Controversy/drama topic type bonus — proven viral format
         if tt == "controversy" or tt == "fifa_political" or tt == "manager_sack":
@@ -1342,7 +1328,7 @@ def _build_reference_data():
     wc_years = 2030 - today.year
     lines = [f"## FACTUAL REFERENCE DATA (ground truth for all math)"]
     lines.append(f"Current date: {today.strftime('%A, %B %d, %Y')}")
-    lines.append(f"2030 FIFA World Cup: June-July 2030 → ~{wc_years} years from now")
+    lines.append(f"Next FIFA World Cup: 2030 (June-July) → ~{wc_years} years from now")
     lines.append("")
     lines.append(f"Player ages (mid-{today.year}):")
     _months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
@@ -1352,12 +1338,13 @@ def _build_reference_data():
             age -= 1
         lines.append(f"- {name}: {age} (born {d} {_months[m-1]} {y})")
     lines.append("")
-    lines.append("2030 World Cup ages (use these for future-age questions):")
+    lines.append("2030 FIFA World Cup age hints (for future-age questions only):")
     for name, m, d, y in players:
         age_2030 = 2030 - y
-        if (6, m) < (m, d):  # World Cup is June-July, check birthday falls after
+        if (6, m) < (m, d):
             age_2030 -= 1
-        lines.append(f"- {name}: ~{age_2030} at 2030 World Cup")
+        lines.append(f"- {name}: ~{age_2030} at 2030 WC (use only for future-age questions)")
+    lines.append("")
     lines.append("")
     lines.append("RULES for numbers in your output:")
     lines.append("- Every number MUST come from the article OR this reference data.")
