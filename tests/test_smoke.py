@@ -1,5 +1,4 @@
 """Smoke tests — verify modules compile cleanly."""
-import sys
 from pathlib import Path
 
 

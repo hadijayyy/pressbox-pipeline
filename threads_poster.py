@@ -34,8 +34,6 @@ Usage:
     print(result)  # list of dicts: [{"text": ..., "post_id": ...}, ...]
 """
 
-from __future__ import annotations
-
 import logging
 import re
 import time

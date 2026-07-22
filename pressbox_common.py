@@ -2,7 +2,7 @@
 """Common utilities shared by Press Box pipeline modules.
 
 Exports:
-  HOME, SCRIPTS, STAGING, POSTED, WIB     — shared paths / timezone
+  HOME, POSTED, WIB                       — shared paths / timezone
   load_env()                                — load ~/.hermes/.env
   log(msg)                                  — timestamped stderr logger
   STOPWORDS, REPLACEMENTS                  — text filtering data
@@ -16,12 +16,6 @@ from datetime import datetime, timezone, timedelta
 
 # ── Paths ───────────────────────────────────────────────────────────
 HOME = os.path.expanduser("~")
-REPO_DIR = "/home/ubuntu/pressbox-pipeline"  # fixed path for cron compatibility
-SCRIPTS = REPO_DIR  # all scripts now live in the repo
-STAGING = {
-    "v2": f"{HOME}/.hermes/pressbox/staging.json",
-    "v3": f"{HOME}/.hermes/pressbox/staging-v3.json"
-}
 POSTED = f"{HOME}/.hermes/pressbox/posted_topics.json"
 WIB = timezone(timedelta(hours=7))
 

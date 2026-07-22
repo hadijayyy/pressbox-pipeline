@@ -3,7 +3,6 @@
 No API key needed — scrapes Google Trends RSS/daily feed."""
 import json, time, sys, re, os
 from urllib.request import urlopen, Request
-from datetime import datetime, timedelta
 
 TRENDS_URL = "https://trends.google.com/trending/rss?geo=GB"
 # Daily trends API (no category filter — filtered by keyword matching instead)

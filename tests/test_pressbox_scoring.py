@@ -6,7 +6,6 @@ Test suite adapted from Market Monday v17 (17-case validation).
 Football-specific test cases with SHOULD-PASS, SHOULD-FAIL, and EDGE CASES.
 """
 
-import pytest
 import datetime
 import importlib.util
 from pathlib import Path
