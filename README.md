@@ -2,7 +2,7 @@
 
 Automated football content pipeline for [@parkthebus.football](https://www.threads.net/@parkthebus.football) on Threads.
 
-Scrapes football news from 5 sources, detects hot/viral topics via entity clustering + **Google Trends**, scores with a multi-layered engine, selects from **5 viral content patterns**, generates 6-slide carousels via LLM with anti-hallucination grounding, and posts on schedule — fully automated with engagement feedback loop.
+Scrapes football news from 5 sources, detects hot/viral topics via entity clustering + **Google Trends**, scores with a multi-layered engine, selects from **6 viral content patterns**, generates 6-slide carousels via LLM (Mistral) with priority-guided prompt architecture and anti-hallucination grounding, and posts on schedule — fully automated with engagement feedback loop.
 
 ## How It Works
 
@@ -17,29 +17,36 @@ Scrapes football news from 5 sources, detects hot/viral topics via entity cluste
 │  3. HOT DETECT      4h persistent cache + entity clustering  │
 │                     (Union-Find) + GOOGLE TRENDS match       │
 │       ↓                                                      │
-│  4. PATTERN SELECT  A (Rule-Break) / C (Detail+Emotion) /   │
-│                     D (Commentary) / E (Pressure Cooker) /   │
-│                     F (Behind-the-Scenes)                    │
+│  4. PATTERN SELECT  A (Rule-Break) / B (Contradiction) /    │
+│                     C (Detail+Emotion) / D (Commentary) /    │
+│                     E (Pressure Cooker) / F (Behind-Scenes)  │
 │       ↓                                                      │
 │  5. SCORE           16-component data-driven engine +        │
 │                     context-aware bonuses + soft cap + tune  │
 │       ↓                                                      │
 │  6. VERIFY          Article: 1000+ chars, 150+ words,        │
 │                     8+ unique sentences. Tries top 5.       │
-│       ↓                                                      │
+│       ↓                                 │
 │  7. FETCH           Extract full article text + og:image HD  │
 │       ↓                                                      │
-│  8. GENERATE        Mistral LLM → JSON with 6 slides +      │
-│                     caption (per selected pattern arc)       │
+│  8. GENERATE        Mistral LLM → XML-prompted output with   │
+│                     priority ladder, evidence rules, source  │
+│                     validation, sensitive topic exception    │
 │       ↓                                                      │
-│  9. POST            Threads API (chained thread + image)     │
+│  9. GROUND CHECK    Named entity match + hallucinated stage  │
+│                     detection + number grounding (soft/hard)  │
 │       ↓                                                      │
-│ 10. TRACK           posted_topics.json + hotness for A/B     │
+│ 10. EVALUATOR       9-rule stance check (must take a side)   │
+│                     + engagement viability + up to 3 cycles  │
 │       ↓                                                      │
-│ 11. NOTIFY          @Szejay_bot (4-line format)              │
+│ 11. POST            Threads API (chained thread + image)     │
+│       ↓                                                      │
+│ 12. TRACK           posted_topics.json + hotness for A/B     │
+│       ↓                                                      │
+│ 13. NOTIFY          @Szejay_bot (4-line format)              │
 └──────────────────────────────────────────────────────────────┘
 
-Cron: every 80m, watchdog at :15.
+Cron: every 60m, watchdog at :15.
 ```
 
 ## Viral Content Patterns
@@ -47,6 +54,7 @@ Cron: every 80m, watchdog at :15.
 | Pattern | Style | Trigger Words | Top Performance |
 |---------|-------|---------------|-----------------|
 | **A — Rule-Break** | Authority violates own rule/ethos | FIFA broke, UEFA waived, IFAB ignores | **12M+** (parkthebus) |
+| **B — Contradiction** | Opposing facts/claims exposed | contradicts, despite, while, yet | — |
 | **C — Detail+Emotion** | Data-driven human interest | contract, sacrifice, journey, fee | ~191K |
 | **D — Commentary** | Celebrity/pundit says something | slams, warns, hits out, reacts | ~403K |
 | **E — Pressure Cooker** 🔥 | Player/manager under fire | NOT happy, fumes, speaks out, defiant | **634K** (Bellingham slap) |
@@ -158,43 +166,115 @@ Viral combo (star+conflict+human) : 130–170
 | FourFourTwo | RSS | **2 (+5)** | Demoted — avg 27K, lowest engagement |
 | Mirror | RSS | 2 (+5) | Fresh 0–1h |
 
+## Prompt Architecture (v4)
+
+Hybrid architecture — v3 editorial skeleton + proven arc templates + viral criteria:
+
+### Instruction Priority
+
+7-level priority ladder (higher = override lower):
+
+1. **Accuracy** — Never sacrifice truth for viral pattern. Never invent.
+2. **Safety** — No misinformation, no libellous claims.
+3. **Story** — Every slide advances one coherent narrative.
+4. **Clarity** — Simple words. Short sentences. Clear throughline.
+5. **Tension** — Raise then hold tension. Binary question earns the answer.
+6. **Brand** — @parkthebus.football voice: sharp, confident, casual.
+7. **Style** — Forbidden phrases avoided. Caption format enforced.
+
+### Source Validation
+
+4-point silent pre-check before drafting:
+
+- ⚠️ Vague source (unnamed "sources", "insiders") → downgrade certainty
+- ⚠️ Conflicting reports → present the gap, don't choose one
+- ⚠️ Out of context → check if quote/situation is recent
+- ⚠️ Hyperbolic headline vs measured body → trust the body
+
+### Evidence Rules
+
+**Never invent:** exact quote, fee/contract value, club/league valuation, player age, date/time, statistic, injury/illness, incident description, motive/intent, tactical reason, consequence/ban. If article doesn't state it, don't write it.
+
+**Uncertainty preservation:** use "reportedly", "allegedly", "according to [source]", "at least [number]" when source is indirect.
+
+**Attribution rule:** source named once in S2, S3, or S4 — not S1, not all slides.
+
+**External knowledge:** allowed only for S6 irony/comparison — must be undisputed (e.g., trophy count, league table position, fixture date).
+
+### Per-Slide Constraints
+
+- S1: EXACTLY 2 sentences, ≤25 words — dense hook that earns the scroll
+- S2–S5: 2–3 sentences, one new insight/slide, every slide must have a take
+- S6: One or two sentences. Story-specific question. Divisive topics = name two named options. Sensitive topics (injuries/abuse/discrimination) = reflective question, NOT divisive bait.
+- MAX 15 words per sentence
+
+### Sensitive Topic Exception
+
+For articles involving injury, abuse, discrimination, or criminal allegations: S6 must be a reflective question ("How should the league handle this?") NOT divisive bait ("Was he right or wrong?").
+
+### Self-Check (before output)
+
+1. JSON valid? 2. Exactly 6 slides? 3. S1 ≤ 2 sentences? 4. S6 question matches sensitive/divisive rules? 5. Every claim supported by article? 6. No forbidden phrases? 7. Source attributed? 8. Caption format correct?
+
 ## Content Format
 
 6-slide Threads carousel with pattern-specific arcs:
 
-### Pattern A — Rule-Break arc (viral parkthebus format)
-- S1 = Hook: "Authority breaks own rule — specific detail — binary question"
-- S2 = Specific physical detail (size, numbers, quotes)
-- S3 = Lore/context (why it matters historically)
-- S4 = Stakes escalation (who benefits/loses)
-- S5 = Twist + source attribution
-- S6 = Venue/location irony — NOT generic
+### Pattern A — Rule-Break arc
+- S1 = Hook: "[Authority] just broke its own rule for [Team A] vs [Team B]. [Concrete detail] — [binary Q with irony/venue twist]"
+- S2 = Physical detail (size, numbers, quotes, timeline)
+- S3 = Lore/context (existing rule, sponsors, why first)
+- S4 = Stakes escalation
+- S5 = What makes this unique
+- S6 = Binary Q (irony/venue twist)
+
+### Pattern B — Contradiction arc
+- S1 = Hook: "[Thing] is [claim] — but [contradicting evidence]. [Implication] — [binary Q]"
+- S2 = The contradiction (make gap explicit)
+- S3 = Evidence proving contradiction
+- S4 = Why it matters
+- S5 = Revealed motives/priorities
+- S6 = Binary Q on interpretation
+
+### Pattern C — Detail+Emotion arc
+- S1 = Hook: "[Concrete number/detail] about [person/team]. [Emotional stake] — [binary Q]"
+- S2 = Emotional entry point
+- S3 = Tangible evidence (data/timeline)
+- S4 = Stakeholder impact
+- S5 = Larger irony
+- S6 = Binary Q on future implications
+
+### Pattern D — Commentary arc
+- S1 = Hook: "[Name] just said [bold/controversial statement]. [Reason they have authority on this] — [binary Q]"
+- S2 = Context of quote
+- S3 = Why this voice matters
+- S4 = Counterpoint/opposition
+- S5 = How this affects real decisions
+- S6 = Binary Q on whether opinion holds
 
 ### Pattern E — Pressure Cooker arc
-- S1 = Hook: "[Player/Manager] not happy after [trigger]"
+- S1 = Hook: "[Player/Manager] [not happy/under fire] after [trigger event]. [Consequence at stake] — [binary Q]"
 - S2 = Tension context
 - S3 = Parties involved
 - S4 = Stakes (job/transfer/board)
-- S5 = Why it's unique
-- S6 = Specific binary (NOT generic)
+- S5 = What's unique (history/contract/timing)
+- S6 = Binary Q on outcome
 
 ### Pattern F — Behind-the-Scenes arc
-- S1 = Hook: "Why [team/authority] did [specific thing]"
+- S1 = Hook: "Why [team/authority] did [specific thing]. [How it affects fans/players] — [binary Q]"
 - S2 = The situation
-- S3 = Why it matters
+- S3 = Why it matters (time/budget/health)
 - S4 = Who benefits/who loses
-- S5 = The real story
+- S5 = What it reveals about organization
 - S6 = Prediction binary
 
 ### Anti-Hallucination Grounding
 
 3-layer system:
 
-1. **Prompt Hardening** — Rules baked into LLM system prompt
-2. **Reference Data Injection** — Current date, player ages, tournament timeline
-3. **Post-Gen Number Check** — Scans for every `£/$/€` amount and warns if not in article
-
-Rules: No invented tactics, exact quotes only, flagged rumors, no speculation.
+1. **Prompt Hardening** — Evidence rules + never-invent list + uncertainty preservation baked into system prompt
+2. **Reference Data Injection** — Current date, player ages, tournament timeline (pre-computed)
+3. **Post-Gen Number Check** — Scans for every `£/$/€` amount + statistic and warns if not in article; soft warn for names, hard block for stages
 
 ### Banned Patterns
 
@@ -211,16 +291,19 @@ LLM returns JSON:
 
 ```json
 {
-  "slide_1": "...",
-  "slide_2": "...",
-  "slide_3": "...",
-  "slide_4": "...",
-  "slide_5": "...",
-  "slide_6": "...",
-  "caption": "...",
-  "cover_image_keywords": "..."
+  "slide_1": "2-sentence hook. Dense, earns the scroll.",
+  "slide_2": "One new insight.",
+  "slide_3": "Next insight — evidence or lore.",
+  "slide_4": "Stakes escalation.",
+  "slide_5": "Setup the binary.",
+  "slide_6": "Story-specific Q. Divisive = named options. Sensitive = reflective.",
+  "caption": "Line 1 = hook. Last line = \"Agree or disagree — [question]?\"",
+  "cover_image_keywords": "search terms",
+  "needs_more_source": "if article insufficient, explain why"
 }
 ```
+
+If article lacks depth, `slide_1` starts with `"needs_more_source"` → pipeline skips article gracefully.
 
 ## Engagement Feedback Loop
 
@@ -229,10 +312,12 @@ Every run:
   1. pull_engagement() — update metrics for posts >12h old
   2. get_analytics_summary() — classify hooks/topics, compute boosts
   3. Score with analytics + Google Trends + hot topic boosts
-  4. Select pattern (A/C/D/E/F) based on content signals
-  5. Generate with selected arc structure
-  6. Post to Threads
-  7. Track with hotness_score for A/B comparison
+  4. Select pattern (A/B/C/D/E/F) based on content signals
+  5. Generate with selected arc structure + XML-prompted LLM
+  6. Grounding check (names + stages + numbers)
+  7. Evaluator (9-rule stance check, up to 3 cycles)
+  8. Post to Threads
+  9. Track with hotness_score for A/B comparison
 ```
 
 Feedback delay: ~12–24 hours.
@@ -246,7 +331,7 @@ Feedback delay: ~12–24 hours.
   pressbox-engagement-report.sh ← Daily report
 
 ~/.hermes/pressbox-pipeline/
-  pressbox-mvp.py               ← Main pipeline
+  pressbox-mvp.py               ← Main pipeline (prompt v4)
   pressbox_scoring.py           ← 16-component scoring engine
   pressbox_common.py            ← Shared utilities
   google_trends.py              ← Google Trends RSS fetcher
@@ -261,10 +346,18 @@ Feedback delay: ~12–24 hours.
 
 | Job | Schedule | Behavior |
 |-----|----------|----------|
-| Pressbox MVP | every 80m | Scrape → score → verify → generate → post |
+| Pressbox MVP | every 60m | Scrape → score → verify → generate → post |
 | Pressbox Watchdog | `15 * * * *` | Re-runs pipeline if stale |
 | Daily Report | `0 8 * * *` | Engagement summary via @Szejay_bot |
 | Hourly Report | `0 * * * *` | Status report |
+
+## Rate Limits
+
+Pipeline handles Mistral API 429 gracefully with exponential backoff:
+- 1st 429 → sleep 30s, retry
+- 2nd 429 → sleep 45s, retry
+- 3rd 429 → sleep 60s, move to next article
+- All articles 429'd → exit (cron wrapper retries)
 
 ## Setup
 
