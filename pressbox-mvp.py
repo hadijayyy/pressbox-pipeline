@@ -1635,7 +1635,12 @@ S6 = BINARY: Question about whether the opinion will hold up or be acted on. For
 
             if r.status_code != 200:
                 log(f"   ❌ HTTP {r.status_code}: {r.text[:200]}")
-                time.sleep(2 + attempt)
+                if r.status_code == 429:
+                    backoff = 15 * (attempt + 1)
+                    log(f"   ⏳ Rate-limited, sleeping {backoff}s...")
+                    time.sleep(backoff)
+                else:
+                    time.sleep(2 + attempt)
                 continue
 
             parts = []
