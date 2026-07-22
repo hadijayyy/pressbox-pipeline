@@ -161,7 +161,7 @@ AMBIGUOUS_EXCLUDES = ["liga"]
 # ─── SOURCE TIERS ────────────────────────────────────────────────────────────
 # Football-specific sources
 
-# Source: goal.com avg 58K views — 2.1x BBC (42K), 2.1x fourfourtwo (27K)
+# Source: goal.com avg 58K views — 2.1x BBC (42K), mirror 27K
 # So super tier gets +15, tier 1 = +10, tier 2 = +5
 SOURCE_TIER_SUPER = [
 ]
@@ -176,7 +176,6 @@ SOURCE_TIER_2 = [
     "mirror", "sun", "daily mail", "express", "star",
     "football365", "talking points", "onefootball", "football london",
     "teamtalk", "hitc", "caughtoffside",
-    "fourfourtwo",
 ]
 
 

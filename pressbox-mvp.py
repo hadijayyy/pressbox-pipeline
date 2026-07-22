@@ -82,8 +82,8 @@ import google_trends
 
 # ── Config ──────────────────────────────────────────────────────────
 DRY_RUN = "--dry-run" in sys.argv
-SOURCES = ["goal", "bbc", "fourfourtwo", "mirror"]
-_SOURCE_PRIORITY = {"goal": 0, "bbc": 1, "fourfourtwo": 2, "mirror": 3}
+SOURCES = ["goal", "bbc", "mirror"]
+_SOURCE_PRIORITY = {"goal": 0, "bbc": 1, "mirror": 2}
 ARTICLE_CACHE = f"{HOME}/.hermes/pressbox/article-cache.json"
 SOURCE_FINGERPRINTS = f"{HOME}/.hermes/pressbox/source-fingerprints.json"
 MAX_CHARS = 500  # Threads per-slide limit
@@ -222,7 +222,6 @@ def scrape_all():
         futs = {
             "goal": ex.submit(scrape_with_fingerprint, "goal", scrape_goal),
             "bbc": ex.submit(scrape_with_fingerprint, "bbc", scrape_rss, "https://feeds.bbci.co.uk/sport/football/rss.xml", "bbc", 10),
-            "fourfourtwo": ex.submit(scrape_with_fingerprint, "fourfourtwo", scrape_rss, "https://www.fourfourtwo.com/rss", "fourfourtwo", 8),
             "mirror": ex.submit(scrape_with_fingerprint, "mirror", scrape_rss, "https://www.mirror.co.uk/sport/football/?service=rss", "mirror", 7),
 
         }
@@ -250,7 +249,6 @@ def scrape_all():
             futs = {
                 "goal": ex.submit(scrape_goal),
                 "bbc": ex.submit(scrape_rss, "https://feeds.bbci.co.uk/sport/football/rss.xml", "bbc", 10),
-                "fourfourtwo": ex.submit(scrape_rss, "https://www.fourfourtwo.com/rss", "fourfourtwo", 8),
                 "mirror": ex.submit(scrape_rss, "https://www.mirror.co.uk/sport/football/?service=rss", "mirror", 7),
 
             }
