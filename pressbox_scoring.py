@@ -6,7 +6,7 @@ Architecture: 7 named components, each capped. Independently debuggable.
 Components:
   1. Keyword Match   : +8 pts per unique include keyword (max 5 = 40 pts)
   2. Category Relev  : 20 (transfer/match/drama) / 10 (international) / 0 (none)
-  3. Recency         : 15 (<6h) / 10 (6-24h) / 5 (24-48h) / 0 (>48h)
+  3. Recency         : 25 (<1h) / 20 (1-3h) / 15 (3-6h) / 10 (6-24h) / 5 (24-48h)
   4. Data/Konkret    : 15 (specific: score, fee, %) / 7 (vague digits) / 0
   5. Sumber Tier     : 10 (Tier 1) / 5 (Tier 2) / 0 (unknown)
   6. Audience Reach  : +10 per big team/nation/star mentioned (max 40)
@@ -348,7 +348,7 @@ def score_topic(t: dict) -> int:
     Components:
       1. Keyword Match  : +8 pts per unique include keyword (max 5 = 40 pts)
       2. Category Relev : 20 (transfer/match/drama) / 10 (international) / 0 (none)
-      3. Recency        : 15 (<6h) / 10 (6-24h) / 5 (24-48h) / 0 (>48h)
+      3. Recency        : 25 (<1h) / 20 (1-3h) / 15 (3-6h) / 10 (6-24h) / 5 (24-48h)
       4. Data/Konkret   : 15 (specific: score, fee, %) / 7 (vague digits) / 0
       5. Sumber Tier    : 10 (Tier 1) / 5 (Tier 2) / 0 (unknown)
       6. Audience Reach : +10 per big team/nation/star (max 40)
@@ -386,10 +386,14 @@ def score_topic(t: dict) -> int:
     else:
         cat_pts = 0
 
-    # 3. Recency (max 15 pts)
+    # 3. Recency (max 25 pts — finer grain for breaking news)
     age_h = compute_age_hours(t.get("published", ""))
-    if age_h < 6:
-        recency_pts = 15
+    if age_h < 1:
+        recency_pts = 25          # Breaking — 1h
+    elif age_h < 3:
+        recency_pts = 20          # Very fresh — 3h
+    elif age_h < 6:
+        recency_pts = 15          # Recent
     elif age_h < 24:
         recency_pts = 10
     elif age_h < 48:

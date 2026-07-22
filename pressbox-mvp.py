@@ -276,7 +276,7 @@ def _extract_entities(title):
             found.add(entity)
     return found
 
-def detect_hot_topics(topics, window_hours=4):
+def detect_hot_topics(topics, window_hours=2):
     """Cluster topics by entity overlap. Returns dict: topic_url → hotness_score.
 
     Uses persistent article cache across runs for better 4h window coverage.
@@ -1850,7 +1850,7 @@ def main():
     # 2. Filter + Score
     posted_urls, posted_ws = load_posted()
     boosts, skips, hooks, cta_pattern, tone = load_analytics()
-    hotness = detect_hot_topics(topics, window_hours=4)
+    hotness = detect_hot_topics(topics, window_hours=2)
     ranked = filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_summary, hotness)
     if not ranked:
         log("❌ No topics after filter")

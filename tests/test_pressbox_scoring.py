@@ -287,7 +287,7 @@ class TestComponentBreakdown:
         assert not (cats & {"transfer", "match", "drama"})
 
     def test_recency_under_6h(self):
-        """Article < 6h old should get 15 pts."""
+        """Article < 3h old gets 20 pts, <6h gets 15 pts (finer grain)."""
         age = pbox_scoring.compute_age_hours(_recent_date(3))
         assert age < 6
 
