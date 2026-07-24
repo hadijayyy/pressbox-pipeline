@@ -221,7 +221,7 @@ def scrape_all():
     with ThreadPoolExecutor(max_workers=5) as ex:
         futs = {
             "goal": ex.submit(scrape_with_fingerprint, "goal", scrape_goal),
-            "bbc": ex.submit(scrape_with_fingerprint, "bbc", scrape_rss, "https://feeds.bbci.co.uk/sport/football/rss.xml", "bbc", 10),
+            "bbc": ex.submit(scrape_with_fingerprint, "bbc", scrape_rss, "https://feeds.bbci.co.uk/sport/football/rss.xml", "bbc", 20),
             "mirror": ex.submit(scrape_with_fingerprint, "mirror", scrape_rss, "https://www.mirror.co.uk/sport/football/?service=rss", "mirror", 7),
 
         }
@@ -248,7 +248,7 @@ def scrape_all():
         with ThreadPoolExecutor(max_workers=5) as ex:
             futs = {
                 "goal": ex.submit(scrape_goal),
-                "bbc": ex.submit(scrape_rss, "https://feeds.bbci.co.uk/sport/football/rss.xml", "bbc", 10),
+                "bbc": ex.submit(scrape_rss, "https://feeds.bbci.co.uk/sport/football/rss.xml", "bbc", 20),
                 "mirror": ex.submit(scrape_rss, "https://www.mirror.co.uk/sport/football/?service=rss", "mirror", 7),
 
             }
@@ -785,8 +785,9 @@ def _classify_hook(title_lower):
         return "event"
     return "statement"
 
-def filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_summary=None, hotness=None):
-    """Filter duplicates, sensitive content, score and rank."""
+def filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_summary=None, hotness=None, _last_sources=None):
+    """Filter duplicates, sensitive content, score and rank.
+    _last_sources: optional list of last 2 posted source names for cold-source rotation boost."""
     results = []
     relaxed = len(topics) < 10
     hotness = hotness or {}
@@ -916,6 +917,11 @@ def filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_su
             boost = 15 + hot_adjust + peak_boost
             s += boost
             log(f"   🔥 Warm boost: +{boost} for '{title[:50]}' (hotness={hot:.1f}, adjust={hot_adjust:+d}, peak={hour in peak_hours})")
+
+        # Cold-source rotation boost — push sources that haven't posted recently
+        if _last_sources and source not in _last_sources:
+            s += 15
+            log(f"   🔄 Cold-source boost: +15 for {source} (last: {_last_sources})")
 
         # Soft cap: above 100, diminishing returns (prevents runaway scores)
         if s > 100:
@@ -1851,7 +1857,20 @@ def main():
     posted_urls, posted_ws = load_posted()
     boosts, skips, hooks, cta_pattern, tone = load_analytics()
     hotness = detect_hot_topics(topics, window_hours=2)
-    ranked = filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_summary, hotness)
+    # Cold-source rotation: track last 2 sources posted → give +15 to unseen sources
+    _last_sources = []
+    try:
+        if os.path.exists(POSTED):
+            with open(POSTED) as f:
+                data = json.load(f)
+            posted_list = data.get("topics", []) if isinstance(data, dict) else data
+            for p in reversed(posted_list):
+                src = (p.get("source") or "").strip().lower()
+                if src and src not in _last_sources:
+                    _last_sources.append(src)
+                    if len(_last_sources) >= 2: break
+    except: pass
+    ranked = filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_summary, hotness, _last_sources)
     if not ranked:
         log("❌ No topics after filter")
         print("❌ Pipeline: all topics filtered out", flush=True)
