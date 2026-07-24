@@ -1483,6 +1483,11 @@ Every slide must hit >=2 criteria. Pick >=2 drivers per post.
 5. Surprising fact — jaw-drop number
 6. Emotional — anger, sympathy, nostalgia
 7. Scroll-stopper — S1: straight to conflict in <2 seconds
+**HACK ELEMENTS (wajib ≥2 per post, prioritas pickup di S1):**
+1. PAIN POINT — what frustrates fans about this story? Injustice? Absurdity? Broken promise? Pick a wound the audience already feels, then poke it.
+2. TRANSFORMATION — after reading this, what does the reader now see or believe that they did not before? One sentence, not a lecture. The story reframes the issue.
+3. URGENCY — why does this matter TODAY and not next week? Deadline, transfer window, hearing, press conference, board meeting, contract clause, rule taking effect. If no urgency exists: rename the hook around what's at stake RIGHT NOW.
+**S1 SCORING:** strongest hooks combine PAIN + URGENCY + NUMBER. If your S1 lacks all three, rewrite before submitting.
 **ENGAGEMENT DRIVERS:**
 - Shareable insight: stat worth screenshotting
 - Comment bait: polarizing take grounded in evidence
@@ -1542,6 +1547,7 @@ If article is insufficient: return {"slide_1":"needs_more_source","slide_2":"","
 - Every claim has article or reference data support.
 - Uncertainty preserved. Attribution appears once naturally.
 - No forbidden phrase, emoji, hashtag, em dash present.
+- **HACK ELEMENTS USED: ≥2 of {PAIN POINT, TRANSFORMATION, URGENCY} are present in the post. S1 hits at least one.**
 """
     # Pattern-specific arc template
     arc_templates = {
