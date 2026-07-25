@@ -1190,14 +1190,15 @@ def _select_viral_pattern(topic, article_text):
     combined = title + " " + text
     import re as _re
     
-    # Pattern A signals (Rule-Break): authority violates own rules, scandal
+    # Pattern A signals (Rule-Break): authority violates own rules, scandal, double standard
     rule_break_words = ["rule", "regulation", "tradition", "golden rule", "broke its own",
-                        "violated", "waived", "ignored its own", "bent the rules",
-                        "loophole", "exception", "exemption", "contradicts", "fast-tracked",
-                        "changed its own", "greenlit", "special treatment"]
+                       "violated", "waived", "ignored its own", "bent the rules",
+                       "loophole", "exception", "exemption", "contradicts", "fast-tracked",
+                       "changed its own", "greenlit", "special treatment", "double standard",
+                       "hypocrisy", "favouritism", "inconsistency", "unfair", "unjust"]
     scandal_words = ["scandal", "controversy", "behind the scenes", "secret", "real reason",
-                     "nobody talks", "ugly truth", "shocking", "betray", "refuse", "clash",
-                     "furious", "rage", "slam", "blast", "row", "rift", "feud"]
+                    "nobody talks", "ugly truth", "shocking", "betray", "refuse", "clash",
+                    "furious", "rage", "slam", "blast", "row", "rift", "feud"]
     scandal_score = sum(2 for w in rule_break_words if w in combined) + \
                     sum(1 for w in scandal_words if w in combined)
     
@@ -1280,8 +1281,13 @@ def _select_viral_pattern(topic, article_text):
     # Decision: rule-break wins unless detail/emotion story clearly stronger
     if scandal_score >= max(detail_score, commentary_score, pressure_score, bts_score) or (scandal_score >= 2 and scandal_score > detail_score - 2):
         return "a"
-    else:
-        return "c"
+    
+    # Urgency check: if deadline/urgent words present, force Rule-Break (a)
+    if any(word in combined for word in ["deadline", "immediate", "now", "today", "countdown", "urgent", "last chance", "final hours", "HARI INI", "SEKARANG"]):
+        return "a"
+    
+    # Default to Rule-Break (a) instead of Detail+Emotion (c)
+    return "a"
 
 def _build_reference_data():
     """Build factual reference data injected into every generation prompt.
