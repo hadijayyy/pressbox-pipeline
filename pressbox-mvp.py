@@ -1483,6 +1483,13 @@ Every slide must hit >=2 criteria. Pick >=2 drivers per post.
 5. Surprising fact — jaw-drop number
 6. Emotional — anger, sympathy, nostalgia
 7. Scroll-stopper — S1: straight to conflict in <2 seconds
+
+## VIRAL TRIGGERS (wajib ≥2 per post)
+1. **PAIN POINT** — frustrasi fans apa yang disentuh? Injustice? Absurdity? Fear?
+2. **TRANSFORMATION** — setelah baca ini, pembaca lihat apa yang beda?
+3. **URGENCY** — kenapa ini penting HARI INI? Deadline? Countdown?
+
+Skor tertinggi kalau S1 combines **PAIN + URGENCY + NUMBER**.
 **HACK ELEMENTS (wajib ≥2 per post, prioritas pickup di S1):**
 1. PAIN POINT — what frustrates fans about this story? Injustice? Absurdity? Broken promise? Pick a wound the audience already feels, then poke it.
 2. TRANSFORMATION — after reading this, what does the reader now see or believe that they did not before? One sentence, not a lecture. The story reframes the issue.
@@ -1606,7 +1613,8 @@ S5 = STAKES: How this opinion affects real decisions. Transfer, selection, polic
 S6 = BINARY: Question about whether the opinion will hold up or be acted on. For sensitive topics (injuries/abuse/discrimination): reflective question per base rules.
 """,
     }
-    system = base + arc_templates.get(pattern, arc_templates["c"])
+    # Default to Rule‑Break pattern when none matched (previously fallback to "c")
+    system = base + arc_templates.get(pattern, arc_templates["a"])
     ref_data = _build_reference_data()
     source_name = source or url.split("/")[2] if url else ""
     pattern_label = {'a':'Rule-Break', 'b':'Contradiction', 'c':'Detail+Emotion', 'd':'Commentary', 'e':'Pressure-Cooker', 'f':'Behind-the-Scenes'}.get(pattern, 'Detail+Emotion')
