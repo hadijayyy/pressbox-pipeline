@@ -1291,12 +1291,11 @@ def _select_viral_pattern(topic, article_text):
 
 def _build_reference_data():
     """Build factual reference data injected into every generation prompt.
-    Includes current date, WC timeline, common player ages, and **real‑time football trends**.
+    Includes current date, WC timeline, and common player ages.
     Returns string to prepend to the user message."""
     from datetime import date
     today = date.today()
-    
-    # Basic player data (unchanged)
+
     players = [
         ("Harry Kane", 7, 28, 1993),
         ("Lionel Messi", 6, 24, 1987),
@@ -1309,27 +1308,34 @@ def _build_reference_data():
         ("Vinicius Jr", 7, 12, 2000),
         ("Rodri", 6, 22, 1996),
         ("Florian Wirtz", 5, 3, 2003),
+        # Extras (added Jul 2026)
         ("Phil Foden", 5, 28, 2000),
         ("Cole Palmer", 5, 6, 2002),
         ("Jamal Musiala", 2, 26, 2003),
+        ("Joshua Kimmich", 2, 8, 1995),
+        ("Declan Rice", 1, 14, 1999),
+        ("Martin Odegaard", 12, 17, 1998),
+        ("Alessandro Bastoni", 4, 13, 1999),
+        ("Viktor Gyokeres", 2, 4, 1998),
+        ("Victor Osimhen", 12, 29, 1998),
+        ("Khvicha Kvaratskhelia", 2, 12, 2001),
+        ("Pau Cubarsi", 1, 22, 2007),
+        ("Nico Williams", 7, 12, 2002),
+        ("Federico Valverde", 7, 22, 1998),
+        ("Gavi", 8, 5, 2004),
+        ("Pedri", 11, 25, 2002),
+        # Batch 3 (no-risk, Jul 2026)
+        ("Kai Havertz", 6, 11, 1999),
+        ("Gabriel Jesus", 4, 3, 1997),
+        ("Ollie Watkins", 12, 30, 1995),
+        ("Bruno Fernandes", 9, 8, 1994),
+        ("Dominik Szoboszlai", 10, 25, 2000),
+        ("Josko Gvardiol", 1, 23, 2002),
+        ("William Saliba", 3, 24, 2001),
+        ("Marcus Rashford", 10, 31, 1997),
+        ("Trent Alexander-Arnold", 10, 7, 1998),
+        ("Cristiano Ronaldo", 2, 5, 1985),
     ]
-    player_str = ", ".join(f"{name} ({age})" for name,_,age,_ in players)
-    
-    # Load realtime football trends (global)
-    trends = []
-    try:
-        import json, os
-        with open('/tmp/pressbox_trends.json') as tf:
-            trends = json.load(tf)
-    except Exception:
-        trends = []
-    trends_str = ", ".join(trends[:10]) if trends else ""
-    
-    # Build final reference block
-    ref = f"Today is {today}. Key football trends: {trends_str}. Notable players: {player_str}."
-    return ref
-
-
 
     wc_years = 2030 - today.year
     lines = [f"## FACTUAL REFERENCE DATA (ground truth for all math)"]
@@ -1502,15 +1508,12 @@ Skor tertinggi kalau S1 combines **PAIN + URGENCY + NUMBER**.
 - Save-worthy: timeline, breakdown, comparison
 
 ## VOICE + STYLE
-- Write like you're explaining to a smart 10-year-old: simple, short, concrete.
-- Use **≤15 words per sentence**. **≤3 sentences per slide**. Avoid jargon.
-- **No metaphors** (e.g., "pressure cooker", "behind the scenes"). State facts directly.
-- **Example** (bad → good):
-  ❌ "The club's administrative logistics faced scrutiny after the controversial decision."
-  ✅ "The team's bosses made a rule that upset fans."
-- **FORBIDDEN:** emoji, hashtags, em dashes, all-caps (except official abbreviations).
-- **FORBIDDEN PHRASES:** "Did you know?", "Let's dive in!", "Here's the secret", "You won't believe", "Let that sink in", "Fans everywhere are talking about it", "This changes everything".
-- **INSTEAD:** Open with a **concrete fact**. Close with a **yes/no question**.
+- Natural global English with football terminology (not "soccer").
+- Casual but informed. Sharp but fair. Confident but properly hedged.
+- Short, varied sentences. Concrete nouns + active verbs.
+**FORBIDDEN:** emoji, hashtags, em dashes, all-caps (except official abbreviations).
+**FORBIDDEN PHRASES:** "Did you know?" / "Let's dive in!" / "Here's the secret" / "You won't believe" / "Let that sink in" / "Fans everywhere are talking about it" / "Say what you want, but..." / "This changes everything" / "Only time will tell" / Generic "Agree or disagree?" without story-specific proposition / Generic "Follow for more" / Rage bait, fake suspense, forced rivalry, criticism added solely for likes.
+**INSTEAD:** Open with surprising fact directly. Name the venue or person — not "fans everywhere". Close with natural story-specific question. Attribute source outlet once, naturally.
 
 ## 6-SLIDE ARC
 **S1 — HOOK:** EXACTLY 2 sentences. Sentence 1 = specific action + who. Sentence 2 = context/stakes/why it matters. Total <=25 words. NOT bare ("Wiped. Gone. Why?") but dense ("FIFA wiped Paredes' red card — no suspension, no fine. What message does this send?").
@@ -1518,16 +1521,15 @@ Skor tertinggi kalau S1 combines **PAIN + URGENCY + NUMBER**.
 **S3 — CONTEXT:** Rule, timeline, background needed to understand the conflict.
 **S4 — STAKES:** Who is affected, why it matters now. Distinguish confirmed consequences from possible implications.
 **S5 — TAKE:** Sharpest fair interpretation. Reveal contradiction, overlooked detail, or larger meaning. Do not just repeat the hook.
-## PER-SLIDE CONSTRAINTS (updated)
-- **S1 (Hook)**: 2 sentences, **≤30 words total**. Sentence 1 = **concrete action** (e.g., "FIFA allowed Argentina to keep their World Cup trophy despite the post-match brawl."). Sentence 2 = **1 concrete reason** (e.g., "They violated FIFA rules but faced no consequences, while Spain played fairly and received nothing.").
-- **S2-S5**: 2-3 sentences, **≤25 words per sentence**. **One main idea + 1-2 supporting details** per slide.
-  - Example (S2):
-    ❌ "Argentina players fought after the game."
-    ✅ "After the final whistle, Argentina players threw punches and kicks at Spanish players. At least 7 players were involved in the violent brawl, which lasted over 2 minutes and required security intervention."
-- **S6 (CTA)**: 1-2 sentences, **≤20 words total**. Ask a **yes/no question + 1 short reason**.
-  - Example: "Should FIFA revoke Argentina’s trophy? They broke multiple rules and set a bad example for future tournaments. Reply YES or NO."
-- **Numbers**: Always include if available (e.g., "Argentina received 0 punishment for 7 separate fights").
-- **Avoid abstract nouns**: Replace "justice" → "fair punishment", "fairness" → "equal treatment for all teams".
+**S6 — PAYOFF:** One or two sentences. Story-specific question. For divisive topics: name two real options ("Tuchel stays or walks?"). For sensitive topics (injuries, abuse, discrimination, criminal allegations): reflective question, NOT divisive bait.
+
+## PER-SLIDE CONSTRAINTS
+- S2-S5: 2-3 sentences each. One new insight per slide.
+- EVERY SLIDE MUST HAVE A TAKE: max 1 descriptive sentence ("X said Y"). At least 1 stance sentence (agreement, disagreement, surprise, analysis, irony, or pointed question).
+- Each slide reveals: physical detail, affected stakeholder, historical precedent, or ironic twist.
+- Use specific numbers from the article. If zero numbers: narrative arc only. NEVER invent.
+- MAX 15 WORDS PER SENTENCE. Short sentences hit harder.
+- Paraphrase quotes. Never copy-paste full quotes.
 
 ## CAPTION
 Zero emoji. Line 1 = headline hook. Last line = story-specific binary question with inline engagement hook: "Agree or disagree - [story-specific question]?"
@@ -2096,7 +2098,7 @@ def main():
             break
 
     if not article_accepted or not slides:
-        log("❌ Pipeline: all articles failed evaluator or generation; refusing to post fallback content")
+        log("❌ Pipeline: all articles failed evaluator or generation")
         print("❌ Pipeline: all articles failed evaluator or generation", flush=True)
         sys.exit(1)
 
