@@ -775,7 +775,7 @@ _LOW_VALUE_GARBAGE = [
 
 def _classify_hook(title_lower):
     """Classify hook type for analytics boost. Returns: controversy/conflict/curiosity/event/statement."""
-    if any(w in title_lower for w in ["slams", "blasts", "hits out", "furious", "outraged", "scandal", "controversy", "row", "rift", "bust-up", "war of words"]):
+    if any(w in title_lower for w in ["slams", "blasts", "hits out", "furious", "outraged", "scandal", "controversy", "conspiracy", "rigged", "fixing", "corruption", "row", "rift", "bust-up", "war of words"]):
         return "controversy"
     if any(w in title_lower for w in ["vs", "against", "clash", "rival", "battle", "face off", "showdown"]):
         return "conflict"
@@ -1196,7 +1196,8 @@ def _select_viral_pattern(topic, article_text):
                        "loophole", "exception", "exemption", "contradicts", "fast-tracked",
                        "changed its own", "greenlit", "special treatment", "double standard",
                        "hypocrisy", "favouritism", "inconsistency", "unfair", "unjust"]
-    scandal_words = ["scandal", "controversy", "behind the scenes", "secret", "real reason",
+    scandal_words = ["scandal", "controversy", "conspiracy", "conspiracy theory", "rigged",
+                    "fixing", "corruption", "behind the scenes", "secret", "real reason",
                     "nobody talks", "ugly truth", "shocking", "betray", "refuse", "clash",
                     "furious", "rage", "slam", "blast", "row", "rift", "feud"]
     scandal_score = sum(2 for w in rule_break_words if w in combined) + \
@@ -1501,6 +1502,7 @@ Skor tertinggi kalau S1 combines **PAIN + URGENCY + NUMBER**.
 2. TRANSFORMATION — after reading this, what does the reader now see or believe that they did not before? One sentence, not a lecture. The story reframes the issue.
 3. URGENCY — why does this matter TODAY and not next week? Deadline, transfer window, hearing, press conference, board meeting, contract clause, rule taking effect. If no urgency exists: rename the hook around what's at stake RIGHT NOW.
 **S1 SCORING:** strongest hooks combine PAIN + URGENCY + NUMBER. If your S1 lacks all three, rewrite before submitting.
+**PROVEN CONTROVERSY FORMAT:** For a sourced allegation, conspiracy, disputed decision, or governing-body intervention: name the authority, affected team/player, and exact disputed event in S1. Keep allegation attribution explicit: "conspiracy theories", "according to [outlet]", or "alleged". Escalate evidence, response, stakes, then end with a specific two-sided question. Never state an allegation as fact.
 **ENGAGEMENT DRIVERS:**
 - Shareable insight: stat worth screenshotting
 - Comment bait: polarizing take grounded in evidence

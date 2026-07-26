@@ -108,8 +108,9 @@ _POLITICAL_KW = {"ban", "banned", "banne", "protest", "visa", "travel",
                  "trump", "government", "policy", "staff denied", "oppressed",
                  "u-turn", "backlash", "boo", "booed", "complaint", "fifa",
                  "iran", "political", "diplomat", "sanction", "restrict"}
-_CONTROVERSY_KW = {"controversy", "scandal", "racism", "racist", "abuse",
-                   "hate symbol", "var official"}
+_CONTROVERSY_KW = {"controversy", "scandal", "conspiracy", "conspiracy theory", "rigged",
+                   "fixing", "corruption", "racism", "racist", "abuse", "hate symbol",
+                   "var official"}
 _TACTICAL_KW = {"tactical", "formation", "system", "analysis", "pressing",
                 "var", "red card", "yellow card", "penalty", "penalties",
                 "offside", "referee", "officials"}
