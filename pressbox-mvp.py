@@ -1380,18 +1380,33 @@ def number_grounding_check(slides_text, article_text, ref_text):
     for m in re.finditer(r"\b\d+\b", ref_lower):
         ref_nums.add(m.group())
 
-    # Check money amounts: £80m, $100m, €50m, "80 million", etc
-    for m in re.finditer(
-        r"\b(?:[£$€]\s*\d[\d,.]*\s*(?:m|million|bn|billion|k|thousand)?|"
-        r"\d[\d,.]*\s*(?:m|million|bn|billion|k|thousand))\b",
-        slides_text, re.IGNORECASE
-    ):
-        val = m.group().strip().lower()
-        if val in article_lower:
-            continue
-        if val in ref_lower:
-            continue
-        warnings.append(f"NUMBER_HALLUCINATION: '{m.group().strip()}' not in article or reference")
+    # Compare money values semantically: £60m, £60 million, and 60m mean the
+    # same amount. Currency remains part of the value when stated.
+    money_re = re.compile(
+        r"(?<!\w)([£$€])?\s*(\d[\d,.]*)\s*(m|million|bn|billion|k|thousand)\b",
+        re.IGNORECASE,
+    )
+
+    def _money_values(text):
+        values = set()
+        for match in money_re.finditer(text):
+            currency, amount, unit = match.groups()
+            scale = {"m": "m", "million": "m", "bn": "bn", "billion": "bn", "k": "k", "thousand": "k"}[unit.lower()]
+            values.add((currency or "", amount.replace(",", ""), scale))
+        return values
+
+    article_money = _money_values(article_text)
+    ref_money = _money_values(ref_text)
+    for m in money_re.finditer(slides_text):
+        currency, amount, unit = m.groups()
+        scale = {"m": "m", "million": "m", "bn": "bn", "billion": "bn", "k": "k", "thousand": "k"}[unit.lower()]
+        value = (currency or "", amount.replace(",", ""), scale)
+        # A slide may omit source currency, but may never change one.
+        grounded = value in article_money or value in ref_money
+        if not grounded and not currency:
+            grounded = any(amount.replace(",", "") == v[1] and scale == v[2] for v in article_money | ref_money)
+        if not grounded:
+            warnings.append(f"NUMBER_HALLUCINATION: '{m.group().strip()}' not in article or reference")
 
     # Check 4-digit years (likely tournament years, record milestones)
     for m in re.finditer(r"\b(20\d{2})\b", slides_text):
