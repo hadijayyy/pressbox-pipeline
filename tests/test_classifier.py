@@ -11,6 +11,21 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from pressbox_common import classify_topic_type
+import importlib.util
+
+
+def _load_mvp():
+    spec = importlib.util.spec_from_file_location(
+        "pressbox_mvp", Path(__file__).parent.parent / "pressbox-mvp.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_number_hook_rule_does_not_force_unsourced_numbers():
+    mvp = _load_mvp()
+    assert "NUMBER is optional unless explicitly supported by the article" in mvp._number_hook_rule("Rodri could join Madrid.")
 
 
 # ── Category coverage ─────────────────────────────────────────────

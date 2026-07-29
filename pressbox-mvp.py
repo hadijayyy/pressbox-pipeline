@@ -1432,6 +1432,11 @@ def number_grounding_check(slides_text, article_text, ref_text):
     return warnings
 
 
+def _number_hook_rule(article_text):
+    """Keep viral-hook guidance from pressuring the model to invent figures."""
+    return "NUMBER is optional unless explicitly supported by the article."
+
+
 def generate_slides(article_text, url, title="", source="", hooks="", cta_pattern="", tone="", pattern="a", evaluator_feedback=""):
     """Call LLM to generate 6-slide thread. Returns parsed slides or None.
     If evaluator_feedback is provided, appends correction instructions to the prompt."""
@@ -1511,12 +1516,12 @@ Every slide must hit >=2 criteria. Pick >=2 drivers per post.
 2. **TRANSFORMATION** — setelah baca ini, pembaca lihat apa yang beda?
 3. **URGENCY** — kenapa ini penting HARI INI? Deadline? Countdown?
 
-Skor tertinggi kalau S1 combines **PAIN + URGENCY + NUMBER**.
+Strongest S1 combines **PAIN + URGENCY**. NUMBER is optional unless explicitly supported by the article.
 **HACK ELEMENTS (wajib ≥2 per post, prioritas pickup di S1):**
 1. PAIN POINT — what frustrates fans about this story? Injustice? Absurdity? Broken promise? Pick a wound the audience already feels, then poke it.
 2. TRANSFORMATION — after reading this, what does the reader now see or believe that they did not before? One sentence, not a lecture. The story reframes the issue.
 3. URGENCY — why does this matter TODAY and not next week? Deadline, transfer window, hearing, press conference, board meeting, contract clause, rule taking effect. If no urgency exists: rename the hook around what's at stake RIGHT NOW.
-**S1 SCORING:** strongest hooks combine PAIN + URGENCY + NUMBER. If your S1 lacks all three, rewrite before submitting.
+**S1 SCORING:** strongest hooks combine PAIN + URGENCY. Never add a number merely to improve the hook.
 **PROVEN CONTROVERSY FORMAT:** For a sourced allegation, conspiracy, disputed decision, or governing-body intervention: name the authority, affected team/player, and exact disputed event in S1. Keep allegation attribution explicit: "conspiracy theories", "according to [outlet]", or "alleged". Escalate evidence, response, stakes, then end with a specific two-sided question. Never state an allegation as fact.
 **ENGAGEMENT DRIVERS:**
 - Shareable insight: stat worth screenshotting
@@ -1646,7 +1651,7 @@ S6 = BINARY: Question about whether the opinion will hold up or be acted on. For
         f"  <selected_pattern>{pattern_label}</selected_pattern>\n</request>\n\n"
         f"<primary_article>\n  <title>{title}</title>\n  <source_name>{source_name}</source_name>\n"
         f"  <source_url>{url}</source_url>\n  <article_body>\n{article_text[:8000]}\n  </article_body>\n"
-        f"</primary_article>\n\n{ref_data}")
+        f"</primary_article>\n\n{ref_data}\n\n{_number_hook_rule(article_text)}")
     if evaluator_feedback:
         user += f"\n\n## ⚠️ EVALUATOR REJECTED YOUR PREVIOUS ATTEMPT — FIX THESE ERRORS:\n{evaluator_feedback}\nRegenerate ALL 6 slides. Do NOT repeat the errors above."
 
