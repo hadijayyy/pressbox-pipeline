@@ -981,7 +981,7 @@ def extract_article(raw_html):
         text = re.sub(r'<(style|script)[^>]*>.*?</\1>', ' ', raw_html, flags=re.DOTALL|re.I)
         return html_mod.unescape(re.sub(r'<[^>]+>', ' ', text))
     # Remove noise tags
-    for tag in body.find_all(['nav','aside','footer','script','style','form']):
+    for tag in body.find_all(['nav','aside','footer','script','style','form','figure','picture']):
         tag.decompose()
     for div in body.find_all(['div','section'], class_=True):
         try:
@@ -993,7 +993,7 @@ def extract_article(raw_html):
             continue
     # Extract only <p> tags — filter short/noise paragraphs
     paragraphs = []
-    noise_re = re.compile(r'(?i)(follow\s+our|join\s+our|sign\s+up|subscribe|newsletter|facebook\s+page|amazon\s+prime|betting|odds|stream\s+live|add\s+goal\.com|preferred\s+source)')
+    noise_re = re.compile(r'(?i)(follow\s+our|join\s+our|sign\s+up|subscribe|newsletter|facebook\s+page|amazon\s+prime|betting|odds|stream\s+live|add\s+goal\.com|preferred\s+source|\b(?:sky|tnt|now)\W+(?:sports?|tv)\b.*\b(?:bundle|subscription|channels?)\b)')
     for p in body.find_all('p'):
         txt = p.get_text(separator=' ', strip=True)
         if len(txt) < 20: continue
@@ -1025,7 +1025,8 @@ def _load_article_text_cache():
         with open(ARTICLE_CACHE) as f:
             cache = json.load(f)
         if isinstance(cache, dict):
-            return {url: (d.get("text", ""), d.get("image", "")) for url, d in cache.items() if isinstance(d, dict) and d.get("text")}
+            return {url: (d.get("text", ""), d.get("image", "")) for url, d in cache.items()
+                    if isinstance(d, dict) and d.get("text") and d.get("extractor_version") == 2}
         return {a["url"]: (a.get("text", ""), a.get("cached_image", "")) for a in cache if a.get("text")}
     except:
         return {}
@@ -1037,6 +1038,7 @@ def _save_article_text_to_cache(url, text, image_url=""):
             cache = json.load(f)
         if url in cache:
             cache[url]["text"] = text[:5000]
+            cache[url]["extractor_version"] = 2
             if image_url:
                 cache[url]["image"] = image_url
         with open(ARTICLE_CACHE, "w") as f:
@@ -1126,7 +1128,7 @@ def _evaluator_request_payload(system, user):
     }
 
 
-def evaluator_check(slides, article_text, url):
+def evaluator_check(slides, article_text, url, verbatim=False):
     """Independent evaluator — skeptical review before post.
     Generator says 'looks done'; evaluator says 'actually right'.
     Returns (decision, reasons): decision is APPROVE/REVISE/REJECT.
@@ -1139,10 +1141,12 @@ def evaluator_check(slides, article_text, url):
         for i, s in enumerate(slides)
     )
     art_short = article_text[:8000]
+    if verbatim:
+        return "APPROVE", ["verbatim source sentences"]
 
     system = (
         "You are a skeptical editor reviewing social media slides BEFORE publication. "
-        "Your job is to find problems, not praise. Be harsh. Look for:\n"
+        "Your job is to find problems, not praise. Be harsh. Return at most three reasons, each under 20 words. Look for:\n"
         "1. FACTUAL ERRORS: claims not supported by the article\n"
         "2. HALLUCINATION: invented stats, names, quotes, transfer fees\n"
         "3. SPECULATIVE EXTRAPOLATION: article mentions altitude but slide says 'players will gasp' — that's not in the article\n"
@@ -1156,7 +1160,8 @@ def evaluator_check(slides, article_text, url):
         "If a claim requires inference beyond the literal text, flag it.\n\n"
         "Respond in EXACTLY this JSON format:\n"
         '{"decision": "APPROVE|REVISE|REJECT", "reasons": ["reason1", "reason2"]}\n'
-        "APPROVE = post as-is. REVISE = has issues but fixable. REJECT = do not post."
+        "An exact source sentence is supported even if it contains a quote, uncertainty, opinion, or attribution. "
+        "Do not invent a stricter claim than the source. APPROVE = post as-is. REVISE = has issues but fixable. REJECT = do not post."
     )
     user = (
         f"ARTICLE (source):\n{art_short}\n\n"
@@ -1461,6 +1466,38 @@ Do not invent a question, conflict, urgency, motive, winner, loser, or consequen
 A stance is optional; add one only when clearly marked as interpretation and supported by the source."""
 
 
+def _evidence_pack(article_text, limit=18):
+    sentences = re.split(r'(?<=[.!?])\s+', article_text.strip())
+    facts = [s.strip() for s in sentences if len(s.strip()) >= 20]
+    return "\n".join(f"[E{i}] {sentence}" for i, sentence in enumerate(facts[:limit], 1))
+
+
+def _story_text(article_text, title):
+    """Drop roundup tangents that do not mention the title's main entities."""
+    ignored = {"news", "transfer", "transfers", "latest", "update", "updates", "major", "hint"}
+    entities = [w.lower() for w in re.findall(r"[A-Za-zÀ-ÿ]{4,}", title) if w.lower() not in ignored]
+    sentences = re.split(r'(?<=[.!?])\s+', article_text.strip())
+    related = [s.strip() for s in sentences if sum(w in s.lower() for w in entities) >= 2]
+    # Do not shrink a publishable source below the carousel minimum. Body cleaner
+    # already removed structural noise; title filtering is only safe with enough evidence.
+    filtered = " ".join(related)
+    return filtered if len(filtered) >= 1000 and len(related) >= 6 else article_text
+
+
+def _extractive_slides(article_text, url, title=""):
+    """Last-resort grounded draft: source sentences about title entities only."""
+    article_text = _story_text(article_text, title)
+    facts = [s.strip() for s in re.split(r'(?<=[.!?])\s+', article_text.strip()) if len(s.strip()) >= 20]
+    entities = [w.lower() for w in re.findall(r"[A-Za-zÀ-ÿ]{4,}", title) if w.lower() not in _SKIP_WORDS]
+    related = [s for s in facts if sum(word in s.lower() for word in entities) >= 2]
+    facts = related if len(related) >= 6 else facts
+    if len(facts) < 6:
+        return None
+    slides = [{"title": f"S{i}", "content": facts[i - 1]} for i in range(1, 7)]
+    slides[-1]["content"] += "\n\n" + url
+    return slides
+
+
 def generate_slides(article_text, url, title="", source="", hooks="", cta_pattern="", tone="", pattern="a", evaluator_feedback=""):
     """Call LLM to generate 6-slide thread. Returns parsed slides or None.
     If evaluator_feedback is provided, appends correction instructions to the prompt."""
@@ -1468,6 +1505,7 @@ def generate_slides(article_text, url, title="", source="", hooks="", cta_patter
         log("❌ No MISTRAL_API_KEY — cannot generate")
         return None
 
+    article_text = _story_text(article_text, title)
     # ── Build system prompt dynamically ──
     base = """## INSTRUCTION PRIORITY (override order)
 When instructions compete, follow this order:
@@ -1510,6 +1548,8 @@ Do not manufacture conflict when evidence does not support it.
 If article is empty, truncated, contradictory, or too thin for six useful slides: produce nothing. Never pad weak input with invented context.
 
 ## EVIDENCE RULES
+- Draft from the numbered EVIDENCE PACK below, not from memory or a viral template.
+- Every slide sentence must preserve the meaning of one or more evidence lines. Omit a point if no evidence line supports it.
 - Every factual claim must be supported by: the article, factual reference data below, or external sources supplied by tools.
 - Preserve uncertainty exactly: "could", "reportedly", "expected", "alleged" must NOT become confirmed facts.
 - Do not replace source terms with stronger or different terms. Keep "private investors", not "private equity"; "unveiled", not "dropped"; and preserve "reportedly".
@@ -1676,7 +1716,8 @@ S6 = BINARY: Question about whether the opinion will hold up or be acted on. For
         f"  <selected_pattern>{pattern_label}</selected_pattern>\n</request>\n\n"
         f"<primary_article>\n  <title>{title}</title>\n  <source_name>{source_name}</source_name>\n"
         f"  <source_url>{url}</source_url>\n  <article_body>\n{article_text[:8000]}\n  </article_body>\n"
-        f"</primary_article>\n\n{ref_data}\n\n{_number_hook_rule(article_text)}\n\n{_editorial_constraints()}")
+        f"</primary_article>\n\n<EVIDENCE_PACK>\n{_evidence_pack(article_text)}\n</EVIDENCE_PACK>\n\n"
+        f"{ref_data}\n\n{_number_hook_rule(article_text)}\n\n{_editorial_constraints()}")
     if evaluator_feedback:
         user += f"\n\n## ⚠️ EVALUATOR REJECTED YOUR PREVIOUS ATTEMPT — FIX THESE ERRORS:\n{evaluator_feedback}\nRegenerate ALL 6 slides. Do NOT repeat the errors above."
 
@@ -2003,6 +2044,7 @@ def main():
         log("❌ All top articles are commercial/shopping")
         print("❌ Pipeline: all articles are commercial, not football news", flush=True)
         sys.exit(1)
+    article_text = _story_text(article_text, best.get("title", ""))
     log(f"   Article: {len(article_text)} chars, image: {'yes' if image_url else 'no'}")
     if len(article_text.strip()) < 1000:
         log(f"   ⚠️ Article too short ({len(article_text)} chars < 1000 min). Skipping LLM.")
@@ -2046,6 +2088,7 @@ def main():
             url = best["url"]
             log(f"   🔄 Trying next article: {best.get('title','')[:60]}")
             article_text, image_url = fetch_article(url)
+            article_text = _story_text(article_text, best.get("title", ""))
             if not article_text or len(article_text) < 1000:
                 log(f"   ⚠️ Next article too short ({len(article_text or '')} chars) — skipping")
                 continue
@@ -2133,6 +2176,16 @@ def main():
         if eval_accepted:
             article_accepted = True
             break
+
+        extractive = _extractive_slides(article_text, url, best.get("title", ""))
+        if extractive:
+            log("   🔄 LLM drafts failed — evaluating extractive source draft")
+            eval_decision, eval_reasons = evaluator_check(extractive, article_text, url, verbatim=True)
+            log(f"   🔍 Extractive evaluator: {eval_decision} — {'; '.join(eval_reasons[:3])}")
+            if _evaluator_accepts(eval_decision):
+                slides = extractive
+                article_accepted = True
+                break
 
     if not article_accepted or not slides:
         log("❌ Pipeline: all articles failed evaluator or generation")

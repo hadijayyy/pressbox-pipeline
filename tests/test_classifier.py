@@ -64,6 +64,81 @@ def test_evaluator_request_uses_json_mode_and_full_article():
     assert payload["max_tokens"] == 800
 
 
+def test_verbatim_evaluator_approves_without_api():
+    mvp = _load_mvp()
+    decision, reasons = mvp.evaluator_check(
+        [{"content": "Exact source sentence.", "title": "S1"}],
+        "Exact source sentence.", "https://example.com", verbatim=True)
+    assert decision == "APPROVE"
+    assert reasons == ["verbatim source sentences"]
+
+
+def test_evidence_pack_is_numbered_and_preserves_source_sentences():
+    mvp = _load_mvp()
+    pack = mvp._evidence_pack("First fact happened. Second fact was reported. Short.")
+    assert "[E1] First fact happened." in pack
+    assert "[E2] Second fact was reported." in pack
+
+
+def test_extractive_slides_use_source_sentences():
+    mvp = _load_mvp()
+    article = " ".join(f"Source sentence number {i} has enough words to become a slide." for i in range(1, 8))
+    slides = mvp._extractive_slides(article, "https://example.com", "Source story")
+    assert len(slides) == 6
+    assert slides[0]["content"] == "Source sentence number 1 has enough words to become a slide."
+    assert slides[-1]["content"].endswith("https://example.com")
+
+
+def test_extractive_slides_prioritize_title_entities():
+    mvp = _load_mvp()
+    article = (
+        "Unrelated advertisement contains enough words to look like a story but is irrelevant. "
+        "Arsenal target Bruno Guimaraes has enough words in source sentence one. "
+        "Bruno Guimaraes is expected at Arsenal training according to this source sentence. "
+        "Arsenal discussed Bruno Guimaraes with Newcastle in this source sentence. "
+        "Newcastle captain Bruno Guimaraes appears again in this source sentence. "
+        "Arsenal and Bruno Guimaraes remain central in this source sentence. "
+        "Final Arsenal Bruno Guimaraes source sentence supplies six factual slides."
+    )
+    slides = mvp._extractive_slides(article, "https://example.com", "Arsenal Bruno Guimaraes")
+    assert "Arsenal target Bruno Guimaraes" in slides[0]["content"]
+
+
+def test_story_text_falls_back_to_clean_body_when_entity_subset_is_thin():
+    mvp = _load_mvp()
+    article = (
+        "Arsenal are pursuing Bruno Guimaraes after a new development. "
+        "Bruno Guimaraes is due back for training on Friday. "
+        "Mikel Arteta also discussed Arsenal's squad plans. "
+    )
+    story = mvp._story_text(article, "Arsenal Bruno Guimaraes transfer news")
+    assert story == article
+
+
+def test_extract_article_excludes_related_content():
+    mvp = _load_mvp()
+    html = """<article><p>Main story first fact has enough words for extraction.</p>
+    <div class="related-content"><p>Unrelated promoted claim has enough words to be dangerous.</p></div>
+    <p>Main story second fact has enough words for extraction.</p></article>"""
+    text = mvp.extract_article(html)
+    assert "Main story first fact" in text
+    assert "Main story second fact" in text
+    assert "Unrelated promoted claim" not in text
+
+
+def test_extract_article_excludes_image_captions_and_subscription_copy():
+    mvp = _load_mvp()
+    html = """<article><p>Main story fact has enough words for extraction and verification.</p>
+    <figure><p>Image caption has enough words but is not story evidence.</p></figure>
+    <p>Sky Sports bundle includes enough words but is subscription copy, not evidence.</p>
+    <p>Second main story fact has enough words for extraction and verification.</p></article>"""
+    text = mvp.extract_article(html)
+    assert "Main story fact" in text
+    assert "Second main story fact" in text
+    assert "Image caption" not in text
+    assert "Sky Sports bundle" not in text
+
+
 # ── Category coverage ─────────────────────────────────────────────
 class TestInjuryUpdate:
     def test_ruled_out(self):
