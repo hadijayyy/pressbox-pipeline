@@ -83,10 +83,32 @@ def test_evidence_pack_is_numbered_and_preserves_source_sentences():
 def test_extractive_slides_use_source_sentences():
     mvp = _load_mvp()
     article = " ".join(f"Source sentence number {i} has enough words to become a slide." for i in range(1, 8))
-    slides = mvp._extractive_slides(article, "https://example.com", "Source story")
+    slides = mvp._extractive_slides(article, "https://example.com")
     assert len(slides) == 6
     assert slides[0]["content"] == "Source sentence number 1 has enough words to become a slide."
     assert slides[-1]["content"].endswith("https://example.com")
+
+
+def test_extractive_slides_skip_long_sentences_and_preserve_source_text():
+    mvp = _load_mvp()
+    url = "https://example.com/story"
+    long = "This source sentence is deliberately too long " + ("word " * 100) + "to fit a Threads slide."
+    valid = [f"Source sentence number {i} has enough words and remains short for a slide." for i in range(1, 8)]
+    article = " ".join([long, *valid])
+    slides = mvp._extractive_slides(article, url)
+    assert len(slides) == 6
+    assert all(len(s["content"].replace("\n\n" + url, "")) <= 400 for s in slides)
+    assert all(s["content"].replace("\n\n" + url, "") in article for s in slides)
+    assert slides[-1]["content"].endswith(url)
+
+
+def test_extractive_slides_reject_when_fewer_than_six_title_related_sentences():
+    mvp = _load_mvp()
+    article = " ".join([
+        "Arsenal and Bruno Guimaraes appear in this only related source sentence.",
+        *[f"Unrelated source sentence {i} has enough words but concerns another story." for i in range(1, 8)],
+    ])
+    assert mvp._extractive_slides(article, "https://example.com", "Arsenal Bruno Guimaraes") is None
 
 
 def test_extractive_slides_prioritize_title_entities():
