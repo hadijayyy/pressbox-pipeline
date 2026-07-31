@@ -1839,6 +1839,14 @@ def load_threads_token():
         return d.get("access_token"), str(d.get("user_id",""))
     except Exception: return None, None
 
+def _space_sentences(text):
+    """One sentence per paragraph; preserve source URL as its own paragraph."""
+    body, sep, url = text.rstrip().partition("\n\nhttp")
+    sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', body) if s.strip()]
+    formatted = "\n\n".join(sentences)
+    return formatted + (sep + url if sep else "")
+
+
 def post_to_threads(slides, image_url=None):
     """Post slides as chained thread. Returns (root_id, permalink) or (None, None)."""
     token, user_id = load_threads_token()
@@ -1849,7 +1857,7 @@ def post_to_threads(slides, image_url=None):
     from threads_poster import ThreadsPoster
     poster = ThreadsPoster(access_token=token, user_id=user_id)
 
-    parts = [s["content"] for s in slides]
+    parts = [_space_sentences(s["content"]) for s in slides]
     images = [image_url] + [None]*(len(parts)-1) if image_url else None
 
     try:
