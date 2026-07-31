@@ -1115,6 +1115,17 @@ def grounding_check(slides_text, article_text, article_names, article_stages):
             warnings.append(f"HALLUCINATED_STAGE: '{stage}'")
     return warnings
 
+
+def _evaluator_request_payload(system, user):
+    return {
+        "model": "mistral-small-latest",
+        "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+        "max_tokens": 800,
+        "temperature": 0.1,
+        "response_format": {"type": "json_object"},
+    }
+
+
 def evaluator_check(slides, article_text, url):
     """Independent evaluator — skeptical review before post.
     Generator says 'looks done'; evaluator says 'actually right'.
@@ -1127,8 +1138,7 @@ def evaluator_check(slides, article_text, url):
         f"[Slide {i+1}: {s.get('title','')}]\n{s['content']}"
         for i, s in enumerate(slides)
     )
-    # Truncate article to save tokens
-    art_short = article_text[:3000]
+    art_short = article_text[:8000]
 
     system = (
         "You are a skeptical editor reviewing social media slides BEFORE publication. "
@@ -1159,9 +1169,7 @@ def evaluator_check(slides, article_text, url):
         r = requests.post(
             "https://api.mistral.ai/v1/chat/completions",
             headers={"Authorization": f"Bearer {MISTRAL_KEY}", "Content-Type": "application/json"},
-            json={"model": "mistral-small-latest", "messages": [
-                {"role": "system", "content": system}, {"role": "user", "content": user}],
-                "max_tokens": 800, "temperature": 0.1},
+            json=_evaluator_request_payload(system, user),
             timeout=30)
         if r.status_code != 200:
             return "ERROR", [f"evaluator HTTP {r.status_code}"]
@@ -1448,8 +1456,9 @@ def _evaluator_accepts(decision):
 
 def _editorial_constraints():
     return """Do not replace source terms with stronger or different terms. Keep
-'reportedly' and other uncertainty words. A stance is optional; add one only
-when clearly marked as interpretation and supported by the source."""
+'reportedly' and other uncertainty words. Do not turn conditional claims into current facts.
+Do not invent a question, conflict, urgency, motive, winner, loser, or consequence.
+A stance is optional; add one only when clearly marked as interpretation and supported by the source."""
 
 
 def generate_slides(article_text, url, title="", source="", hooks="", cta_pattern="", tone="", pattern="a", evaluator_feedback=""):
@@ -1482,10 +1491,10 @@ Turn one football news article into a six-slide Threads post that:
 1. Stops the scroll with a specific, factual hook.
 2. Makes the story understandable without reading the source.
 3. Escalates tension or significance across slides.
-4. Adds clear editorial perspective — without inventing facts.
-5. Ends with a story-specific discussion prompt.
+4. Preserves exactly what the source establishes.
+5. Ends with a factual story-specific question only if the source supports two real outcomes.
 
-## EDITORIAL LENS (at least one per post)
+## EDITORIAL LENS (optional; source-supported only)
 - Expose a contradiction or double standard.
 - Explain why one overlooked detail changes the story.
 - Challenge a popular fan assumption with supported evidence.
@@ -1517,7 +1526,7 @@ One article = one story. Pick the strongest storyline from title + body together
 For live blogs or multi-article roundups: IGNORE everything except the story in the title. All 6 slides follow ONE line. Never merge separate transfers, matches, or controversies.
 
 ## VIRAL CRITERIA + ENGAGEMENT DRIVERS
-Every slide must hit >=2 criteria. Pick >=2 drivers per post.
+Use only criteria the source genuinely supports. Do not manufacture a criterion.
 **CRITERIA:**
 1. Pro & Con — tension, debate, two sides
 2. Relatable — money, loyalty, underdog, betrayal
@@ -1527,22 +1536,22 @@ Every slide must hit >=2 criteria. Pick >=2 drivers per post.
 6. Emotional — anger, sympathy, nostalgia
 7. Scroll-stopper — S1: straight to conflict in <2 seconds
 
-## VIRAL TRIGGERS (wajib ≥2 per post)
+## VIRAL TRIGGERS (optional; source-supported only)
 1. **PAIN POINT** — frustrasi fans apa yang disentuh? Injustice? Absurdity? Fear?
 2. **TRANSFORMATION** — setelah baca ini, pembaca lihat apa yang beda?
 3. **URGENCY** — kenapa ini penting HARI INI? Deadline? Countdown?
 
-Strongest S1 combines **PAIN + URGENCY**. NUMBER is optional unless explicitly supported by the article.
-**HACK ELEMENTS (wajib ≥2 per post, prioritas pickup di S1):**
+Strongest S1 may combine **PAIN + URGENCY** only when both are explicit in the article. NUMBER is optional unless explicitly supported by the article.
+**HACK ELEMENTS (optional, source-supported only):**
 1. PAIN POINT — what frustrates fans about this story? Injustice? Absurdity? Broken promise? Pick a wound the audience already feels, then poke it.
 2. TRANSFORMATION — after reading this, what does the reader now see or believe that they did not before? One sentence, not a lecture. The story reframes the issue.
-3. URGENCY — why does this matter TODAY and not next week? Deadline, transfer window, hearing, press conference, board meeting, contract clause, rule taking effect. If no urgency exists: rename the hook around what's at stake RIGHT NOW.
-**S1 SCORING:** strongest hooks combine PAIN + URGENCY. Never add a number merely to improve the hook.
+3. **URGENCY** — use only a stated deadline, date, or event. If none exists, do not imply urgency.
+**S1 SCORING:** factual specificity beats pain or urgency. Never add a number merely to improve the hook.
 **PROVEN CONTROVERSY FORMAT:** For a sourced allegation, conspiracy, disputed decision, or governing-body intervention: name the authority, affected team/player, and exact disputed event in S1. Keep allegation attribution explicit: "conspiracy theories", "according to [outlet]", or "alleged". Escalate evidence, response, stakes, then end with a specific two-sided question. Never state an allegation as fact.
-**ENGAGEMENT DRIVERS:**
+**ENGAGEMENT DRIVERS (optional; source-supported only):**
 - Shareable insight: stat worth screenshotting
-- Comment bait: polarizing take grounded in evidence
-- Like fuel: praise underrated player, criticize rival
+|- Comment bait: a source-supported two-sided question
+|- Like fuel: sourced praise or criticism
 - Save-worthy: timeline, breakdown, comparison
 
 ## VOICE + STYLE
@@ -1558,13 +1567,13 @@ Strongest S1 combines **PAIN + URGENCY**. NUMBER is optional unless explicitly s
 **S2 — EVIDENCE:** Clearest detail, number, decision, scene, or verified statement. Make it tangible.
 **S3 — CONTEXT:** Rule, timeline, background needed to understand the conflict.
 **S4 — STAKES:** Who is affected, why it matters now. Distinguish confirmed consequences from possible implications.
-**S5 — TAKE:** Sharpest fair interpretation. Reveal contradiction, overlooked detail, or larger meaning. Do not just repeat the hook.
-**S6 — PAYOFF:** One or two sentences. Story-specific question. For divisive topics: name two real options ("Tuchel stays or walks?"). For sensitive topics (injuries, abuse, discrimination, criminal allegations): reflective question, NOT divisive bait.
+**S5 — CONTEXT:** Final verified detail or clearly marked source-supported interpretation. Do not add a take merely to fill this slot.
+**S6 — PAYOFF:** One or two sentences. Use a story-specific question only if it follows directly from the source; otherwise state the verified unresolved point.
 
 ## PER-SLIDE CONSTRAINTS
 - S2-S5: 2-3 sentences each. One new insight per slide.
 - A stance is optional. Add analysis only when clearly framed as interpretation and supported by the source. Reporting verified facts alone is valid.
-- Each slide reveals: physical detail, affected stakeholder, historical precedent, or ironic twist.
+- Each slide adds one verified detail. Do not invent a physical detail, stakeholder, precedent, irony, or twist.
 - Use specific numbers from the article. If zero numbers: narrative arc only. NEVER invent.
 - MAX 15 WORDS PER SENTENCE. Short sentences hit harder.
 - Paraphrase quotes. Never copy-paste full quotes.
@@ -1594,11 +1603,11 @@ If article is insufficient: return {"slide_1":"needs_more_source","slide_2":"","
 - S1: exactly 2 sentences, <=25 words.
 - Every sentence <=15 words.
 - Slides 2-5 each add new info or interpretation (no repeats).
-- S6 ends with story-specific question.
+- S6 ends with a story-specific question only if source-supported.
 - Every claim has article or reference data support.
 - Uncertainty preserved. Attribution appears once naturally.
 - No forbidden phrase, emoji, hashtag, em dash present.
-- **HACK ELEMENTS USED: ≥2 of {PAIN POINT, TRANSFORMATION, URGENCY} are present in the post. S1 hits at least one.**
+- No claim, question, or engagement element exceeds the source.
 """
     # Pattern-specific arc template
     arc_templates = {
@@ -1657,8 +1666,8 @@ S5 = STAKES: How this opinion affects real decisions. Transfer, selection, polic
 S6 = BINARY: Question about whether the opinion will hold up or be acted on. For sensitive topics (injuries/abuse/discrimination): reflective question per base rules.
 """,
     }
-    # Default to Rule‑Break pattern when none matched (previously fallback to "c")
-    system = base + arc_templates.get(pattern, arc_templates["a"])
+    # Pattern templates force unsupported conflict and inference; source facts take priority.
+    system = base
     ref_data = _build_reference_data()
     source_name = source or url.split("/")[2] if url else ""
     pattern_label = {'a':'Rule-Break', 'b':'Contradiction', 'c':'Detail+Emotion', 'd':'Commentary', 'e':'Pressure-Cooker', 'f':'Behind-the-Scenes'}.get(pattern, 'Detail+Emotion')

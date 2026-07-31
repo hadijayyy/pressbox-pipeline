@@ -53,6 +53,15 @@ def test_editorial_constraints_preserve_source_wording():
     rules = mvp._editorial_constraints()
     assert "Do not replace source terms" in rules
     assert "A stance is optional" in rules
+    assert "Do not turn conditional claims into current facts" in rules
+    assert "Do not invent a question, conflict, urgency, motive, winner, loser, or consequence" in rules
+
+
+def test_evaluator_request_uses_json_mode_and_full_article():
+    mvp = _load_mvp()
+    payload = mvp._evaluator_request_payload("system", "user")
+    assert payload["response_format"] == {"type": "json_object"}
+    assert payload["max_tokens"] == 800
 
 
 # ── Category coverage ─────────────────────────────────────────────
