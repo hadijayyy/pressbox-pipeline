@@ -1121,7 +1121,7 @@ def evaluator_check(slides, article_text, url):
     Returns (decision, reasons): decision is APPROVE/REVISE/REJECT.
     """
     if not MISTRAL_KEY:
-        return "APPROVE", ["no API key — skip eval"]
+        return "ERROR", ["no API key — evaluator unavailable"]
 
     slides_text = "\n\n".join(
         f"[Slide {i+1}: {s.get('title','')}]\n{s['content']}"
@@ -1164,7 +1164,7 @@ def evaluator_check(slides, article_text, url):
                 "max_tokens": 800, "temperature": 0.1},
             timeout=30)
         if r.status_code != 200:
-            return "APPROVE", [f"evaluator HTTP {r.status_code}"]
+            return "ERROR", [f"evaluator HTTP {r.status_code}"]
         content = r.json()["choices"][0]["message"]["content"].strip()
         # Parse JSON response
         candidate = re.sub(r"^```(?:json)?\s*", "", content)
@@ -1173,10 +1173,10 @@ def evaluator_check(slides, article_text, url):
         decision = data.get("decision", "APPROVE").upper()
         reasons = data.get("reasons", [])
         if decision not in ("APPROVE", "REVISE", "REJECT"):
-            decision = "APPROVE"
+            decision = "ERROR"
         return decision, reasons
     except Exception as e:
-        return "APPROVE", [f"evaluator error: {e}"]
+        return "ERROR", [f"evaluator error: {e}"]
 
 def _count_sentences(text):
     return len([s for s in re.split(r'(?<=[.!?])\s+', text.strip()) if len(s.strip()) > 5])
@@ -1435,6 +1435,15 @@ def number_grounding_check(slides_text, article_text, ref_text):
 def _number_hook_rule(article_text):
     """Keep viral-hook guidance from pressuring the model to invent figures."""
     return "NUMBER is optional unless explicitly supported by the article."
+
+
+def _requires_evaluator(pattern, score):
+    """Every generated post needs an independent source-grounding review."""
+    return True
+
+
+def _evaluator_accepts(decision):
+    return decision == "APPROVE"
 
 
 def generate_slides(article_text, url, title="", source="", hooks="", cta_pattern="", tone="", pattern="a", evaluator_feedback=""):
@@ -2074,38 +2083,28 @@ def main():
                     log(f"   🚫 Number hallucination persisted after 3 attempts — trying next article")
                     break
 
-            # 5.5. Evaluator — skip for E/F patterns (structural, high-trust, ~50s saved)
-            if pattern in ("e", "f"):
-                log(f"   ⏭️ Evaluator skipped (pattern {pattern.upper()} — structural/high-trust)")
-                eval_accepted = True
-                break
-            # Also skip for high-score posts
+            # 5.5. Evaluator — never bypass source-grounding for a viral pattern or score.
             score_val = hotness.get(url, 0) or best.get("_score", 0)
-            if score_val >= 80:
-                log(f"   ⏭️ Evaluator skipped (score {score_val:.0f} >= 80)")
+            if not _requires_evaluator(pattern, score_val):
+                log("   ⏭️ Evaluator skipped by explicit policy")
                 eval_accepted = True
                 break
             eval_t0 = time.time()
-            # Cache check: same URL evaluated before? Skip re-eval
-            cached = _EVAL_CACHE.get(url)
-            if cached:
-                eval_decision, eval_reasons = cached["decision"], cached["reasons"]
-                eval_time = time.time() - eval_t0
-                log(f"   🔍 Evaluator (cached): {eval_decision} ({eval_time:.1f}s) — {'; '.join(eval_reasons[:3])}")
-            else:
-                eval_decision, eval_reasons = evaluator_check(slides, article_text, url)
-                eval_time = time.time() - eval_t0
-                log(f"   🔍 Evaluator: {eval_decision} ({eval_time:.1f}s) — {'; '.join(eval_reasons[:3])}")
-                _EVAL_CACHE[url] = {"decision": eval_decision, "reasons": eval_reasons}
-                _save_eval_cache()
+            # Evaluation is output-specific: never reuse a verdict from another draft.
+            eval_decision, eval_reasons = evaluator_check(slides, article_text, url)
+            eval_time = time.time() - eval_t0
+            log(f"   🔍 Evaluator: {eval_decision} ({eval_time:.1f}s) — {'; '.join(eval_reasons[:3])}")
 
-            if eval_decision == "APPROVE":
+            if _evaluator_accepts(eval_decision):
                 eval_accepted = True
                 break
             elif eval_decision == "REVISE":
-                log(f"   ⚠️ Evaluator REVISE — approving with notes: {'; '.join(eval_reasons[:3])}")
-                eval_accepted = True
-                break  # REVISE = fixable issues, post anyway
+                if eval_round < 2:
+                    eval_feedback = "\n".join(f"- {r}" for r in eval_reasons)
+                    log(f"   🔄 Evaluator REVISE (round {eval_round+1}/3) — retrying with feedback")
+                    continue
+                log(f"   🚫 Evaluator REVISE after 3 attempts — trying next article")
+                break
             else:  # REJECT
                 if eval_round < 2:
                     eval_feedback = "\n".join(f"- {r}" for r in eval_reasons)

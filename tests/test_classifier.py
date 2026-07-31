@@ -28,6 +28,26 @@ def test_number_hook_rule_does_not_force_unsourced_numbers():
     assert "NUMBER is optional unless explicitly supported by the article" in mvp._number_hook_rule("Rodri could join Madrid.")
 
 
+def test_evaluator_is_required_for_every_generated_post():
+    mvp = _load_mvp()
+    assert mvp._requires_evaluator("f", 100)
+    assert mvp._requires_evaluator("e", 80)
+    assert mvp._requires_evaluator("a", 1)
+
+
+def test_evaluator_revise_does_not_authorize_posting():
+    mvp = _load_mvp()
+    assert not mvp._evaluator_accepts("REVISE")
+    assert mvp._evaluator_accepts("APPROVE")
+
+
+def test_missing_evaluator_key_blocks_posting():
+    mvp = _load_mvp()
+    mvp.MISTRAL_KEY = ""
+    decision, _ = mvp.evaluator_check([], "source", "https://example.com")
+    assert not mvp._evaluator_accepts(decision)
+
+
 # ── Category coverage ─────────────────────────────────────────────
 class TestInjuryUpdate:
     def test_ruled_out(self):
