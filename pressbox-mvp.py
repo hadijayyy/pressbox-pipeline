@@ -1141,7 +1141,7 @@ def evaluator_check(slides, article_text, url):
         "6. TONE ISSUES: clickbait that damages credibility, insensitive content\n"
         "7. QUALITY: grammar errors, incoherent flow, too many slides\n"
         "8. MISLEADING: headline says X but article says Y\n"
-        "9. NO STANCE: slide only reports (\"X said Y\") without any take, analysis, or opinion. Every slide needs a stance.\n\n"
+        "9. TONE: flag analysis only when it adds an unsupported claim. A slide may report verified facts without a stance.\n\n"
         "RULE: For each slide, can you point to the EXACT sentence in the article that supports every claim? "
         "If a claim requires inference beyond the literal text, flag it.\n\n"
         "Respond in EXACTLY this JSON format:\n"
@@ -1446,6 +1446,12 @@ def _evaluator_accepts(decision):
     return decision == "APPROVE"
 
 
+def _editorial_constraints():
+    return """Do not replace source terms with stronger or different terms. Keep
+'reportedly' and other uncertainty words. A stance is optional; add one only
+when clearly marked as interpretation and supported by the source."""
+
+
 def generate_slides(article_text, url, title="", source="", hooks="", cta_pattern="", tone="", pattern="a", evaluator_feedback=""):
     """Call LLM to generate 6-slide thread. Returns parsed slides or None.
     If evaluator_feedback is provided, appends correction instructions to the prompt."""
@@ -1497,6 +1503,7 @@ If article is empty, truncated, contradictory, or too thin for six useful slides
 ## EVIDENCE RULES
 - Every factual claim must be supported by: the article, factual reference data below, or external sources supplied by tools.
 - Preserve uncertainty exactly: "could", "reportedly", "expected", "alleged" must NOT become confirmed facts.
+- Do not replace source terms with stronger or different terms. Keep "private investors", not "private equity"; "unveiled", not "dropped"; and preserve "reportedly".
 - Prefer paraphrase over direct quotes. Exact quote only when precise wording matters.
 - **NEVER invent:** quote, fee, valuation, age, date, statistic, injury, incident, motive, tactical reason, or consequence.
 - Do NOT calculate ages, future ages, fees, percentages, or time intervals unless explicitly provided in reference data below.
@@ -1556,7 +1563,7 @@ Strongest S1 combines **PAIN + URGENCY**. NUMBER is optional unless explicitly s
 
 ## PER-SLIDE CONSTRAINTS
 - S2-S5: 2-3 sentences each. One new insight per slide.
-- EVERY SLIDE MUST HAVE A TAKE: max 1 descriptive sentence ("X said Y"). At least 1 stance sentence (agreement, disagreement, surprise, analysis, irony, or pointed question).
+- A stance is optional. Add analysis only when clearly framed as interpretation and supported by the source. Reporting verified facts alone is valid.
 - Each slide reveals: physical detail, affected stakeholder, historical precedent, or ironic twist.
 - Use specific numbers from the article. If zero numbers: narrative arc only. NEVER invent.
 - MAX 15 WORDS PER SENTENCE. Short sentences hit harder.
@@ -1660,7 +1667,7 @@ S6 = BINARY: Question about whether the opinion will hold up or be acted on. For
         f"  <selected_pattern>{pattern_label}</selected_pattern>\n</request>\n\n"
         f"<primary_article>\n  <title>{title}</title>\n  <source_name>{source_name}</source_name>\n"
         f"  <source_url>{url}</source_url>\n  <article_body>\n{article_text[:8000]}\n  </article_body>\n"
-        f"</primary_article>\n\n{ref_data}\n\n{_number_hook_rule(article_text)}")
+        f"</primary_article>\n\n{ref_data}\n\n{_number_hook_rule(article_text)}\n\n{_editorial_constraints()}")
     if evaluator_feedback:
         user += f"\n\n## ⚠️ EVALUATOR REJECTED YOUR PREVIOUS ATTEMPT — FIX THESE ERRORS:\n{evaluator_feedback}\nRegenerate ALL 6 slides. Do NOT repeat the errors above."
 

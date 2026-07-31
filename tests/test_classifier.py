@@ -48,6 +48,13 @@ def test_missing_evaluator_key_blocks_posting():
     assert not mvp._evaluator_accepts(decision)
 
 
+def test_editorial_constraints_preserve_source_wording():
+    mvp = _load_mvp()
+    rules = mvp._editorial_constraints()
+    assert "Do not replace source terms" in rules
+    assert "A stance is optional" in rules
+
+
 # ── Category coverage ─────────────────────────────────────────────
 class TestInjuryUpdate:
     def test_ruled_out(self):
