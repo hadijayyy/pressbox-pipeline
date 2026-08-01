@@ -154,6 +154,14 @@ def test_extract_article_excludes_related_content():
     assert "Unrelated promoted claim" not in text
 
 
+def test_extract_article_removes_inline_image_credits():
+    mvp = _load_mvp()
+    html = """<article><p>Hull boss Acun Ilicali spoke about transfers (Image: Getty Images) and Carlos Espi.</p></article>"""
+    text = mvp.extract_article(html)
+    assert "(Image:" not in text
+    assert "Hull boss Acun Ilicali spoke" in text
+
+
 def test_extract_article_excludes_image_captions_and_subscription_copy():
     mvp = _load_mvp()
     html = """<article><p>Main story fact has enough words for extraction and verification.</p>
