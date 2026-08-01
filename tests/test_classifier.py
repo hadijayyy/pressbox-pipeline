@@ -109,13 +109,15 @@ def test_extractive_slides_skip_long_sentences_and_preserve_source_text():
     assert slides[-1]["content"].endswith(url)
 
 
-def test_extractive_slides_reject_when_fewer_than_six_title_related_sentences():
+def test_extractive_slides_fall_back_to_clean_body_when_entity_subset_is_thin():
     mvp = _load_mvp()
     article = " ".join([
         "Arsenal and Bruno Guimaraes appear in this only related source sentence.",
-        *[f"Unrelated source sentence {i} has enough words but concerns another story." for i in range(1, 8)],
+        *[f"Clean source sentence {i} has enough words and remains literal article evidence." for i in range(1, 8)],
     ])
-    assert mvp._extractive_slides(article, "https://example.com", "Arsenal Bruno Guimaraes") is None
+    slides = mvp._extractive_slides(article, "https://example.com", "Arsenal Bruno Guimaraes")
+    assert len(slides) == 6
+    assert "Clean source sentence 1" in slides[1]["content"]
 
 
 def test_extractive_slides_prioritize_title_entities():

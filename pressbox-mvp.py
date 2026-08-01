@@ -1495,9 +1495,9 @@ def _extractive_slides(article_text, url, title=""):
     facts = [s.strip() for s in re.split(r'(?<=[.!?])\s+', article_text.strip()) if 20 <= len(s.strip()) <= 400]
     entities = [w.lower() for w in re.findall(r"[A-Za-zÀ-ÿ]{4,}", title) if w.lower() not in _SKIP_WORDS]
     related = [s for s in facts if sum(word in s.lower() for word in entities) >= 2]
-    if entities and len(related) < 6:
-        return None
-    facts = related if entities else facts
+    # Prefer title-related evidence, but never discard a clean article solely
+    # because its title is a roundup and only names its lead angle once.
+    facts = related if len(related) >= 6 else facts
     if len(facts) < 6:
         return None
     slides = [{"title": f"S{i}", "content": facts[i - 1]} for i in range(1, 7)]
