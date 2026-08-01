@@ -996,8 +996,11 @@ def extract_article(raw_html):
     noise_re = re.compile(r'(?i)(follow\s+our|join\s+our|sign\s+up|subscribe|newsletter|facebook\s+page|amazon\s+prime|betting|odds|stream\s+live|add\s+goal\.com|preferred\s+source|\b(?:sky|tnt|now)\W+(?:sports?|tv)\b.*\b(?:bundle|subscription|channels?)\b)')
     for p in body.find_all('p'):
         txt = p.get_text(separator=' ', strip=True)
-        # Some publishers inject image credits inside article <p> tags.
-        txt = re.sub(r'\s*\(Image:\s*[^)]*\)\s*', ' ', txt, flags=re.I)
+        # Some publishers concatenate a caption and article paragraph in one <p>.
+        credit = re.search(r'\s*\(Image:\s*[^)]*\)\s*', txt, flags=re.I)
+        if credit:
+            before, after = txt[:credit.start()].strip(), txt[credit.end():].strip()
+            txt = after or before
         if len(txt) < 20: continue
         if noise_re.search(txt): continue
         paragraphs.append(txt)

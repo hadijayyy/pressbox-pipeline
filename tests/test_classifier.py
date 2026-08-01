@@ -154,12 +154,12 @@ def test_extract_article_excludes_related_content():
     assert "Unrelated promoted claim" not in text
 
 
-def test_extract_article_removes_inline_image_credits():
+def test_extract_article_removes_inline_image_captions():
     mvp = _load_mvp()
-    html = """<article><p>Hull boss Acun Ilicali spoke about transfers (Image: Getty Images) and Carlos Espi.</p></article>"""
+    html = """<article><p>Acun Ilicali spoke about transfers (Image: Getty Images) Hull boss Ilicali accused Real Madrid of fake stories.</p></article>"""
     text = mvp.extract_article(html)
     assert "(Image:" not in text
-    assert "Hull boss Acun Ilicali spoke" in text
+    assert text == "Hull boss Ilicali accused Real Madrid of fake stories."
 
 
 def test_extract_article_excludes_image_captions_and_subscription_copy():
