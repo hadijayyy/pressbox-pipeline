@@ -1847,8 +1847,7 @@ def load_threads_token():
 def _space_sentences(text):
     """One sentence per paragraph; preserve source URL as its own paragraph."""
     body, sep, url = text.rstrip().partition("\n\nhttp")
-    sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', body) if s.strip()]
-    formatted = "\n\n".join(sentences)
+    formatted = re.sub(r'([.!?]["”]?)\s+', r'\1\n\n', body).strip()
     return formatted + (sep + url if sep else "")
 
 

@@ -68,6 +68,7 @@ def test_space_sentences_uses_blank_lines_and_keeps_url():
     mvp = _load_mvp()
     text = "First fact. Second fact?\n\nhttps://example.com/story"
     assert mvp._space_sentences(text) == "First fact.\n\nSecond fact?\n\nhttps://example.com/story"
+    assert mvp._space_sentences('He said, "First fact." Second fact.') == 'He said, "First fact."\n\nSecond fact.'
 
 
 def test_verbatim_evaluator_approves_without_api():
