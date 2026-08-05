@@ -173,8 +173,9 @@ def scrape_goal():
             if href in seen: continue
             seen.add(href)
             title = a.get_text(strip=True)
-            # Strip time prefix from breaking news ("5 hours agoDeschamps...")
-            title = re.sub(r'^\d+\s+hours?\s+ago', '', title).strip()
+            # Strip time prefix from breaking news ("36 minutes agoWorld Cup sensation...", "5 hours agoDeschamps...")
+            title = re.sub(r'^\d+\s+(?:minute|hour|day)s?\s+ago', '', title).strip()
+            title = re.sub(r'^\s*[📽️📹🎥]+\s*\|?\s*', '', title).strip()
             if not title or len(title) < 20: continue
             if title.startswith('🎥'): continue  # video-only content
             link = href if href.startswith('http') else "https://www.goal.com" + href
@@ -785,6 +786,22 @@ def _classify_hook(title_lower):
         return "event"
     return "statement"
 
+# Reversal/conflict verbs — proven viral drivers (top-10 posts in Aug data all carry one:
+# U-turn 732K, rebellion 242K, blocks 183K, standoff 173K, collapse 159K, dramatic 140K)
+_REVERSAL = ["u-turn", "rebellion", "revolt", "boycott", "blocked", "blocks", "standoff",
+             "collapse", "collapsing", "shock", "shocked", "stunned", "bombshell",
+             "slams", "blasts", "furious", "rage", "rejects", "rejected", "forced",
+             "threatens", "threatened", "threaten", "slapped", "banned", "sacked", "scandal",
+             "row", "rift", "feud", "war of words", "ultimatum", "quits", "denied",
+             "vows", "warns", "fumes", "under fire", "demands", "crisis",
+             "dramatic", "revolt", "fired", "dismissed", "explodes", "erupts", "controversy"]
+
+# Statement/rumour filler markers — flat "X linked with Y" headlines with no conflict.
+# These tank engagement (transfer_rumor avg 10.6K vs fifa_political 25.7K, Aug data).
+_STATEMENT = ["linked", "eyeing", "interested", "keen", "plot", "awaits", "reacts",
+              "reveals truth", "expected to", "in talks", "weighing", "mulling",
+              "on the radar", "targeted", "hint", "hints", "officially"]
+
 def filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_summary=None, hotness=None, _last_sources=None):
     """Filter duplicates, sensitive content, score and rank.
     _last_sources: optional list of last 2 posted source names for cold-source rotation boost."""
@@ -859,6 +876,18 @@ def filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_su
         if tt == "controversy" or tt == "fifa_political" or tt == "manager_sack":
             s += 15
             log(f"   📈 Controversy boost: +15 for '{title[:50]}'")
+        # Reversal/conflict verb boost — proven viral driver (top-10 posts all carry one)
+        if any(re.search(r'\b' + re.escape(w) + r'\b', tl) for w in _REVERSAL):
+            s += 30
+            log(f"   💥 Reversal boost: +30 for '{title[:50]}'")
+        # Statement/rumour filler — no conflict verb, tanks engagement (transfer_rumor avg 10.6K)
+        elif any(re.search(r'\b' + re.escape(w) + r'\b', tl) for w in _STATEMENT):
+            if relaxed:
+                s -= 25
+                log(f"   📉 Statement filler: -25 for '{title[:50]}'")
+            else:
+                log(f"   🗑️ Statement filler: skipped '{title[:60]}'")
+                continue
         # Penalty for generic content (no topic type = low engagement)
         if tt and tt == "other":
             s -= 10
@@ -1642,7 +1671,7 @@ cover_image_keywords: 2-3 search terms (e.g. "Tuchel training kit England"). Pri
 ## OUTPUT CONTRACT — JSON only, no markdown wrapping.
 Return this EXACT schema:
 {"slide_1":"","slide_2":"","slide_3":"","slide_4":"","slide_5":"","slide_6":"","caption":"","cover_image_keywords":""}
-Sentences within slides: separated by \\n (newline). Between slides: the JSON keys define boundaries.
+Sentences within slides: plain text with single spaces, no forced line breaks. Between slides: the JSON keys define boundaries.
 If article is insufficient: return {"slide_1":"needs_more_source","slide_2":"","slide_3":"","slide_4":"","slide_5":"","slide_6":"","caption":"","cover_image_keywords":""} with slide_1 starting with "needs_more_source".
 
 ## FINAL SELF-CHECK (silent, before output)
@@ -1786,8 +1815,6 @@ S6 = BINARY: Question about whether the opinion will hold up or be acted on. For
                         text = text.replace("—", " - ").replace("–", " - ")
                         text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
                         text = re.sub(r'(?<!\*)\*([^*\n]+)\*(?!\*)', r'\1', text)
-                        # Insert \n between sentences (whitespace after each sentence)
-                        text = re.sub(r'(?<!Mr)(?<!Mrs)(?<!Ms)(?<!Dr)(?<!St)(?<!vs)(?<!Jr)(?<!Sr)(?<!Prof)([.?!])\s+(?=[A-Z])', r'\1\n', text)
                         slides.append({"title": f"S{i}", "content": text})
                 caption = data.get("caption", "").strip()
                 hashtags = data.get("hashtags", "").strip()
@@ -1802,8 +1829,6 @@ S6 = BINARY: Question about whether the opinion will hold up or be acted on. For
                         text = text.replace("—", " - ").replace("–", " - ")
                         text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
                         text = re.sub(r'(?<!\*)\*([^*\n]+)\*(?!\*)', r'\1', text)
-                        # Insert \n between sentences (whitespace after each sentence)
-                        text = re.sub(r'(?<!Mr)(?<!Mrs)(?<!Ms)(?<!Dr)(?<!St)(?<!vs)(?<!Jr)(?<!Sr)(?<!Prof)([.?!])\s+(?=[A-Z])', r'\1\n', text)
                         slides.append({"title": f"S{num}", "content": text})
             if len(slides) < 3:
                 log(f"   ❌ Only {len(slides)} parseable slides")
@@ -1845,9 +1870,9 @@ def load_threads_token():
     except Exception: return None, None
 
 def _space_sentences(text):
-    """One sentence per paragraph; preserve source URL as its own paragraph."""
+    """Single flowing paragraph; preserve source URL as its own paragraph."""
     body, sep, url = text.rstrip().partition("\n\nhttp")
-    formatted = re.sub(r'([.!?]["”]?)\s+', r'\1\n\n', body).strip()
+    formatted = re.sub(r'\s+', ' ', body).strip()
     return formatted + (sep + url if sep else "")
 
 
