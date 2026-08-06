@@ -798,9 +798,15 @@ _REVERSAL = ["u-turn", "rebellion", "revolt", "boycott", "blocked", "blocks", "s
 
 # Statement/rumour filler markers — flat "X linked with Y" headlines with no conflict.
 # These tank engagement (transfer_rumor avg 10.6K vs fifa_political 25.7K, Aug data).
+# Phrase-level entries added 6 Aug after Aug 5-6 audit: begin/start talks, could line up,
+# salary explainers, transfer route, set to agree, roundups — all <5K performers that
+# slipped past single-word markers.
 _STATEMENT = ["linked", "eyeing", "interested", "keen", "plot", "awaits", "reacts",
               "reveals truth", "expected to", "in talks", "weighing", "mulling",
-              "on the radar", "targeted", "hint", "hints", "officially"]
+              "on the radar", "targeted", "hint", "hints", "officially",
+              "begin talks", "start talks", "hold talks", "could line up",
+              "salary", "earns", "how much", "transfer route", "set to agree",
+              "predicted xi", "transfer news:"]
 
 def filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_summary=None, hotness=None, _last_sources=None):
     """Filter duplicates, sensitive content, score and rank.
