@@ -1873,6 +1873,11 @@ def _space_sentences(text):
     """Single flowing paragraph; preserve source URL as its own paragraph."""
     body, sep, url = text.rstrip().partition("\n\nhttp")
     formatted = re.sub(r'\s+', ' ', body).strip()
+    # LLM sering drop spasi setelah koma ("Bandung,pengusaha", "periksa,12 orang").
+    # letter-letter: koma antar kata; letter-digit: spasi hilang sebelum angka.
+    # Desimal ID ("1,2") = digit-digit, tidak kena.
+    formatted = re.sub(r'(?<=[A-Za-z]),(?=[A-Za-z])', ', ', formatted)
+    formatted = re.sub(r'(?<=[A-Za-z]),(?=\d)', ', ', formatted)
     return formatted + (sep + url if sep else "")
 
 
@@ -1972,6 +1977,35 @@ def _self_check():
 def main():
     START = time.time()
     log("=== PRESSBOX MVP ===")
+
+    # Volume gate: min 2h gap between posts → ≤12/day, cuts audience fatigue from 23/day.
+    # Dead-hours skipped by this too — no need for hour-specific gating (hour data too noisy).
+    if not DRY_RUN:
+        try:
+            with open(POSTED) as f:
+                _pdata = json.load(f)
+            _plist = _pdata.get("topics", []) if isinstance(_pdata, dict) else _pdata
+            _last_ts = None
+            for _p in _plist:
+                for _k in ("posted_at", "published_ts"):
+                    _v = _p.get(_k)
+                    if not _v: continue
+                    try:
+                        _t = datetime.fromisoformat(str(_v).replace("Z", "+00:00"))
+                        if _t.tzinfo:
+                            _t = _t.astimezone(timezone(timedelta(hours=7)))
+                        if _last_ts is None or _t > _last_ts:
+                            _last_ts = _t
+                    except Exception:
+                        continue
+            if _last_ts is not None:
+                _age_h = (datetime.now(timezone(timedelta(hours=7))) - _last_ts).total_seconds() / 3600
+                if _age_h < 2.0:
+                    log(f"⏸️ Volume gate: last post {_age_h:.1f}h ago (<2h) — skipping")
+                    print(f"⏸️ Skip — volume gate (posted {_age_h:.1f}h ago)", flush=True)
+                    sys.exit(0)
+        except Exception:
+            pass
 
     # 0. Init Threads poster (for metrics)
     token, user_id = load_threads_token()
