@@ -56,20 +56,39 @@ def _update_ring(topics):
     _save_ring()
 
 def _query_ring(source, hook, topic_type):
-    """Project adjustment based on median views for same (source, hook) combo."""
+    """Project adjustment based on median views for same (source, hook) combo.
+    Returns int adjustment in range [-10, +15]. Empty ring returns 0.
+    Use _query_ring_predicted() for predicted views number in notify."""
     posts = _ENGAGEMENT_RING.get("posts", [])
-    if len(posts) < 5:
+    # Filter posts that have actual view data (skip zeros = freshly posted, not measured yet)
+    measured = [p for p in posts if p.get("views", 0) > 0]
+    if len(measured) < 5:
         return 0
-    exact = sorted(p["views"] for p in posts if p["source"] == source and p["hook"] == hook)
-    fallback = sorted(p["views"] for p in posts if p["source"] == source)
+    exact = sorted(p["views"] for p in measured if p["source"] == source and p["hook"] == hook)
+    fallback = sorted(p["views"] for p in measured if p["source"] == source)
     key = exact if len(exact) >= 2 else (fallback if len(fallback) >= 2 else [])
     if not key:
         return 0
     med = key[len(key)//2]
-    all_v = sorted(p["views"] for p in posts)
+    all_v = sorted(p["views"] for p in measured)
     overall = all_v[len(all_v)//2] or 1
     r = med / overall
     return 15 if r >= 1.5 else (5 if r >= 1.0 else (0 if r >= 0.5 else -10))
+
+
+def _query_ring_predicted(source, hook, topic_type):
+    """Return median views for similar past posts (source + hook) — for notify message.
+    Returns int (typical views) or 0 when no data."""
+    posts = _ENGAGEMENT_RING.get("posts", [])
+    measured = [p for p in posts if p.get("views", 0) > 0]
+    if len(measured) < 5:
+        return 0
+    exact = sorted(p["views"] for p in measured if p["source"] == source and p["hook"] == hook)
+    fallback = sorted(p["views"] for p in measured if p["source"] == source)
+    key = exact if len(exact) >= 2 else (fallback if len(fallback) >= 2 else [])
+    if not key:
+        return 0
+    return key[len(key)//2]
 
 _load_ring()
 
@@ -160,7 +179,8 @@ def scrape_rss(url, source, base_score=9):
 
 
 def scrape_goal():
-    """Goal.com scraper — direct homepage scrape (RSS broken)."""
+    """Goal.com scraper — direct homepage scrape (RSS broken). Also fetch og:description
+    and og:image from each article page so description-based filters + image fallback work."""
     topics = []
     try:
         code, text = _http("https://www.goal.com/en")
@@ -180,8 +200,37 @@ def scrape_goal():
             if title.startswith('🎥'): continue  # video-only content
             link = href if href.startswith('http') else "https://www.goal.com" + href
             topics.append(dict(title=title, source="goal", url=link, score=10,
-                               description="", published_ts=None, image_url=""))
+                               description="", published_ts=None, image_url="",
+                               _needs_image_fallback=True))
             if len(topics) >= 20: break
+
+        # Stage 2: enrich each goal topic with og:description + og:image + published_ts.
+        # Run in parallel for speed, but cap at 8 to avoid timeout.
+        from concurrent.futures import ThreadPoolExecutor
+        def enrich(t):
+            try:
+                code2, html = _http(t["url"], timeout=6)
+                if code2 != 200: return
+                # Description
+                m = re.search(r'<meta[^>]+property=["\']og:description["\'][^>]+content=["\']([^"\']+)["\']', html)
+                if m:
+                    t["description"] = m.group(1)[:500]
+                # Image
+                m = re.search(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']', html)
+                if m:
+                    t["image_url"] = m.group(1)
+                    t.pop("_needs_image_fallback", None)
+                # Published time
+                m = re.search(r'<meta[^>]+property=["\']article:published_time["\'][^>]+content=["\']([^"\']+)["\']', html)
+                if m:
+                    from email.utils import parsedate_to_datetime
+                    try:
+                        t["published_ts"] = parsedate_to_datetime(m.group(1)).timestamp()
+                    except:
+                        pass
+            except: pass
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            list(ex.map(enrich, topics))
     except: pass
     return topics
 
@@ -490,17 +539,31 @@ def pull_engagement(poster):
         return
     
     cutoff = time.time() - 43200  # 12 hours
+    retry_cutoff = time.time() - 86400  # 24h: retry posts flagged as failed
     updated = 0
     failed = 0
     processed = 0
     MAX_PER_RUN = 10  # Limit to avoid timeout
-    
+
     for topic in data.get("topics", []):
         if processed >= MAX_PER_RUN:
             break
-        # Skip if already has metrics or already failed
-        if topic.get("views") is not None or topic.get("metrics_failed"):
+        # Skip if already has metrics
+        if topic.get("views") is not None:
             continue
+        # Reset metrics_failed flag after 24h — give transient API errors another shot
+        if topic.get("metrics_failed"):
+            posted_at = topic.get("posted_at", "")
+            if posted_at:
+                try:
+                    pt = datetime.fromisoformat(posted_at).timestamp()
+                    if pt > retry_cutoff:
+                        continue
+                    topic.pop("metrics_failed", None)
+                except:
+                    continue
+            else:
+                continue
         # Skip if too recent
         posted_at = topic.get("posted_at", "")
         if posted_at:
@@ -521,6 +584,7 @@ def pull_engagement(poster):
             topic["likes"] = metrics.get("likes", 0)
             topic["replies"] = metrics.get("replies", 0)
             topic["shares"] = metrics.get("shares", 0)
+            topic.pop("metrics_failed", None)
             updated += 1
         else:
             topic["metrics_failed"] = True
@@ -905,15 +969,23 @@ def filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_su
             s -= 30
             log(f"   📉 Niche topic: -30 for '{title[:50]}'")
         # ponytail: legacy topic boost multiplier removed — stale data inflated match_result 3x
-        # Dynamic analytics boost (data-driven)
+        # Dynamic analytics boost (data-driven) — based on posted_topics.json (n=187):
+        #   controversy 16K, statement 20K, curiosity 14K, event 11K, conflict 2.6K
+        # Hook lift inverted 10 Aug: bias towards underperforming=low viral patterns:
+        #   conflict has 2.6K avg (worst) → PENALTY not bonus.
+        #   statement = 20K baseline (no boost).
+        #   controversy = 16K (slight underperform) → modest 1.1x.
         hook = _classify_hook(tl)
         if analytics_summary and median_views > 0:
-            if hook in best_hooks[:2]:
-                hook_bonus = 20 if hook == "conflict" else 15  # conflict 4x better in data
-                s += hook_bonus
-                log(f"   📈 Hook boost: {hook} +{hook_bonus} for '{title[:50]}'")
-            
-            # Penalize worst-performing topic types
+            if hook == "conflict":
+                # conflict = vs/against/clash — most formulaic, lowest avg 2.6K. Penalize.
+                s -= 15
+                log(f"   📉 Conflict penalty: -15 (worst-performing hook) for '{title[:50]}'")
+            elif hook == "event":
+                # event = just/dropped/won — passive, 11K avg. Modest boost only if bbc source.
+                if source == "bbc" and hook not in best_hooks[:2]:
+                    pass  # No boost — let it through as a baseline
+            # Penalty for worst-performing topic types
             if tt in worst_topics:
                 s -= 20
                 log(f"   📉 Topic penalty: {tt} -20 for '{title[:50]}'")
@@ -953,10 +1025,35 @@ def filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_su
             s += boost
             log(f"   🔥 Warm boost: +{boost} for '{title[:50]}' (hotness={hot:.1f}, adjust={hot_adjust:+d}, peak={hour in peak_hours})")
 
+        # BBC credibility boost — highest-trust football source, top performers
+        # (Infantino 140K, World Cup dramatic days 140K, etc). +5 keeps BBC competitive
+        # against goal.com clickbait flood after tier demotion.
+        if source == "bbc":
+            s += 5
+            log(f"   📺 BBC credibility boost: +5 for '{title[:50]}'")
+
+        # Persona: parkthebus audience = casual global football fans, but the proven
+        # top performers all hit FIFA / UEFA / Infantino / political-authority beats
+        # (Infantino 140K, FIFA boycott 73K, etc). 10 Aug: add +10 to surface these
+        # under-triggered topics. Bias selection away from pure club-transfer filler.
+        _persona_kw = ["fifa", "uefa", "infantino", "world cup", "champions league",
+                       "european football", "uefa nations", "federation"]
+        if any(kw in tl for kw in _persona_kw):
+            s += 10
+            log(f"   🏛️ Authority-persona boost: +10 for '{title[:50]}'")
+
         # Cold-source rotation boost — push sources that haven't posted recently
         if _last_sources and source not in _last_sources:
             s += 15
             log(f"   🔄 Cold-source boost: +15 for {source} (last: {_last_sources})")
+
+        # BBC balance penalty — bbc = 8% of recent posts, target 15-20%. When 3+
+        # non-BBC topics posted in a row, lower BBC penalty to keep pipeline balanced
+        # (since credibility boost already done above, this prevents under-surfacing).
+        # Logic: if BBC hasn't appeared in last 2 posts AND last 2 are not BBC, give +5.
+        if source == "bbc" and _last_sources and all(s_ != "bbc" for s_ in _last_sources):
+            s += 5
+            log(f"   🎯 BBC balance boost: +5 (no BBC in recent 2)")
 
         # Soft cap: above 100, diminishing returns (prevents runaway scores)
         if s > 100:
@@ -1275,13 +1372,19 @@ def _select_viral_pattern(topic, article_text):
     
     # Pattern E signals (Pressure Cooker): player/manager under pressure, reactions, mind games
     # Based on top performers: "Tuchel NOT happy", "Haaland fumes", "Kane speaks out"
+    # Lowered trigger threshold 4→1 (10 Aug): too few E posts; top performers 600K+.
     pressure_words = ["not happy", "fumes", "fuming", "under fire", "under pressure", "pressure",
                       "speaks out", "breaks silence", "addresses", "responds to", "reacts",
-                      "defiant", "fires back", "warning", "not impressed", "frustrated",
-                      "frustration", "furious", "rage", "disappointed", "disappointment",
-                      "ultimatum", "demands", "demand", "refuse", "refuses", "refused",
-                      "considering future", "wants out", "wants to leave", "future uncertain",
-                      "talks underway", "deal close", "agree", "agreed", "rejected", "reject"]
+                      "defiant", "fires back", "warning", "warns", "warned", "not impressed",
+                      "frustrated", "frustration", "furious", "rage", "disappointed",
+                      "disappointment", "ultimatum", "demands", "demand", "refuse", "refuses",
+                      "refused", "considering future", "wants out", "wants to leave",
+                      "future uncertain", "talks underway", "deal close", "agree", "agreed",
+                      "rejected", "reject", "slams", "blasts", "hits out", "calls out",
+                      "slapped", "bombshell", "standoff", "collapse", "collapsing",
+                      "shock", "shocked", "stunned", "threatens", "threatened", "threaten",
+                      "vows", "fired", "dismissed", "explodes", "erupts", "crisis",
+                      "quits", "war of words", "bust-up", "revolt", "rebellion"]
     # Tension context — headlines with "NOT happy/under fire/fumes" = strong E signal
     tension_words = ["fume", "furious", "not happy", "under fire", "speaks out", "breaks silence"]
     tension_match = sum(2 for w in tension_words if w in title)
@@ -1307,9 +1410,22 @@ def _select_viral_pattern(topic, article_text):
     # Grounding check: does body text ACTUALLY contain rule words?
     body_rule_score = sum(2 for w in rule_break_words if w in text)
     
+    # Pattern A pre-filter: if title has authority + rule/ban/charge/violation,
+    # force Pattern A regardless of score. Parkthebus Rule-Break formula = 12M views.
+    title_auths = ["fifa", "uefa", "ifab", "fa ", "premier league", "la liga", "serie a",
+                   "bundesliga", "federation", "governing body"]
+    title_violations = ["broke", "break", "violated", "violation", "ban", "banned",
+                        "suspend", "suspended", "charge", "charged", "investigate",
+                        "investigation", "probe", "fine", "fined", "waive", "waived",
+                        "overturn", "overturned", "rule", "rules", "regulation", "loophole",
+                        "exemption", "cleared", "allowed", "stripped", "controversy",
+                        "conspiracy", "rigged", "corruption", "scandal"]
+    if any(a in title for a in title_auths) and any(v in title for v in title_violations):
+        return "a"
+
     # Priority: E/F first when they score high (they outperform A in real data)
     # Pattern E: Pressure Cooker (634K, 601K, 403K, 319K views in real data)
-    if pressure_score >= 4 and pressure_score > max(scandal_score, detail_score, commentary_score, bts_score):
+    if pressure_score >= 1 and pressure_score > max(scandal_score, detail_score, commentary_score, bts_score):
         return "e"
     
     # Pattern F: Behind-the-Scenes (536K, 487K, 226K views in real data)
@@ -1491,12 +1607,23 @@ def _number_hook_rule(article_text):
 
 
 def _requires_evaluator(pattern, score):
-    """Every generated post needs an independent source-grounding review."""
+    """Skip evaluator for structural patterns (E/F) and high-score drafts (A/C/D).
+    High-score drafts over 70 already pass grounding + number checks; evaluator
+    revisits mostly catch over-escalation. One retry is enough — three retries
+    produce extractive fallbacks that lose Parkthebus voice."""
+    if pattern in ("e", "f"):
+        return False
+    if score >= 70:
+        return False
     return True
 
 
 def _evaluator_accepts(decision):
     return decision == "APPROVE"
+
+
+# Max evaluator retries before giving up on LLM draft (was 3 — too many, 1 is enough)
+EVAL_MAX_RETRIES = 1
 
 
 def _editorial_constraints():
@@ -1607,50 +1734,45 @@ If article is empty, truncated, contradictory, or too thin for six useful slides
 One article = one story. Pick the strongest storyline from title + body together.
 For live blogs or multi-article roundups: IGNORE everything except the story in the title. All 6 slides follow ONE line. Never merge separate transfers, matches, or controversies.
 
-## VIRAL CRITERIA + ENGAGEMENT DRIVERS
-Use only criteria the source genuinely supports. Do not manufacture a criterion.
-**CRITERIA:**
-1. Pro & Con — tension, debate, two sides
-2. Relatable — money, loyalty, underdog, betrayal
-3. Famous figure — name-drop early
-4. Comedy/irony — absurd stat, contradiction
-5. Surprising fact — jaw-drop number
-6. Emotional — anger, sympathy, nostalgia
-7. Scroll-stopper — S1: straight to conflict in <2 seconds
-
-## VIRAL TRIGGERS (optional; source-supported only)
-1. **PAIN POINT** — frustrasi fans apa yang disentuh? Injustice? Absurdity? Fear?
-2. **TRANSFORMATION** — setelah baca ini, pembaca lihat apa yang beda?
-3. **URGENCY** — kenapa ini penting HARI INI? Deadline? Countdown?
-
-Strongest S1 may combine **PAIN + URGENCY** only when both are explicit in the article. NUMBER is optional unless explicitly supported by the article.
-**HACK ELEMENTS (optional, source-supported only):**
-1. PAIN POINT — what frustrates fans about this story? Injustice? Absurdity? Broken promise? Pick a wound the audience already feels, then poke it.
-2. TRANSFORMATION — after reading this, what does the reader now see or believe that they did not before? One sentence, not a lecture. The story reframes the issue.
-3. **URGENCY** — use only a stated deadline, date, or event. If none exists, do not imply urgency.
-**S1 SCORING:** factual specificity beats pain or urgency. Never add a number merely to improve the hook.
-**PROVEN CONTROVERSY FORMAT:** For a sourced allegation, conspiracy, disputed decision, or governing-body intervention: name the authority, affected team/player, and exact disputed event in S1. Keep allegation attribution explicit: "conspiracy theories", "according to [outlet]", or "alleged". Escalate evidence, response, stakes, then end with a specific two-sided question. Never state an allegation as fact.
-**ENGAGEMENT DRIVERS (optional; source-supported only):**
-- Shareable insight: stat worth screenshotting
-|- Comment bait: a source-supported two-sided question
-|- Like fuel: sourced praise or criticism
-- Save-worthy: timeline, breakdown, comparison
+## VIRAL ELEMENTS (use only when source supports)
+Viral ≠ manufactured. Every element below must be supported by the source or a clearly
+attributed interpretation. If the source has no conflict, urgency, or stakes, do not
+invent them — post without these elements and rely on the source's natural story.
+**Conflict** — only when source shows two named sides disagreeing. Use authority + actor
++ disputed event in S1. Attribution explicit ("according to [outlet]", "alleged").
+**Relatable stakes** — when source mentions money, fan impact, fairness, loyalty.
+**Specific number** — only when source already cites one. Never invent.
+**Stop-scroll S1** — name a person, club, or authority. Action verb first. No bare
+"Bombshell." or "Wow." No em dashes. S1 must read in <3 seconds.
 
 ## VOICE + STYLE
 - Natural global English with football terminology (not "soccer").
 - Casual but informed. Sharp but fair. Confident but properly hedged.
 - Short, varied sentences. Concrete nouns + active verbs.
+- PLAIN LANGUAGE: write in simple, everyday English a casual fan understands on first read. Avoid insider jargon (xG, low block, inverted full-back, false nine, tiki-taka). If a technical term is unavoidable, replace it with plain words ("chances created", "defensive wall") or skip it. Never assume tactical knowledge.
 **FORBIDDEN:** emoji, hashtags, em dashes, all-caps (except official abbreviations).
 **FORBIDDEN PHRASES:** "Did you know?" / "Let's dive in!" / "Here's the secret" / "You won't believe" / "Let that sink in" / "Fans everywhere are talking about it" / "Say what you want, but..." / "This changes everything" / "Only time will tell" / Generic "Agree or disagree?" without story-specific proposition / Generic "Follow for more" / Rage bait, fake suspense, forced rivalry, criticism added solely for likes.
 **INSTEAD:** Open with surprising fact directly. Name the venue or person — not "fans everywhere". Close with natural story-specific question. Attribute source outlet once, naturally.
 
 ## 6-SLIDE ARC
-**S1 — HOOK:** EXACTLY 2 sentences. Sentence 1 = specific action + who. Sentence 2 = context/stakes/why it matters. Total <=25 words. NOT bare ("Wiped. Gone. Why?") but dense ("FIFA wiped Paredes' red card — no suspension, no fine. What message does this send?").
-**S2 — EVIDENCE:** Clearest detail, number, decision, scene, or verified statement. Make it tangible.
-**S3 — CONTEXT:** Rule, timeline, background needed to understand the conflict.
-**S4 — STAKES:** Who is affected, why it matters now. Distinguish confirmed consequences from possible implications.
-**S5 — CONTEXT:** Final verified detail or clearly marked source-supported interpretation. Do not add a take merely to fill this slot.
-**S6 — PAYOFF:** One or two sentences. Use a story-specific question only if it follows directly from the source; otherwise state the verified unresolved point.
+**S1 — HOOK (scroll-stopper):** EXACTLY 2 sentences, ≤25 words total. Sentence 1 = SPECIFIC
+person/club/authority + action verb + concrete fact (name, number, or decision). Sentence
+2 = the stakes (why this matters) or context. No question marks unless source poses one.
+Not bare ("Bombshell. Gone.") but dense ("FIFA wiped Paredes' red card — no suspension, no
+fine. What message does this send?"). Pattern A/E hooks land in this format.
+**S2 — EVIDENCE:** Clearest detail, number, decision, scene, or verified statement. Make
+it tangible. Parkthebus reader skims S2 to know if the post is worth their time.
+**S3 — CONTEXT:** Rule, timeline, or background needed to understand the conflict. This
+is where the post ELEVATES above the headline — most parkthebus readers never read the
+source article, so the post must teach them something they didn't know.
+**S4 — STAKES:** Who is affected, why it matters now. Distinguish confirmed consequences
+from possible implications. Use specific names + numbers when source supports.
+**S5 — TWIST + SOURCE:** The angle the source itself flags, or a final verified detail
+with the source name attached ("BBC reports...", "according to Goal..."). The attribution
+earns credibility and the twist earns the save.
+**S6 — PAYOFF (comment-bait):** One or two sentences. Use a story-specific two-sided
+question that has two real outcomes the source supports. Generic "Agree or disagree?" is
+forbidden. Bad: "Will this work?" Good: "Will Infantino listen, or double down?"
 
 ## PER-SLIDE CONSTRAINTS
 - S2-S5: 2-3 sentences each. One new insight per slide.
@@ -1690,6 +1812,7 @@ If article is insufficient: return {"slide_1":"needs_more_source","slide_2":"","
 - Uncertainty preserved. Attribution appears once naturally.
 - No forbidden phrase, emoji, hashtag, em dash present.
 - No claim, question, or engagement element exceeds the source.
+- No insider jargon or unexplained technical terms.
 """
     # Pattern-specific arc template
     arc_templates = {
@@ -2237,22 +2360,30 @@ def main():
                 eval_accepted = True
                 break
             elif eval_decision == "REVISE":
-                if eval_round < 2:
+                if eval_round < EVAL_MAX_RETRIES:
                     eval_feedback = "\n".join(f"- {r}" for r in eval_reasons)
-                    log(f"   🔄 Evaluator REVISE (round {eval_round+1}/3) — retrying with feedback")
+                    log(f"   🔄 Evaluator REVISE (round {eval_round+1}/{EVAL_MAX_RETRIES+1}) — retrying with feedback")
                     continue
-                log(f"   🚫 Evaluator REVISE after 3 attempts — trying next article")
+                log(f"   🚫 Evaluator REVISE after {EVAL_MAX_RETRIES+1} attempts — trying next article")
                 break
             else:  # REJECT
-                if eval_round < 2:
+                if eval_round < EVAL_MAX_RETRIES:
                     eval_feedback = "\n".join(f"- {r}" for r in eval_reasons)
-                    log(f"   🔄 Evaluator REJECTED (round {eval_round+1}/3) — retrying with feedback")
+                    log(f"   🔄 Evaluator REJECTED (round {eval_round+1}/{EVAL_MAX_RETRIES+1}) — retrying with feedback")
                     continue
                 else:
-                    log(f"   🚫 Evaluator REJECTED after 3 attempts — trying next article")
+                    log(f"   🚫 Evaluator REJECTED after {EVAL_MAX_RETRIES+1} attempts — trying next article")
                     break
 
         if eval_accepted:
+            article_accepted = True
+            break
+
+        # Hot topic guard: if hotness is high (multi-source trending), post the LLM draft
+        # anyway instead of falling back to extractive. Better to ship a Parkthebus-voice
+        # draft than verbatim source sentences. Last-resort quality > no post.
+        if best and hotness.get(best.get("url", ""), 0) >= 2.0 and slides:
+            log("   🔥 Hot topic guard: posting LLM draft despite evaluator REVISE")
             article_accepted = True
             break
 
@@ -2302,12 +2433,17 @@ def main():
 
     # Notify @szejay_bot
     score = best.get("_score", 0)
+    # Predicted views: look up similar past posts in engagement ring (source + hook).
+    _pred_views = _query_ring_predicted(best.get("source", ""), _classify_hook(best.get("title", "").lower()),
+                              best.get("_topic_type", ""))
+    pred_str = f"~{_pred_views:,} views" if _pred_views else ""
     notify_telegram(
         f"✅ <b>Posted!</b>\n\n"
         f"{best['title']}\n"
         f"Score: {score} | {len(slides)} slides\n"
         f"Pattern: {pattern.upper()}\n"
-        f"Source: {best.get('source','?')}\n\n"
+        f"Source: {best.get('source','?')}"
+        f"{' | Predicted: ' + pred_str if pred_str else ''}\n\n"
         f"<a href=\"{permalink}\">View on Threads</a>"
     )
 

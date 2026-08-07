@@ -35,7 +35,7 @@ DRIVERS:
 
 ## OUTPUT FORMAT
 {"slide_1":"","slide_2":"","slide_3":"","slide_4":"","slide_5":"","slide_6":"","caption":"","cover_image_keywords":""}
-Sentences separated by \n (new slide content) and \n\n (within slides).
+Sentences flow naturally: single spaces between sentences, no forced line breaks. Slide boundaries defined by JSON keys.
 
 ## TONE RULES
 - Curated casual — sharp fan voice, not a bot.

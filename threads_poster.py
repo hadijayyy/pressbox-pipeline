@@ -91,8 +91,6 @@ class ThreadsPoster:
         # Strip markdown italic/bold markers
         text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
         text = re.sub(r'(?<!\*)\*([^*\n]+)\*(?!\*)', r'\1', text)
-        # Insert \n\n between sentences (Threads renders \n as space, \n\n as break)
-        text = re.sub(r'(?<!Mr)(?<!Mrs)(?<!Ms)(?<!Dr)(?<!St)(?<!vs)(?<!Jr)(?<!Sr)(?<!Prof)([.?!])\s+(?=[A-Z])', r'\1\n\n', text)
         url = f"{GRAPH_API_BASE}/{self.user_id}/threads"
         params = {
             "text": text,

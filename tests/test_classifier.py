@@ -64,11 +64,15 @@ def test_evaluator_request_uses_json_mode_and_full_article():
     assert payload["max_tokens"] == 800
 
 
-def test_space_sentences_uses_blank_lines_and_keeps_url():
+def test_space_sentences_flows_naturally_and_keeps_url():
     mvp = _load_mvp()
-    text = "First fact. Second fact?\n\nhttps://example.com/story"
-    assert mvp._space_sentences(text) == "First fact.\n\nSecond fact?\n\nhttps://example.com/story"
-    assert mvp._space_sentences('He said, "First fact." Second fact.') == 'He said, "First fact."\n\nSecond fact.'
+    text = "First fact. Second fact?\\n\\nhttps://example.com/story"
+    assert mvp._space_sentences(text) == "First fact. Second fact?\\n\\nhttps://example.com/story"
+    assert mvp._space_sentences('He said, "First fact."\\nSecond fact.') == 'He said, "First fact." Second fact.'
+    # LLM comma-space drop: letter-letter and letter-digit fixed, ID decimal untouched
+    assert mvp._space_sentences("Polri,sekarang Kejagung.") == "Polri, sekarang Kejagung."
+    assert mvp._space_sentences("Diperiksa,12 orang.") == "Diperiksa, 12 orang."
+    assert mvp._space_sentences("Naik 1,2 persen.") == "Naik 1,2 persen."
 
 
 def test_verbatim_evaluator_approves_without_api():

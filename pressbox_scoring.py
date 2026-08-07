@@ -161,19 +161,19 @@ AMBIGUOUS_EXCLUDES = ["liga"]
 # ─── SOURCE TIERS ────────────────────────────────────────────────────────────
 # Football-specific sources
 
-# Source: goal.com avg 58K views — 2.1x BBC (42K), mirror 27K
-# So super tier gets +15, tier 1 = +10, tier 2 = +5
+# Source: BBC avg 30K (Infantino 140K), goal.com avg 13K (recent clickbait flood)
+# So tier 1 = +10 (BBC), tier 2 = +5 (goal, mirror demoted 10 Aug for clickbait)
 SOURCE_TIER_SUPER = [
 ]
 
 SOURCE_TIER_1 = [
-    "bbc sport", "sky sports", "the athletic", "guardian football",
+    "bbc sport", "bbc", "sky sports", "the athletic", "guardian football",
     "espn fc", "football italia", "90min", "fabrizio romano",
-    "transfermarkt", "goal.com", "goal",
+    "transfermarkt",
 ]
 
 SOURCE_TIER_2 = [
-    "mirror", "sun", "daily mail", "express", "star",
+    "goal", "goal.com", "mirror", "sun", "daily mail", "express", "star",
     "football365", "talking points", "onefootball", "football london",
     "teamtalk", "hitc", "caughtoffside",
 ]
