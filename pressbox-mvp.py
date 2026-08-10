@@ -1259,7 +1259,7 @@ _STAGE_CANONICAL = {
 }
 
 def _extract_proper_nouns(text):
-    names = re.findall(r'([A-Z][a-z]+(?:\s[A-Z][a-z]+)+)', text)
+    names = re.findall(r'([A-Z][A-Za-z\u00C0-\u024F]+(?:\s[A-Z][A-Za-z\u00C0-\u024F]+)+)', text)
     cleaned = []
     for n in names:
         words = n.split()
@@ -1769,7 +1769,15 @@ def _evidence_plan(article_text):
     min_facts = max(8, min(12, word_count // 100))  # 8 at ~800 words, 12 at ~1200+
     if len(facts) < min_facts:
         return None
-    return {f"slide_{i}": [f"E{2 * i - 1}", f"E{2 * i}"] for i in range(1, 7)}
+    # Map available facts to 6 slides. With fewer than 12 facts, reuse evidence
+    # rather than requiring strict unique pairs per slide.
+    total = min(len(facts), 12)
+    plan = {}
+    for i in range(1, 7):
+        idx1 = (2 * i - 2) % total
+        idx2 = (2 * i - 1) % total
+        plan[f"slide_{i}"] = [f"E{idx1 + 1}", f"E{idx2 + 1}"]
+    return plan
 
 
 def _assigned_evidence(article_text, evidence_plan):
