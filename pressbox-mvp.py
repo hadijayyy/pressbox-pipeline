@@ -335,10 +335,13 @@ UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chr
 # ── 1. SCRAPE ───────────────────────────────────────────────────────
 
 def _http(url, timeout=8):
-    """Simple HTTP GET with requests, fallback to httpx. Retries on 202 (CDN gate)."""
+    """Simple HTTP GET with requests, fallback to httpx. Retries on 202 (CDN gate)
+    with shorter UA (Mirror CDN blocks full Chrome UA)."""
+    uas = [UA, "Mozilla/5.0"]
     for attempt in (1, 2):
         try:
-            r = requests.get(url, headers={"User-Agent": UA}, timeout=timeout, allow_redirects=True)
+            ua = uas[attempt - 1]
+            r = requests.get(url, headers={"User-Agent": ua}, timeout=timeout, allow_redirects=True)
             if r.status_code == 202 and len(r.text) < 500 and attempt == 1:
                 time.sleep(1.5)  # CDN warming — Mirror does this
                 continue
@@ -346,7 +349,7 @@ def _http(url, timeout=8):
         except Exception:
             if attempt == 2:
                 import httpx
-                c = httpx.Client(headers={"User-Agent": UA}, timeout=timeout, follow_redirects=True, verify=False)
+                c = httpx.Client(headers={"User-Agent": "Mozilla/5.0"}, timeout=timeout, follow_redirects=True, verify=False)
                 r = c.get(url)
                 return r.status_code, r.text
     return 202, ""
