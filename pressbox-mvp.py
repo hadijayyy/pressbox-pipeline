@@ -473,7 +473,8 @@ def _save_fingerprints(fps):
         json.dump(fps, f)
 
 def scrape_all():
-    """Scrape all sources in parallel. Skip sources with unchanged RSS."""
+    """Scrape all sources in parallel. Skip sources with unchanged RSS (fingerprint).
+    Fingerprint = first 3 titles hashed. Expires after 3h to avoid sticky-article deadlock."""
     log(f"Scraping {len(SOURCES)} sources...")
     t0 = time.time()
     fingerprints = _load_fingerprints()
@@ -481,16 +482,22 @@ def scrape_all():
     all_t = []
     skipped = []
 
+    def _fp_from_topics(topics):
+        """Fingerprint from first 3 titles hashed — resilient to single sticky article."""
+        titles = "|||".join(t.get("title", "")[:60] for t in topics[:3])
+        return titles
+
     def scrape_with_fingerprint(name, fn, *args):
-        """Run scrape, check if feed changed. Returns (topics, changed)."""
+        """Run scrape, check if feed changed. Expires fingerprint after 3h."""
         topics = fn(*args) if args else fn()
         if not topics:
             return [], False
-        # First topic title = fingerprint (newest article)
-        fp = topics[0].get("title", "")[:80]
+        fp = _fp_from_topics(topics)
         old_fp = fingerprints.get(name, "")
-        if fp == old_fp:
-            return [], False  # unchanged
+        old_ts = fingerprints.get(f"{name}_ts", 0)
+        age_h = (time.time() - old_ts) / 3600 if old_ts else 999
+        if fp == old_fp and age_h < 3.0:
+            return [], False  # unchanged + not expired
         return topics, True
 
     with ThreadPoolExecutor(max_workers=5) as ex:
@@ -504,7 +511,8 @@ def scrape_all():
             try:
                 topics, changed = f.result(timeout=15)
                 if changed:
-                    new_fingerprints[name] = topics[0].get("title", "")[:80]
+                    new_fingerprints[name] = _fp_from_topics(topics)
+                    new_fingerprints[f"{name}_ts"] = time.time()
                     log(f"   {name}: {len(topics)} topics (new)")
                     all_t.extend(topics)
                 else:
@@ -517,9 +525,12 @@ def scrape_all():
     fingerprints.update(new_fingerprints)
     _save_fingerprints(fingerprints)
 
-    # If too few topics (<20) or all unchanged, force full scrape
-    if len(all_t) < 20 and skipped:
-        log("   ⚠️ All sources unchanged — forcing full scrape")
+    # If too few topics (<20) or any source skipped, force full scrape
+    if len(all_t) < 20 or skipped:
+        if skipped and len(all_t) >= 20:
+            log(f"   ⚠️ {len(skipped)} source(s) unchanged — forcing fresh scrape for variety")
+        else:
+            log(f"   ⚠️ Only {len(all_t)} topics — forcing full scrape")
         with ThreadPoolExecutor(max_workers=5) as ex:
             futs = {
                 "goal": ex.submit(scrape_goal),
@@ -530,8 +541,14 @@ def scrape_all():
             for name, f in futs.items():
                 try:
                     r = f.result(timeout=15)
+                    # Update fingerprint with fresh data
+                    if r:
+                        new_fingerprints[name] = _fp_from_topics(r)
+                        new_fingerprints[f"{name}_ts"] = time.time()
                     all_t.extend(r)
                 except: pass
+        fingerprints.update(new_fingerprints)
+        _save_fingerprints(fingerprints)
 
     log(f"   Total: {len(all_t)} in {time.time()-t0:.1f}s")
     return all_t
@@ -1231,13 +1248,18 @@ def filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_su
         # Skip hot boost for niche topics — they ride trending entity clusters without being newsworthy
         _is_niche = any(kw in tl for kw in _niche_kw)
         hot = hotness.get(url, 0)
-        # Topic relevance: title must be ABOUT the entity (in first half), not just mention it
+        # Topic relevance: title must be ABOUT the entity (in first half), not just mention it.
+        # Exception: if the article IS in a hot cluster, it's relevant by definition.
         _hot_relevant = True
         if hot >= 1.5:
             cluster_ents = hotness.get(url + "_entities", [])
             if cluster_ents:
                 first_half = tl[:len(tl)//2]
                 _hot_relevant = any(e.lower() in first_half for e in cluster_ents)
+                if not _hot_relevant:
+                    # Check body/description as fallback for listicle/roundup articles
+                    desc = t.get("description", "").lower()
+                    _hot_relevant = any(e.lower() in desc for e in cluster_ents)
                 if not _hot_relevant:
                     log(f"   ⚠️ Hot boost skipped: entity not in title first half for '{title[:50]}'")
         hot_adjust = analytics_summary.get("hot_boost_adjust", 0) if analytics_summary else 0
