@@ -12,3 +12,4 @@ staging/*.json
 article_cache.json
 .trends_cache.json
 declare/
+*.bak-*
