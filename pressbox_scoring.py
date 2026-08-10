@@ -39,13 +39,13 @@ INCLUDE_KEYWORDS = {
     ],
     # Match Results / Performance
     "match": [
-        "hat-trick", "brace", "goal of the season", "last-minute goal",
-        "injury time", "extra time", "penalty shootout", "adu penalti", "red card",
+        "hat-trick", "hat trick", "brace", "goal of the season", "last-minute goal",
+        "injury time", "extra time", "penalty shootout", "red card",
         "yellow card", "var decision", "offside goal", "disallowed goal",
         "own goal", "clean sheet", "man of the match", "match winner",
-        "equalizer", "comeback win", "thrashing", "humiliated",
+        "equalizer", "equaliser", "comeback win", "thrashing", "humiliated",
         "demolished", "destroyed", "battered", "upset", "giant-killing",
-        "skor akhir", "juara", "menang", "kalah", "imbang",
+        "last-gasp", "stoppage time", "injury-time",
     ],
     # Drama / Controversy
     "drama": [
@@ -56,17 +56,15 @@ INCLUDE_KEYWORDS = {
         "dressing room", "mutiny", "player revolt", "manager sack",
         "sacked", "resign", "quit", "stepping down", "under pressure",
     ],
-    # World Cup / International
+    # International / Tournaments
     "international": [
-        "fifa", "qualifier", "world cup 2030",
+        "fifa", "qualifier", "world cup",
         "euros", "copa america", "nations league", "friendly international", "vs",
         "call-up", "squad announcement", "international break",
-        "group stage", "knockout stage", "round of 16", "quarter-final", "kualifikasi",
+        "group stage", "knockout stage", "round of 16", "quarter-final",
         "semi-final", "final", "trophy", "champions league",
         "europa league", "conference league", "premier league",
         "la liga", "serie a", "bundesliga", "ligue 1",
-        "piala dunia", "piala presiden", "liga 1", "liga indonesia",
-        "liga inggris", "liga champion", "timnas",
     ],
     # Cross-cutting (global football, finance-related)
     "cross": [
@@ -97,22 +95,10 @@ INCLUDE_KEYWORDS = {
 # Strict: substring match → hard reject (-1)
 
 EXCLUDE_KEYWORDS = {
-    "noise": [
-        "prediksi zodiak", "ramalan", "gosip artis", "selebriti",
-        "giveaway", "kuis berhadiah", "undian", "kontes foto",
-        "tiktok viral", "instagram reel", "youtube shorts",
-    ],
-    "non_editorial": [
-        "advertorial", "press release", "lowongan kerja",
-        "event promosi", "sponsored content", "betting tips",
-        "quiz",
-        "odds", "accumulator", "bet of the day", "free bet",
-        "casino", "slot online", "judi online",
-    ],
     "commercial": [
         "snap up", "buy now", "shop now", "price drop",
         "coupon", "voucher", "bargain", "save £", "save $",
-        "% off", "for £", "for $", "amazon", "ebay", "buy your",
+        "% off", "for £", "for $", "buy your",
         "add to basket", "checkout", "free delivery", "next day delivery",
         "black friday", "cyber monday", "prime day", "clearance",
     ],
