@@ -2551,7 +2551,7 @@ def main():
     START = time.time()
     log("=== PRESSBOX MVP ===")
 
-    # Volume gate: min 1h gap between posts → ≤24/day. User preference: hourly cadence.
+    # Volume gate: min 30m gap between posts → ≤48/day.
     # Dead-hours skipped by this too — no need for hour-specific gating (hour data too noisy).
     if not DRY_RUN:
         try:
@@ -2573,8 +2573,8 @@ def main():
                         continue
             if _last_ts is not None:
                 _age_h = (datetime.now(timezone(timedelta(hours=7))) - _last_ts).total_seconds() / 3600
-                if _age_h < 1.0:
-                    log(f"⏸️ Volume gate: last post {_age_h:.1f}h ago (<1h) — skipping")
+                if _age_h < 0.5:
+                    log(f"⏸️ Volume gate: last post {_age_h:.1f}h ago (<30m) — skipping")
                     print(f"⏸️ Skip — volume gate (posted {_age_h:.1f}h ago)", flush=True)
                     sys.exit(0)
         except Exception:
