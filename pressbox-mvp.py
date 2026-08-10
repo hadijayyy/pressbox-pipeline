@@ -14,7 +14,7 @@ for _p, _m in [("requests","requests"),("httpx","httpx"),("beautifulsoup4","bs4"
     try: __import__(_m)
     except ImportError: _sp.check_call([_sys.executable,"-m","pip","install","--quiet","--root-user-action=ignore",_p],stdout=_sp.DEVNULL,stderr=_sp.DEVNULL)
 
-import html as html_mod, json, os, re, sys, time
+import html as html_mod, json, os, re, sys, time, random
 from datetime import datetime, timezone, timedelta
 from concurrent.futures import ThreadPoolExecutor
 
@@ -2327,8 +2327,10 @@ S6 = CIRCLE BACK: Reference S1's tension with a sharp question. "So which is it 
             if r.status_code != 200:
                 log(f"   ❌ HTTP {r.status_code}: {r.text[:200]}")
                 if r.status_code == 429:
-                    log("   ⏭️ Rate-limited — skipping article")
-                    return None
+                    wait = 2 ** attempt + random.random()
+                    log(f"   ⏭️ Rate-limited — waiting {wait:.1f}s")
+                    time.sleep(wait)
+                    continue
                 else:
                     time.sleep(2 + attempt)
                 continue
@@ -2730,117 +2732,132 @@ def main():
         log("❌ All top articles are commercial/shopping")
         print("❌ Pipeline: all articles are commercial, not football news", flush=True)
         sys.exit(1)
-    article_text = _story_text(article_text, best.get("title", ""))
-    if not _high_risk_claim_allowed(article_text, best.get("source", "")):
-        log(f"   🚫 High-risk fee/legal claim from non-tier-one source: {best.get('source', '')}")
-        print("⏸️ Skip — no tier-one source for high-risk claim", flush=True)
-        sys.exit(0)
-    log(f"   Article: {len(article_text)} chars, image: {'yes' if image_url else 'no'}")
-    if len(article_text.strip()) < 1000:
-        log(f"   ⚠️ Article too short ({len(article_text)} chars < 1000 min). Skipping LLM.")
-        print(f"❌ Pipeline: article too short for carousel ({len(article_text)} chars)", flush=True)
-        sys.exit(1)
-    word_count = len(article_text.split())
-    if word_count < 150:
-        log(f"   ⚠️ Article too thin ({word_count} words < 150 min). Skipping LLM.")
-        print(f"❌ Pipeline: article too thin for carousel ({word_count} words)", flush=True)
-        sys.exit(1)
-    # Sentence count filter — catches boilerplate-inflated articles
-    sentences = [s.strip() for s in re.split(r'[.!?]+', article_text) if len(s.strip()) > 20]
-    if len(sentences) < 5:
-        log(f"   ⚠️ Article too few sentences ({len(sentences)} < 5 min). Skipping LLM.")
-        print(f"❌ Pipeline: article too few sentences ({len(sentences)})", flush=True)
-        sys.exit(1)
-
-    # Image priority: og:image (1200px) > RSS thumbnail (240px)
-    if not image_url and best.get("image_url"):
-        image_url = best["image_url"]
-        log(f"   🖼️ Fallback to RSS thumbnail: {image_url[:60]}")
-    elif image_url and best.get("image_url"):
-        log(f"   🖼️ Using og:image (HD) over RSS thumbnail")
-
-    # 4. Generate — up to 2 attempts. First attempt is clean; second gets all failures
-    # as feedback so the model self-corrects.
+    # 4. Generate — try candidates in ranked order until one succeeds.
+    # Each candidate: validate article, then up to 2 LLM attempts with feedback.
+    # Falls back to next candidate on any failure.
     t0 = time.time()
-    pattern = _select_viral_pattern(best, article_text)
-    pattern_name = {'a': 'A (Rule-Break)', 'b': 'B (deprecated)', 'c': 'C (Detail+Emotion)', 'd': 'D (Commentary)', 'e': 'E (Pressure-Cooker)', 'f': 'F (Behind-the-Scenes)'}[pattern]
-    log(f"   🎯 Viral pattern: {pattern_name}")
     hooks_str = ", ".join(hooks) if isinstance(hooks, list) else hooks
-    evidence_plan = _evidence_plan(article_text)
-    if not evidence_plan:
-        log("⏸️ Skip — article lacks enough source evidence")
-        print("⏸️ Skip — article lacks enough source evidence", flush=True)
-        sys.exit(0)
-
-    all_errors = ""
-    gen_attempt = 1
     slides = None
     llm_time = 0.0
     passed = False
-    for gen_attempt in range(1, 3):
-        gen_t0 = time.time()
-        slides = generate_slides(
-            article_text, url,
-            title=best.get("title", ""),
-            source=best.get("source", ""),
-            hooks=hooks_str,
-            cta_pattern=cta_pattern,
-            tone=tone,
-            pattern=pattern,
-            evidence_plan=evidence_plan,
-            evaluator_feedback=all_errors,
-        )
-        gen_elapsed = time.time() - gen_t0
-        if not slides:
-            if gen_attempt == 1:
-                log("⏸️ Skip — generation failed on attempt 1")
-                print("⏸️ Skip — generation failed", flush=True)
-                sys.exit(0)
-            break
+    candidate_idx = 0
+    pattern = "a"  # default, always overwritten in loop when candidate valid
 
-        contract_errors = _slide_contract_errors(slides)
-        slides_text = " ".join(s["content"] for s in slides)
-        grounding_errors = grounding_check(slides_text, article_text, _extract_proper_nouns(article_text), _extract_stages(article_text))
-        number_errors = number_grounding_check(slides_text, article_text, _build_reference_data())
-        errors = contract_errors + grounding_errors + number_errors
-        if errors:
-            all_errors = "; ".join(errors)
-            log(f"   ⚠️ Checks failed (attempt {gen_attempt}): {all_errors}")
-            if gen_attempt == 1:
-                log("   🔁 Retrying with error feedback...")
-                continue  # try again
-            break  # failed on attempt 2
+    for candidate_idx in range(len(ranked[:15])):
+        candidate = ranked[candidate_idx]
+        art_text = candidate.get("_article_text", "")
+        art_url = candidate["url"]
+        art_image = candidate.get("_image_url", "")
+        art_title = candidate.get("title", "")
 
-        eval_t0 = time.time()
-        # Patterns E (Pressure Cooker) and F (Behind-the-Scenes) skip evaluator.
-        # Structural patterns hallucinate less and evaluator adds ~50s with false REVISE on
-        # natural tension narration. High-score posts (>80) also skip.
-        skip_eval = pattern in ("e", "f") or best.get("_score", 0) >= 80
-        if skip_eval:
-            log(f"   🔍 Evaluator: SKIP (pattern={pattern.upper()}, score={best.get('_score', 0)})")
-            # No evaluator — go straight to pass
-            pass
-        else:
-            eval_decision, eval_reasons = evaluator_check(slides, article_text, url)
-            eval_time = time.time() - eval_t0
-            log(f"   🔍 Evaluator: {eval_decision} ({eval_time:.1f}s) — {'; '.join(eval_reasons[:3])}")
-            # On attempt 1: retry on REVISE or REJECT. On attempt 2: only REJECT blocks.
-            if eval_decision == "REJECT" or (gen_attempt == 1 and eval_decision != "APPROVE"):
-                all_errors = "EVALUATOR: " + "; ".join(eval_reasons[:3])
-                log(f"   ⚠️ Evaluator rejected (attempt {gen_attempt}): {all_errors}")
+        # Validate article body
+        if not art_text or len(art_text) < 100:
+            log(f"   ❌ Candidate #{candidate_idx+1} too short — trying next")
+            continue
+        if _is_commercial_body(art_text):
+            log(f"   🛒 Candidate #{candidate_idx+1} is commercial — trying next")
+            continue
+        art_text = _story_text(art_text, art_title)
+        if not _high_risk_claim_allowed(art_text, candidate.get("source", "")):
+            log(f"   🚫 Candidate #{candidate_idx+1} high-risk non-tier-one — trying next")
+            continue
+        if len(art_text.strip()) < 1000 or len(art_text.split()) < 150:
+            log(f"   ⚠️ Candidate #{candidate_idx+1} too thin ({len(art_text)}c/{len(art_text.split())}w) — trying next")
+            continue
+        sentences = [s.strip() for s in re.split(r'[.!?]+', art_text) if len(s.strip()) > 20]
+        if len(sentences) < 5:
+            log(f"   ⚠️ Candidate #{candidate_idx+1} too few sentences ({len(sentences)}) — trying next")
+            continue
+
+        log(f"   🎯 Candidate #{candidate_idx+1}: '{art_title[:80]}' ({len(art_text)} chars)")
+
+        # Image priority
+        img_url = art_image
+        if not img_url and candidate.get("image_url"):
+            img_url = candidate["image_url"]
+            log(f"   🖼️ Fallback to RSS thumbnail")
+
+        pattern = _select_viral_pattern(candidate, art_text)
+        pattern_name = {'a': 'A (Rule-Break)', 'b': 'B (deprecated)', 'c': 'C (Detail+Emotion)', 'd': 'D (Commentary)', 'e': 'E (Pressure-Cooker)', 'f': 'F (Behind-the-Scenes)'}[pattern]
+        log(f"   🎯 Viral pattern: {pattern_name}")
+        evidence_plan = _evidence_plan(art_text)
+        if not evidence_plan:
+            log(f"   ⚠️ Candidate #{candidate_idx+1} lacks evidence — trying next")
+            continue
+
+        all_errors = ""
+        for gen_attempt in range(1, 3):
+            gen_t0 = time.time()
+            slides = generate_slides(
+                art_text, art_url,
+                title=art_title,
+                source=candidate.get("source", ""),
+                hooks=hooks_str,
+                cta_pattern=cta_pattern,
+                tone=tone,
+                pattern=pattern,
+                evidence_plan=evidence_plan,
+                evaluator_feedback=all_errors,
+            )
+            gen_elapsed = time.time() - gen_t0
+            if not slides:
                 if gen_attempt == 1:
-                    log("   🔁 Retrying with evaluator feedback...")
-                    continue  # try again
-                break  # failed on attempt 2
+                    log(f"   ⚠️ LLM empty (attempt 1), retrying...")
+                    all_errors = "LLM returned empty response"
+                    continue
+                log(f"   ❌ LLM empty (attempt 2) — trying next candidate")
+                break
 
-        # All checks passed
-        passed = True
-        llm_time = time.time() - t0
-        break  # success, exit retry loop
+            contract_errors = _slide_contract_errors(slides)
+            slides_text = " ".join(s["content"] for s in slides)
+            grounding_errors = grounding_check(slides_text, art_text, _extract_proper_nouns(art_text), _extract_stages(art_text))
+            number_errors = number_grounding_check(slides_text, art_text, _build_reference_data())
+            errors = contract_errors + grounding_errors + number_errors
+            if errors:
+                all_errors = "; ".join(errors)
+                log(f"   ⚠️ Checks failed (attempt {gen_attempt}): {all_errors}")
+                if gen_attempt == 1:
+                    log("   🔁 Retrying with error feedback...")
+                    continue
+                log("   ❌ Checks failed (attempt 2) — trying next candidate")
+                break
+
+            skip_eval = pattern in ("e", "f") or candidate.get("_score", 0) >= 80
+            if skip_eval:
+                log(f"   🔍 Evaluator: SKIP (pattern={pattern.upper()}, score={candidate.get('_score', 0)})")
+            else:
+                eval_t0 = time.time()
+                eval_decision, eval_reasons = evaluator_check(slides, art_text, art_url)
+                eval_time = time.time() - eval_t0
+                log(f"   🔍 Evaluator: {eval_decision} ({eval_time:.1f}s) — {'; '.join(eval_reasons[:3])}")
+                if eval_decision == "REJECT" or (gen_attempt == 1 and eval_decision != "APPROVE"):
+                    all_errors = "EVALUATOR: " + "; ".join(eval_reasons[:3])
+                    log(f"   ⚠️ Evaluator rejected (attempt {gen_attempt}): {all_errors}")
+                    if gen_attempt == 1:
+                        log("   🔁 Retrying with evaluator feedback...")
+                        continue
+                    log("   ❌ Evaluator rejected (attempt 2) — trying next candidate")
+                    break
+
+            # All checks passed
+            passed = True
+            llm_time = time.time() - t0
+            best = candidate
+            url = art_url
+            image_url = img_url
+            article_text = art_text
+            break  # success, exit retry loop
+
+        if passed:
+            break  # success, exit candidate loop
+        # Reset for next candidate — backoff to avoid rate limit spiral
+        slides = None
+        all_errors = ""
+        time.sleep(3 + random.random() * 2)  # 3-5s jitter between candidates
 
     if not passed:
-        log("⏸️ Skip — generated slides failed checks")
-        print("⏸️ Skip — generated slides failed checks", flush=True)
+        log("⏸️ Skip — all candidates failed generation")
+        print("⏸️ Skip — all candidates failed generation", flush=True)
         sys.exit(0)
 
 
