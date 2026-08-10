@@ -335,15 +335,21 @@ UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chr
 # ── 1. SCRAPE ───────────────────────────────────────────────────────
 
 def _http(url, timeout=8):
-    """Simple HTTP GET with requests, fallback to httpx."""
-    try:
-        r = requests.get(url, headers={"User-Agent": UA}, timeout=timeout, allow_redirects=True)
-        return r.status_code, r.text
-    except Exception:
-        import httpx
-        c = httpx.Client(headers={"User-Agent": UA}, timeout=timeout, follow_redirects=True, verify=False)
-        r = c.get(url)
-        return r.status_code, r.text
+    """Simple HTTP GET with requests, fallback to httpx. Retries on 202 (CDN gate)."""
+    for attempt in (1, 2):
+        try:
+            r = requests.get(url, headers={"User-Agent": UA}, timeout=timeout, allow_redirects=True)
+            if r.status_code == 202 and len(r.text) < 500 and attempt == 1:
+                time.sleep(1.5)  # CDN warming — Mirror does this
+                continue
+            return r.status_code, r.text
+        except Exception:
+            if attempt == 2:
+                import httpx
+                c = httpx.Client(headers={"User-Agent": UA}, timeout=timeout, follow_redirects=True, verify=False)
+                r = c.get(url)
+                return r.status_code, r.text
+    return 202, ""
 
 def scrape_rss(url, source, base_score=9):
     """RSS feed scraper."""
