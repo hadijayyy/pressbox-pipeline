@@ -1863,7 +1863,9 @@ def _slide_contract_errors(slides, editorial=True):
             errors.append(f"S{i} invalid length ({len(text)})")
         elif i == 6 and len(_source_units(text.split("\n\nhttp", 1)[0])) < 1:
             errors.append(f"S{i} needs at least 1 sentence")
-        elif i < 6 and len(_source_units(text.split("\n\nhttp", 1)[0])) < 2:
+        elif i == 1 and len(_source_units(text.split("\n\nhttp", 1)[0])) < 1:
+            errors.append(f"S1 needs at least 1 sentence")
+        elif 2 <= i <= 5 and len(_source_units(text.split("\n\nhttp", 1)[0])) < 2:
             errors.append(f"S{i} needs at least 2 sentences")
     return errors
 
@@ -1934,6 +1936,19 @@ If article is empty, truncated, contradictory, or too thin for six useful slides
 ## SINGLE STORY RULE
 One article = one story. Pick the strongest storyline from title + body together.
 For live blogs or multi-article roundups: IGNORE everything except the story in the title. All 6 slides follow ONE line. Never merge separate transfers, matches, or controversies.
+
+## EMOTIONAL ANCHOR — pick ONE before drafting
+Every slide pair must have an emotional anchor. Without it, the post is just a summary.
+Options (pick the strongest supported by source):
+- Schadenfreude — rival fan's worst nightmare
+- Vindication — "I told you so" energy, receipts exist
+- Betrayal — someone broke trust, crossed a line
+- FOMO — something is happening NOW and missing it means losing
+- Outrage — rules applied unfairly, double standard exposed
+- Nostalgia — past glory threatening to return
+- Absurdity — the numbers don't add up, the decision makes no sense
+- Fear — consequences that affect the fan's own club or player
+Anchor the S1 hook in this emotion. S6 should return to it for the payoff.
 
 ## VIRAL ELEMENTS (use only when source supports)
 Viral ≠ manufactured. Every element below must be supported by the source or a clearly
@@ -2094,14 +2109,16 @@ If source is insufficient return:
     # Pattern-specific arc template
     arc_templates = {
         "a": """## ARC: Rule-Break (Pattern A)
-S1 = VIRAL HOOK: "[Authority] just [broke/violated] its own [rule] for [Team A] vs [Team B]. [Concrete detail] — [Binary Q with irony/venue twist]"
-EXACTLY 2 sentences. Example: "FIFA just broke its own golden rule for England vs Argentina. The Mercedes-Benz logo stays — engineering nightmare or sponsor snub?"
+S1 = CURIOSITY HOOK: Name the authority, the rule they broke, and the specific consequence — all in one breath.
+Bad (vague): "FIFA just broke its own golden rule for England vs Argentina."
+Good (specific): "FIFA's own handbook says sponsors stay off the pitch. Then Mercedes-Benz appeared at Wembley. The rulebook went out the window."
+Open with the contradiction itself — authority vs its own standards. EXACTLY 1-2 punchy sentences. No generic "broke its own rule" — always name the specific rule.
 
-S2 = PHYSICAL DETAIL: ONE vivid detail — size, number, quote, timeline. NOT "what the rule says". Make reader imagine the scene.
-S3 = LORE + CONTEXT: The existing rule, affected sponsors, why this is a first.
-S4 = STAKES: Raise tension. Background context → real consequences for stakeholders.
-S5 = WHAT MAKES THIS UNIQUE: Why this bends the rule matters more than usual.
-S6 = BINARY: Question about interpretation or consequences using irony/venue twist. For sensitive topics (injuries/abuse/discrimination): reflective question per base rules.
+S2 = PHYSICAL DETAIL: ONE vivid detail — the logo, the banner, the document, the statement. Make the reader SEE it. NOT "what the rule says."
+S3 = LORE + CONTEXT: The existing rule, how long it stood, who it protected, why this is unprecedented.
+S4 = STAKES: Who loses? Who wins? What precedent does this set for the NEXT time?
+S5 = THE PATTERN: Has this authority done this before? Is this a one-off or a pattern?
+S6 = BRING IT HOME: "So what happens when [next team] asks for the same treatment?" Make it about the NEXT case — fear of what comes after. For sensitive topics (injuries/abuse/discrimination): reflective question per base rules.
 
 """,
         "b": """## ARC: Contradiction (Pattern B)
@@ -2116,20 +2133,28 @@ S6 = BINARY: "Is this [excuse] or [underlying issue]?" — name two interpretati
 
 """,
         "c": """## ARC: Detail+Emotion (Pattern C)
-S1 = HOOK: Core conflict or surprising detail. Use "Revealed", "Admitted", or opinion framing. EXACTLY 2 sentences.
-S2 = DATA: The specific number, quote, or report driving the story.
-S3 = CONTEXT: Background making the data meaningful.
-S4 = STAKEHOLDER: Affected party — player, club, fans, league.
-S5 = IRONY: Why this is unexpected, contradictory, or ironic.
-S6 = BINARY: Question about future implications or interpretation. For sensitive topics (injuries/abuse/discrimination): reflective question per base rules.
+S1 = CURIOSITY HOOK: Lead with the specific number, decision, or human-cost detail.
+Bad (vague): "Sources close to the negotiations have revealed the asking price."
+Good (specific): "€150m. That's the number Barcelona slapped on Pedri after City's approach."
+If article has a €/£/US$ figure, a concrete deadline (hours/days), or a life-changing consequence — lead with it. EXACTLY 1-2 sentences. No "Revealed" or "Admitted" unless the REVELATION is the hook.
+
+S2 = DATA: The specific number, quote, or report driving the story. Make it tangible.
+S3 = CONTEXT: Background making the data meaningful — comparison, precedent, or timing.
+S4 = STAKEHOLDER: Affected party — player, club, fans, league. Humanize it. Who loses sleep over this?
+S5 = IRONY: Why this is unexpected, contradictory, or the opposite of what fans assumed.
+S6 = CIRCLE BACK: Question that references the S1 detail. "€150m — worth it, or Barcelona pricing him out on purpose?" For sensitive topics (injuries/abuse/discrimination): reflective question per base rules.
 """,
         "e": """## ARC: Pressure Cooker (Pattern E)
-S1 = HOOK: "[Player/Manager] [not happy/fumes/speaks out] after [event]. [Reaction] — [Binary Q about future]" EXACTLY 2 sentences.
+S1 = CURIOSITY HOOK: Name the person + the tension signal + the trigger.
+Bad (flat): "Erling Haaland was not happy after Norway's late collapse."
+Good (curiosity gap): "Erling Haaland walked straight past the cameras. Didn't stop. Didn't speak. Two words to a teammate, then gone. That silence says more than any interview."
+Open with a VIVID moment — walked out, refused to train, deleted social media, silent treatment. Let the visual do the work. EXACTLY 1-2 sentences.
+
 S2 = TENSION CONTEXT: What triggered the reaction. Specific incident/decision/quote.
-S3 = WHO'S INVOLVED: Other parties — teammates, board, fans, media.
-S4 = STAKES: What happens if tension escalates. Job, transfer, board meeting?
-S5 = WHAT'S UNIQUE: History, contract situation, timing making this matter more.
-S6 = BINARY: "[Option specific to this tension] or [option specific to this tension]?" For sensitive topics (injuries/abuse/discrimination): reflective question per base rules.
+S3 = PLAYERS INVOLVED: Other parties — teammates, board, fans, media. Who benefits if this blows up?
+S4 = STAKES: What happens if tension escalates. Job, transfer, board meeting, dressing room fracture.
+S5 = HISTORY: Has this happened before? Pattern or one-off? Contract situation, past friction.
+S6 = BRING IT HOME: "[Name] has a decision to make. [Option A] or [Option B]?" For sensitive topics (injuries/abuse/discrimination): reflective question per base rules.
 """,
         "f": """## ARC: Behind-the-Scenes (Pattern F)
 S1 = HOOK: "Why [team/authority] [did/decided] [specific thing]. [Detail] — [Binary Q]" EXACTLY 2 sentences.
@@ -2140,12 +2165,17 @@ S5 = THE REAL STORY: What this reveals about the organization behind the scenes.
 S6 = BINARY: "Will [factor] affect [result], or is it just [dismissive explanation]?" For sensitive topics (injuries/abuse/discrimination): reflective question per base rules.
 """,
         "d": """## ARC: Commentary (Pattern D)
-S1 = HOOK: The quote/opinion/claim driving the story. Name the speaker. "Revealed", "Admitted", "Says" framing. EXACTLY 2 sentences.
-S2 = THE QUOTE: Exact quote or specific claim. Attribute clearly.
-S3 = CONTEXT: Why this person's opinion matters — their role, history, or stake.
-S4 = COUNTERPOINT: Opposition, rebuttal, or nuance. Who disagrees and why.
-S5 = STAKES: How this opinion affects real decisions. Transfer, selection, policy.
-S6 = BINARY: Question about whether the opinion will hold up or be acted on. For sensitive topics (injuries/abuse/discrimination): reflective question per base rules.
+S1 = CURIOSITY HOOK: The strongest implication from the quote, NOT restating the quote.
+Bad (reporting): "Frank Leboeuf has backed Arsenal to retain the Premier League title."
+Good (curiosity gap): "Arsenal's biggest rival just endorsed them. That should terrify Mikel Arteta."
+Rule: if article has a number in S1 position, LEAD with it. "£80m. For a player his own manager calls 'not ready.' The Salah replacement plan just got messy."
+EXACTLY 1-2 punchy sentences. Open with: name, number, or contradiction. Never "X says Y."
+
+S2 = THE CLAIM: Exact quote or specific claim. Attribute clearly. What was actually said.
+S3 = WHY THIS PERSON: Why their words carry weight — role, history, track record, or stake in the outcome.
+S4 = THE UNSAID: What the quote implies but doesn't say. Between-the-lines reading, framed as interpretation. "Reading between the lines, this sounds like..."
+S5 = STAKES + RECEIPTS: How this affects real decisions. Transfer, selection, contract, morale. Use a specific downstream effect.
+S6 = CIRCLE BACK: Reference S1's tension with a sharp question. "So which is it — genuine belief, or damage control?" Name two real interpretations. For sensitive topics (injuries/abuse/discrimination): reflective question per base rules.
 """,
     }
     # Pattern templates force unsupported conflict and inference; source facts take priority.
@@ -2166,7 +2196,7 @@ S6 = BINARY: Question about whether the opinion will hold up or be acted on. For
         f"  <source_url>{url}</source_url>\n</primary_article>\n\n"
         f"<EVIDENCE_PACK>\n{_evidence_pack(article_text)}\n</EVIDENCE_PACK>\n\n"
         f"<SLIDE_EVIDENCE>\n{assignments}\n</SLIDE_EVIDENCE>\n\n"
-        "Each slide must contain exactly two complete sentences. Each sentence must be a faithful,"
+        "Each slide must contain at least one complete sentence grounded in its assigned evidence. S1 may be 1-2 punchy sentences. Other slides: at least 2 sentences preferred, but 1 is acceptable when the evidence is dense. Each sentence must be a faithful,"
         " non-escalating paraphrase of its slide's assigned evidence only. Do not add a question"
         " unless one assigned sentence supports both outcomes.\n\n"
         f"{ref_data}\n\n{_number_hook_rule(article_text)}\n\n{_editorial_constraints()}")
