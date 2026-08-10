@@ -569,3 +569,15 @@ def score_topic(t: dict) -> int:
     return total
 
 
+def select_best_candidate(articles, top_n=1, threshold=60):
+    """Return valid candidates as (score, article), highest score first."""
+    scored = []
+    for article in articles or []:
+        if not isinstance(article, dict) or not article.get("title") or not article.get("url"):
+            continue
+        score = score_topic(article)
+        if score >= threshold:
+            scored.append((score, article))
+    return sorted(scored, key=lambda item: item[0], reverse=True)[:top_n]
+
+

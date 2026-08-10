@@ -4,6 +4,7 @@ Covers all 11 categories + priority order + edge cases.
 Regression test for the 22 Jun 2026 classifier expansion
 (managerial_change, VAR keywords, etc).
 """
+import inspect
 import sys
 from pathlib import Path
 
@@ -26,6 +27,70 @@ def _load_mvp():
 def test_number_hook_rule_does_not_force_unsourced_numbers():
     mvp = _load_mvp()
     assert "NUMBER is optional unless explicitly supported by the article" in mvp._number_hook_rule("Rodri could join Madrid.")
+
+
+def test_number_grounding_accepts_mojibake_currency_from_article():
+    mvp = _load_mvp()
+    assert not mvp.number_grounding_check("Arsenal paid £75m.", "Arsenal paid Â£75m.", "")
+
+
+def test_slide_contract_requires_two_source_grounded_sentences_per_slide():
+    mvp = _load_mvp()
+    slides = [{"content": "One supported source sentence."}] * 6
+    assert "S1 needs at least 2 sentences" in mvp._slide_contract_errors(slides)
+
+
+def test_slide_contract_accepts_two_sentences_per_slide():
+    mvp = _load_mvp()
+    slides = [{"content": "One supported source sentence. A second supported source sentence."}] * 6
+    assert not mvp._slide_contract_errors(slides)
+
+
+def test_slide_contract_keeps_450_char_limit():
+    mvp = _load_mvp()
+    overlength = [{"content": "One."}] * 5 + [{"content": "x" * 451}]
+    assert "S6 invalid length (451)" in mvp._slide_contract_errors(overlength)
+
+
+def test_main_uses_one_candidate_and_one_final_evaluator():
+    mvp = _load_mvp()
+    source = inspect.getsource(mvp.main)
+    assert "for article_attempt" not in source
+    assert "for eval_round" not in source
+    assert "_extractive_slides" not in source
+    assert source.count("evaluator_check(") == 1
+
+
+def test_high_risk_transfer_claim_requires_tier_one_source():
+    mvp = _load_mvp()
+    text = "The clubs agreed a £75m transfer fee for the midfielder."
+    assert not mvp._high_risk_claim_allowed(text, "Goal")
+    assert mvp._high_risk_claim_allowed(text, "BBC Sport")
+    assert mvp._high_risk_claim_allowed("The midfielder trained with his club.", "Goal")
+
+
+def test_high_risk_candidate_is_skipped_for_next_eligible_article():
+    mvp = _load_mvp()
+    source = inspect.getsource(mvp.main)
+    assert 'ranked = [topic for topic in ranked if _high_risk_claim_allowed(' in source
+    assert 'topic.get("_article_text", ""), topic.get("source", ""))]' in source
+    assert 'print("⏸️ Skip — no tier-one source for high-risk claim", flush=True)\n        sys.exit(0)' in source
+    assert source.index('ranked = [topic for topic in ranked if _high_risk_claim_allowed(') < source.index('best = ranked[0]')
+
+
+def test_generated_output_rejection_is_normal_skip_not_failure():
+    mvp = _load_mvp()
+    source = inspect.getsource(mvp.main)
+    block = source[source.index('if errors:'):source.index('final_contract_errors')]
+    assert 'print("⏸️ Skip — generated slides failed checks", flush=True)' in block
+    assert 'print("⏸️ Skip — evaluator did not approve", flush=True)' in block
+    assert block.count('sys.exit(0)') == 2
+    assert 'sys.exit(1)' not in block
+
+
+def test_space_sentences_collapses_literal_backslash_newline():
+    mvp = _load_mvp()
+    assert mvp._space_sentences('He said, "First fact."\\nSecond fact.') == 'He said, "First fact." Second fact.'
 
 
 def test_evaluator_is_required_for_every_generated_post():
@@ -91,52 +156,97 @@ def test_evidence_pack_is_numbered_and_preserves_source_sentences():
     assert "[E2] Second fact was reported." in pack
 
 
-def test_extractive_slides_use_source_sentences():
+def test_extractive_slides_reject_one_sentence_per_slide():
     mvp = _load_mvp()
-    article = " ".join(f"Source sentence number {i} has enough words to become a slide." for i in range(1, 8))
-    slides = mvp._extractive_slides(article, "https://example.com")
-    assert len(slides) == 6
-    assert slides[0]["content"] == "Source sentence number 1 has enough words to become a slide."
-    assert slides[-1]["content"].endswith("https://example.com")
+    article = " ".join(f"Source sentence number {i} has enough words to become a slide." for i in range(1, 7))
+    assert mvp._extractive_slides(article, "https://example.com") is None
 
 
 def test_extractive_slides_skip_long_sentences_and_preserve_source_text():
     mvp = _load_mvp()
     url = "https://example.com/story"
     long = "This source sentence is deliberately too long " + ("word " * 100) + "to fit a Threads slide."
-    valid = [f"Source sentence number {i} has enough words and remains short for a slide." for i in range(1, 8)]
+    valid = [f"Source sentence number {i} has enough words and remains short for a slide." for i in range(1, 13)]
     article = " ".join([long, *valid])
     slides = mvp._extractive_slides(article, url)
-    assert len(slides) == 6
-    assert all(len(s["content"].replace("\n\n" + url, "")) <= 400 for s in slides)
-    assert all(s["content"].replace("\n\n" + url, "") in article for s in slides)
-    assert slides[-1]["content"].endswith(url)
+    assert slides and not mvp._extractive_audit_errors(slides, article)
 
 
-def test_extractive_slides_fall_back_to_clean_body_when_entity_subset_is_thin():
+def test_extractive_slides_need_twelve_source_sentences():
     mvp = _load_mvp()
     article = " ".join([
         "Arsenal and Bruno Guimaraes appear in this only related source sentence.",
-        *[f"Clean source sentence {i} has enough words and remains literal article evidence." for i in range(1, 8)],
+        *[f"Clean source sentence {i} has enough words and remains literal article evidence." for i in range(1, 12)],
     ])
-    slides = mvp._extractive_slides(article, "https://example.com", "Arsenal Bruno Guimaraes")
-    assert len(slides) == 6
-    assert "Clean source sentence 1" in slides[1]["content"]
+    assert mvp._extractive_slides(article, "https://example.com", "Arsenal Bruno Guimaraes")
 
 
-def test_extractive_slides_prioritize_title_entities():
+def test_source_units_keep_quote_together_and_drop_open_quote_fragment():
     mvp = _load_mvp()
-    article = (
-        "Unrelated advertisement contains enough words to look like a story but is irrelevant. "
-        "Arsenal target Bruno Guimaraes has enough words in source sentence one. "
-        "Bruno Guimaraes is expected at Arsenal training according to this source sentence. "
-        "Arsenal discussed Bruno Guimaraes with Newcastle in this source sentence. "
-        "Newcastle captain Bruno Guimaraes appears again in this source sentence. "
-        "Arsenal and Bruno Guimaraes remain central in this source sentence. "
-        "Final Arsenal Bruno Guimaraes source sentence supplies six factual slides."
-    )
-    slides = mvp._extractive_slides(article, "https://example.com", "Arsenal Bruno Guimaraes")
-    assert "Arsenal target Bruno Guimaraes" in slides[0]["content"]
+    article = ('Iraola said, "We played a good first half. Right now we have work to do." '
+               'Liverpool face Como next weekend. "This unfinished quote must not publish.')
+    units = mvp._source_units(article)
+    assert units == ['Iraola said, "We played a good first half. Right now we have work to do."',
+                     'Liverpool face Como next weekend.']
+
+
+def test_fallback_evidence_rejects_attribution_only_and_quote_without_speaker():
+    mvp = _load_mvp()
+    facts = [
+        "Iraola said, \"We have plenty of work to do before the next match.\"",
+        "Iraola told LFC TV after the match.",
+        "\"We have work to do.\"",
+        *[f"Verified source fact {i} contains enough context for a clean slide." for i in range(1, 7)],
+    ]
+    selected = mvp._fallback_evidence(facts)
+    assert "Iraola told LFC TV after the match." not in selected
+    assert '"We have work to do."' not in selected
+    assert 'Iraola said, "We have plenty of work to do before the next match."' in selected
+
+
+def test_fallback_evidence_prefers_compact_complete_source_units():
+    mvp = _load_mvp()
+    long = "Player Name gave a very long source explanation " + ("with extra context " * 35) + "after the match."
+    facts = [
+        long,
+        *[f"Verified source fact {i} contains enough context for a clean carousel slide." for i in range(1, 7)],
+    ]
+    selected = mvp._fallback_evidence(facts)
+    assert long not in selected[:6]
+
+
+def test_narrative_fallback_keeps_source_order_after_compact_selection():
+    mvp = _load_mvp()
+    article = " ".join([
+        "Opening source fact gives readers the story context in clear terms.",
+        "Second source fact explains why this development matters to the club.",
+        "This source sentence is deliberately too long " + ("with repetitive context " * 40) + "to use cleanly.",
+        "Third source fact keeps the same story moving without changing subject.",
+        "Fourth source fact adds a named detail from the original report.",
+        "Fifth source fact preserves the source uncertainty around the next step.",
+        "Sixth source fact closes the reported sequence with a clear outcome.",
+        "Seventh source fact is available if one earlier detail is unsuitable.",
+    ])
+    facts = mvp._narrative_fallback_evidence(article)
+    assert facts == [
+        "Opening source fact gives readers the story context in clear terms.",
+        "Second source fact explains why this development matters to the club.",
+        "Third source fact keeps the same story moving without changing subject.",
+        "Fourth source fact adds a named detail from the original report.",
+        "Fifth source fact preserves the source uncertainty around the next step.",
+        "Sixth source fact closes the reported sequence with a clear outcome.",
+        "Seventh source fact is available if one earlier detail is unsuitable.",
+    ]
+
+
+def test_assigned_evidence_maps_each_slide_to_two_planned_units():
+    mvp = _load_mvp()
+    article = " ".join(f"Verified fact {i} gives enough source context for a carousel slide." for i in range(1, 13))
+    plan = mvp._evidence_plan(article)
+    assigned = mvp._assigned_evidence(article, plan)
+    assert all(len(facts) == 2 for facts in assigned.values())
+    assert sorted(fact for facts in assigned.values() for fact in facts) == sorted(mvp._ranked_evidence(article)[:12])
+    assert len(assigned) == 6
 
 
 def test_story_text_falls_back_to_clean_body_when_entity_subset_is_thin():

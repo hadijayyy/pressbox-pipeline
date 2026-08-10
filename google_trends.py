@@ -5,8 +5,6 @@ import json, time, sys, re, os
 from urllib.request import urlopen, Request
 
 TRENDS_URL = "https://trends.google.com/trending/rss?geo=GB"
-# Daily trends API (no category filter — filtered by keyword matching instead)
-DAILY_URL = "https://trends.google.com/trends/api/dailytrends?hl=en-GB&geo=GB&ns=15"
 
 CACHE_FILE = os.path.expanduser("~/.hermes/pressbox-pipeline/.trends_cache.json")
 CACHE_TTL = 1800  # 30 min
@@ -19,34 +17,6 @@ def fetch_google_trends():
         "Accept": "application/json, text/plain, */*"
     }
     
-    try:
-        # Method 1: Try daily trends API (structured, more reliable)
-        req = Request(DAILY_URL, headers=headers)
-        raw = urlopen(req, timeout=15).read().decode("utf-8", errors="replace")
-        
-        # Google returns: )]}'\n{json}
-        if raw.startswith(")]}'"):
-            raw = raw[5:].strip()
-        data = json.loads(raw)
-        
-        trends = []
-        for day in data.get("default", {}).get("trendingSearchesDays", []):
-            for search in day.get("trendingSearches", []):
-                title = search.get("title", {}).get("query", "")
-                traffic = search.get("formattedTraffic", "")
-                articles = search.get("articles", [])
-                news_count = len(articles)
-                score = _parse_traffic(traffic) + (news_count * 2)
-                if title:
-                    trends.append((title, score, news_count))
-        
-        if trends:
-            trends.sort(key=lambda t: -t[1])
-            return _to_output(trends)
-    except Exception as e:
-        print(f"[trends] Daily API failed: {e}", file=sys.stderr)
-    
-    # Method 2: RSS fallback
     try:
         req = Request(TRENDS_URL, headers=headers)
         raw = urlopen(req, timeout=15).read().decode("utf-8", errors="replace")
