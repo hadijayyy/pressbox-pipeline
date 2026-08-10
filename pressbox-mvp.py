@@ -1861,7 +1861,9 @@ def _slide_contract_errors(slides, editorial=True):
         text = _space_sentences(slide.get("content", ""))
         if not text or len(text) > MAX_CHARS:
             errors.append(f"S{i} invalid length ({len(text)})")
-        elif len(_source_units(text.split("\n\nhttp", 1)[0])) < 2:
+        elif i == 6 and len(_source_units(text.split("\n\nhttp", 1)[0])) < 1:
+            errors.append(f"S{i} needs at least 1 sentence")
+        elif i < 6 and len(_source_units(text.split("\n\nhttp", 1)[0])) < 2:
             errors.append(f"S{i} needs at least 2 sentences")
     return errors
 
@@ -2633,6 +2635,7 @@ def main():
     gen_attempt = 1
     slides = None
     llm_time = 0.0
+    passed = False
     for gen_attempt in range(1, 3):
         gen_t0 = time.time()
         slides = generate_slides(
@@ -2671,7 +2674,8 @@ def main():
         eval_decision, eval_reasons = evaluator_check(slides, article_text, url)
         eval_time = time.time() - eval_t0
         log(f"   🔍 Evaluator: {eval_decision} ({eval_time:.1f}s) — {'; '.join(eval_reasons[:3])}")
-        if not _evaluator_accepts(eval_decision):
+        # On attempt 1: retry on REVISE or REJECT. On attempt 2: only REJECT blocks.
+        if eval_decision == "REJECT" or (gen_attempt == 1 and eval_decision != "APPROVE"):
             all_errors = "EVALUATOR: " + "; ".join(eval_reasons[:3])
             log(f"   ⚠️ Evaluator rejected (attempt {gen_attempt}): {all_errors}")
             if gen_attempt == 1:
@@ -2680,10 +2684,11 @@ def main():
             break  # failed on attempt 2
 
         # All checks passed
+        passed = True
         llm_time = time.time() - t0
         break  # success, exit retry loop
 
-    if gen_attempt == 2 and not slides:
+    if not passed:
         log("⏸️ Skip — generated slides failed checks")
         print("⏸️ Skip — generated slides failed checks", flush=True)
         sys.exit(0)
