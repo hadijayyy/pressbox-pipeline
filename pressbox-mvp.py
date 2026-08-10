@@ -103,6 +103,213 @@ _load_ring()
 
 from pressbox_common import WIB, HOME, POSTED, load_env, log, clean_words, is_similar, classify_topic_type
 from pressbox_scoring import score_topic as base_score_topic
+
+# ── FEEDBACK LOOP: AUTO-GENERATED PROMPT LEARNINGS ──
+RECENT_LEARNINGS_PATH = f"{HOME}/.hermes/pressbox/recent_learnings.txt"
+
+
+def _load_recent_learnings():
+    """Load auto-generated engagement learnings for prompt injection.
+    Expires after 48 hours to avoid stale advice."""
+    try:
+        if os.path.exists(RECENT_LEARNINGS_PATH):
+            with open(RECENT_LEARNINGS_PATH) as f:
+                learnings = f.read().strip()
+            mtime = os.path.getmtime(RECENT_LEARNINGS_PATH)
+            if time.time() - mtime > 48 * 3600:
+                return ""
+            return learnings
+    except Exception:
+        pass
+    return ""
+
+
+def _analyze_posts_for_learnings(posts):
+    """Analyze top vs bottom performing posts. Return learnings string for prompt injection."""
+    if len(posts) < 10:
+        return ""
+
+    ranked = sorted(posts, key=lambda p: p.get("views", 0), reverse=True)
+    median = ranked[len(ranked) // 2].get("views", 0) or 1
+    qtr = max(3, len(ranked) // 4)
+
+    top = [p for p in ranked[:qtr] if p.get("views", 0) >= median * 1.3]
+    bottom = [p for p in ranked[-qtr:] if p.get("views", 0) < median * 0.5]
+
+    if len(top) < 3 or len(bottom) < 3:
+        return ""
+
+    rules = []
+    from collections import Counter
+
+    # Entity analysis: which names drive views?
+    entity_re = re.compile(r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b')
+    junk = {"The", "For", "And", "With", "From", "After", "World Cup", "Premier League", "Champions League"}
+
+    def _get_entities(post_list):
+        names = []
+        for p in post_list:
+            title = p.get("title", "")
+            names.extend(e for e in entity_re.findall(title) if e not in junk)
+        return Counter(names)
+
+    top_ents = _get_entities(top)
+    bottom_ents = _get_entities(bottom)
+
+    for entity, count in top_ents.most_common(8):
+        bcount = bottom_ents.get(entity, 0)
+        if count >= 2 and count >= bcount * 2:
+            mult = int(count / max(bcount, 1))
+            rules.append(
+                f"- Posts mentioning {entity} average {mult}x more views. "
+                f"Lead S1 with {entity} when they appear in the article."
+            )
+
+    # Source analysis
+    top_src = Counter(p.get("source", "") for p in top)
+    bottom_src = Counter(p.get("source", "") for p in bottom)
+    for src, count in top_src.most_common(3):
+        bcount = bottom_src.get(src, 0)
+        if count >= 2 and count >= bcount * 1.5:
+            mult = int(count / max(bcount, 1))
+            rules.append(
+                f"- {src.title()} articles perform {mult}x better. "
+                f"Prioritize {src.title()} headlines when available."
+            )
+
+    # S1 hook length analysis
+    def _s1_words(p):
+        slides = p.get("slides", [])
+        if slides and len(slides) > 0:
+            s1 = slides[0]
+            text = s1 if isinstance(s1, str) else s1.get("content", "")
+            return len(text.split())
+        return 0
+
+    top_lens = [l for p in top if (l := _s1_words(p)) > 0]
+    bottom_lens = [l for p in bottom if (l := _s1_words(p)) > 0]
+
+    if top_lens and bottom_lens:
+        avg_top = sum(top_lens) / len(top_lens)
+        avg_bot = sum(bottom_lens) / len(bottom_lens)
+        if avg_top < avg_bot * 0.8:
+            rules.append(
+                f"- Short S1 hooks ({avg_top:.0f}w avg) outperform long ones ({avg_bot:.0f}w). "
+                f"Keep S1 punchy — {int(avg_top + 5)} words max."
+            )
+        elif avg_top > avg_bot * 1.3:
+            rules.append(
+                f"- Detail-rich S1 hooks ({avg_top:.0f}w avg) outperform short ones ({avg_bot:.0f}w). "
+                f"Pack specifics into S1."
+            )
+
+    # View distribution — log the gap
+    top_avg = sum(p.get("views", 0) for p in top) / len(top)
+    bottom_avg = sum(p.get("views", 0) for p in bottom) / len(bottom)
+    ratio = top_avg / max(bottom_avg, 1)
+    log(f"   📈 Learnings: {len(top)} top (avg {top_avg:.0f}) vs {len(bottom)} bottom ({bottom_avg:.0f}) → ratio {ratio:.1f}x")
+
+    if not rules:
+        return ""
+
+    lines = [
+        "The following patterns were observed in recent post performance data.",
+        "Adjust your drafting to follow these patterns when the source supports it.",
+    ]
+    lines.extend(rules)
+    return "\n".join(lines)
+
+
+def _update_recent_learnings():
+    """Analyze engagement data and generate RECENT LEARNINGS for prompt injection.
+    Called from get_analytics_summary() after ring update."""
+    try:
+        with open(POSTED) as f:
+            data = json.load(f)
+    except Exception:
+        return
+
+    topics = data.get("topics", [])
+    with_metrics = [t for t in topics if t.get("views") is not None and t.get("views", 0) > 0]
+
+    if len(with_metrics) < 10:
+        return
+
+    learnings = _analyze_posts_for_learnings(with_metrics)
+
+    if learnings:
+        try:
+            os.makedirs(os.path.dirname(RECENT_LEARNINGS_PATH), exist_ok=True)
+            with open(RECENT_LEARNINGS_PATH, "w") as f:
+                f.write(learnings)
+            log(f"🧠 Recent learnings updated ({len(learnings.split(chr(10)))} rules)")
+        except Exception:
+            pass
+
+
+# ── 4-PILLAR TAXONOMY (user-defined engagement pillars) ──
+
+def _pillar_from_pattern(pattern):
+    """Map pipeline pattern to user-defined engagement pillar.
+    Pillar A: Hot Takes & Unpopular Opinions (Patterns A+E: Rule-Break, Pressure Cooker)
+    Pillar B: Stat-Bomb / Tactical Reality Check (Pattern C: Detail+Emotion)
+    Pillar C: Nostalgia & Forgotten Football Lore (Pattern F: Behind-the-Scenes)
+    Pillar D: Transfer Market / Live Matchday Banter (Pattern D: Commentary)
+    """
+    return {
+        'a': 'Hot Take', 'e': 'Hot Take',
+        'c': 'Stat-Bomb',
+        'f': 'Nostalgia',
+        'd': 'Transfer/Matchday',
+        'b': 'Hot Take',
+    }.get(pattern, 'Hot Take')
+
+
+def _predict_engagement_trigger(topic, pattern, article_text=""):
+    """Generate prediction of WHY this post will get engagement.
+    Returns a short string like 'Hot Take: Bellingham appeal, binary Q = replies'."""
+    title = (topic.get("title") or "").lower()
+    pillar = _pillar_from_pattern(pattern)
+    triggers = []
+
+    # Name-drop trigger: star player or big club in S1 = instant recognition
+    big_names = ["messi", "ronaldo", "mbappe", "haaland", "bellingham", "salah",
+                 "kane", "vinicius", "yamal", "pedri", "gavi", "palmer", "saka",
+                 "foden", "odegaard", "rodri", "arsenal", "liverpool", "manchester",
+                 "chelsea", "barcelona", "real madrid", "bayern", "psg", "juventus"]
+    name_hits = [n for n in big_names if n in title]
+    if name_hits:
+        triggers.append(f"{name_hits[0].title()} appeal")
+
+    # Binary Q trigger: forced-choice = replies
+    if pattern in ('a', 'c', 'd', 'e', 'f'):
+        triggers.append("binary Q = replies")
+
+    # Controversy trigger
+    controversy_words = ["slams", "blasts", "furious", "row", "rift", "feud",
+                         "scandal", "controversy", "under fire", "not happy"]
+    if any(w in title for w in controversy_words):
+        triggers.append("controversy = shares")
+
+    # Number trigger: specific stat = saves
+    if any(w in title for w in ["£", "$", "€", "million", "billion", "fee"]):
+        triggers.append("money = saves")
+
+    # Nostalgia trigger
+    nostalgia_words = ["remember", "forgotten", "almost signed", "what if",
+                       "retro", "legend", "prime", "peak", "iconic"]
+    if any(w in title for w in nostalgia_words):
+        triggers.append("nostalgia = engagement")
+
+    # Transfer trigger: FOMO
+    transfer_words = ["transfer", "bid", "offer", "contract", "signs", "signed",
+                      "deal", "agreed", "release clause"]
+    if any(w in title for w in transfer_words):
+        triggers.append("transfer = FOMO")
+
+    return f"{pillar}: {' + '.join(triggers[:3])}" if triggers else f"{pillar}: natural curiosity"
+
+
 import requests
 from bs4 import BeautifulSoup
 # External hot topic detection
@@ -703,6 +910,7 @@ def get_analytics_summary():
         summary['score_tuning'] = _compute_score_tuning(with_metrics, median_views)
 
     _update_ring(topics)  # feed latest views into engagement ring buffer
+    _update_recent_learnings()  # analyze engagement → auto-inject prompt learnings
     return summary
 
 def _compute_score_tuning(posts, median_views):
@@ -1890,155 +2098,6 @@ def generate_slides(article_text, url, title="", source="", hooks="", cta_patter
 
     article_text = _story_text(article_text, title)
     # ── Build system prompt dynamically ──
-    base = """## INSTRUCTION PRIORITY (override order)
-When instructions compete, follow this order:
-1. Factual accuracy and source integrity.
-2. Safety, fairness, preservation of uncertainty.
-3. One-story coherence.
-4. Clarity and reader comprehension.
-5. Narrative tension and retention.
-6. Brand voice and engagement.
-7. Pattern or style preferences.
-Never sacrifice accuracy for viral pattern, punchline, word limit, or engagement goal.
-
-## IDENTITY
-You are the editorial content engine for @parkthebus.football.
-Write like a sharp, well-informed football fan who reads too much football news. You are NOT a journalist, bot, tabloid, or tactical analyst.
-
-Your audience = global English-speaking casual football fans. They recognize major players, clubs, managers, and competitions. They scroll fast. They want story + drama + stakes — no fluff.
-
-## PRIMARY OBJECTIVE
-Turn one football news article into a six-slide Threads post that:
-1. Stops the scroll with a specific, factual hook.
-2. Makes the story understandable without reading the source.
-3. Escalates tension or significance across slides.
-4. Preserves exactly what the source establishes.
-5. Ends with a factual story-specific question only if the source supports two real outcomes.
-
-## EDITORIAL LENS (optional; source-supported only)
-- Expose a contradiction or double standard.
-- Explain why one overlooked detail changes the story.
-- Challenge a popular fan assumption with supported evidence.
-- Reveal human stakes behind a headline.
-- Turn a complicated issue into a fair, sharp argument.
-Do not manufacture conflict when evidence does not support it.
-
-## SOURCE VALIDATION (silent pre-draft check)
-1. Title and body refer to the same main story.
-2. Body has enough supported info for six slides.
-3. Central claim is attributable to a named source.
-4. Rumours, allegations, predictions, and confirmed facts are distinguishable.
-If article is empty, truncated, contradictory, or too thin for six useful slides: produce nothing. Never pad weak input with invented context.
-
-## EVIDENCE RULES
-- Draft from the numbered EVIDENCE PACK below, not from memory or a viral template.
-- Every slide sentence must preserve the meaning of one or more evidence lines. Omit a point if no evidence line supports it.
-- Every factual claim must be supported by: the article, factual reference data below, or external sources supplied by tools.
-- Preserve uncertainty exactly: "could", "reportedly", "expected", "alleged" must NOT become confirmed facts.
-- Do not replace source terms with stronger or different terms. Keep "private investors", not "private equity"; "unveiled", not "dropped"; and preserve "reportedly".
-- Prefer paraphrase over direct quotes. Exact quote only when precise wording matters.
-- **NEVER invent:** quote, fee, valuation, age, date, statistic, injury, incident, motive, tactical reason, or consequence.
-- Do NOT calculate ages, future ages, fees, percentages, or time intervals unless explicitly provided in reference data below.
-- Do NOT infer private motives or emotions. Frame analysis as interpretation: "That makes this feel..." / "The bigger issue is..."
-- When listing part of a longer list: use "including" or "among them". Never imply completeness.
-- Attribute the main source once — normally in slide 2, 3, or 4. Not slide 1 unless the source itself is the story.
-- External knowledge: ONLY for slide 6 irony. Must be common knowledge (stadium name, famous club history, iconic player).
-
-## SINGLE STORY RULE
-One article = one story. Pick the strongest storyline from title + body together.
-For live blogs or multi-article roundups: IGNORE everything except the story in the title. All 6 slides follow ONE line. Never merge separate transfers, matches, or controversies.
-
-## EMOTIONAL ANCHOR — pick ONE before drafting
-Every slide pair must have an emotional anchor. Without it, the post is just a summary.
-Options (pick the strongest supported by source):
-- Schadenfreude — rival fan's worst nightmare
-- Vindication — "I told you so" energy, receipts exist
-- Betrayal — someone broke trust, crossed a line
-- FOMO — something is happening NOW and missing it means losing
-- Outrage — rules applied unfairly, double standard exposed
-- Nostalgia — past glory threatening to return
-- Absurdity — the numbers don't add up, the decision makes no sense
-- Fear — consequences that affect the fan's own club or player
-Anchor the S1 hook in this emotion. S6 should return to it for the payoff.
-
-## VIRAL ELEMENTS (use only when source supports)
-Viral ≠ manufactured. Every element below must be supported by the source or a clearly
-attributed interpretation. If the source has no conflict, urgency, or stakes, do not
-invent them — post without these elements and rely on the source's natural story.
-**Conflict** — only when source shows two named sides disagreeing. Use authority + actor
-+ disputed event in S1. Attribution explicit ("according to [outlet]", "alleged").
-**Relatable stakes** — when source mentions money, fan impact, fairness, loyalty.
-**Specific number** — only when source already cites one. Never invent.
-**Stop-scroll S1** — name a person, club, or authority. Action verb first. No bare
-"Bombshell." or "Wow." No em dashes. S1 must read in <3 seconds.
-
-## VOICE + STYLE
-- Natural global English with football terminology (not "soccer").
-- Casual but informed. Sharp but fair. Confident but properly hedged.
-- Short, varied sentences. Concrete nouns + active verbs.
-- PLAIN LANGUAGE: write in simple, everyday English a casual fan understands on first read. Avoid insider jargon (xG, low block, inverted full-back, false nine, tiki-taka). If a technical term is unavoidable, replace it with plain words ("chances created", "defensive wall") or skip it. Never assume tactical knowledge.
-**FORBIDDEN:** emoji, hashtags, em dashes, all-caps (except official abbreviations).
-**FORBIDDEN PHRASES:** "Did you know?" / "Let's dive in!" / "Here's the secret" / "You won't believe" / "Let that sink in" / "Fans everywhere are talking about it" / "Say what you want, but..." / "This changes everything" / "Only time will tell" / Generic "Agree or disagree?" without story-specific proposition / Generic "Follow for more" / Rage bait, fake suspense, forced rivalry, criticism added solely for likes.
-**INSTEAD:** Open with surprising fact directly. Name the venue or person — not "fans everywhere". Close with natural story-specific question. Attribute source outlet once, naturally.
-
-## 6-SLIDE ARC
-**S1 — HOOK (scroll-stopper):** Specific person/club/authority + action verb + concrete
-fact (name, number, or decision). Give stakes or context when source supports it. No
-question marks unless source poses one. Not bare ("Bombshell. Gone.") but dense.
-**S2 — EVIDENCE:** Clearest detail, number, decision, scene, or verified statement. Make
-it tangible. Parkthebus reader skims S2 to know if the post is worth their time.
-**S3 — CONTEXT:** Rule, timeline, or background needed to understand the conflict. This
-is where the post ELEVATES above the headline — most parkthebus readers never read the
-source article, so the post must teach them something they didn't know.
-**S4 — STAKES:** Who is affected, why it matters now. Distinguish confirmed consequences
-from possible implications. Use specific names + numbers when source supports.
-**S5 — TWIST + SOURCE:** The angle the source itself flags, or a final verified detail
-with the source name attached ("BBC reports...", "according to Goal..."). The attribution
-earns credibility and the twist earns the save.
-**S6 — PAYOFF (comment-bait):** Use a story-specific two-sided question only when source
-supports two real outcomes. Generic "Agree or disagree?" is forbidden. Bad: "Will this
-work?" Good: "Will Infantino listen, or double down?"
-
-## PER-SLIDE CONSTRAINTS
-- One new insight per slide. Use as many sentences as clarity needs.
-- A stance is optional. Add analysis only when clearly framed as interpretation and supported by the source. Reporting verified facts alone is valid.
-- Each slide adds one verified detail. Do not invent a physical detail, stakeholder, precedent, irony, or twist.
-- Use specific numbers from the article. If zero numbers: narrative arc only. NEVER invent.
-- Keep prose compact and natural. Short sentences help, but no word-count rule.
-- Paraphrase quotes. Never copy-paste full quotes.
-
-## CAPTION
-Zero emoji. Line 1 = headline hook. Last line = story-specific binary question with inline engagement hook: "Agree or disagree - [story-specific question]?"
-NO generic "Follow for more". CTA must reference the story: "Who replaces X? Follow for more."
-
-## NUMBER TRUTH (ZERO TOLERANCE)
-1. Numbers ONLY from article text OR factual reference data below.
-2. NEVER calculate ages. Use reference data age.
-3. NEVER calculate years-to-event. Use reference data year-gap.
-4. Hallucination history: "He's 31" (not in article), "6 years until 2030" (wrong), invented transfer fees.
-5. No number > wrong number.
-
-## COVER IMAGE
-cover_image_keywords: 2-3 search terms (e.g. "Tuchel training kit England"). Prioritize story's most emotionally relevant subject. Not always a player — coach, referee, stadium, trophy, match moment may fit better. No text overlays.
-
-## OUTPUT CONTRACT — JSON only, no markdown wrapping.
-Return this EXACT schema:
-{"slide_1":"","slide_2":"","slide_3":"","slide_4":"","slide_5":"","slide_6":"","caption":"","cover_image_keywords":""}
-Sentences within slides: plain text with single spaces, no forced line breaks. Between slides: the JSON keys define boundaries.
-If article is insufficient: return {"slide_1":"needs_more_source","slide_2":"","slide_3":"","slide_4":"","slide_5":"","slide_6":"","caption":"","cover_image_keywords":""} with slide_1 starting with "needs_more_source".
-
-## FINAL SELF-CHECK (silent, before output)
-- Valid JSON. Exactly 6 slides. One coherent story.
-- Every slide: compact, clear, and within character ceiling.
-- Slides 2-5 each add new info or interpretation (no repeats).
-- S6 ends with a story-specific question only if source-supported.
-- Every claim has article or reference data support.
-- Uncertainty preserved. Attribution appears once naturally.
-- No forbidden phrase, emoji, hashtag, em dash present.
-- No claim, question, or engagement element exceeds the source.
-- No insider jargon or unexplained technical terms.
-"""
-    # User-approved editorial contract. Keep this after legacy prompt until legacy templates are removed.
     base = """You are the editorial content engine for @parkthebus.football.
 
 ## ROLE
@@ -2189,11 +2248,20 @@ S5 = STAKES + RECEIPTS: How this affects real decisions. Transfer, selection, co
 S6 = CIRCLE BACK: Reference S1's tension with a sharp question. "So which is it — genuine belief, or damage control?" Name two real interpretations. For sensitive topics (injuries/abuse/discrimination): reflective question per base rules.
 """,
     }
-    # Pattern templates force unsupported conflict and inference; source facts take priority.
-    system = base
+    # Pattern-specific arc template injected into system prompt.
+    arc_template = arc_templates.get(pattern, "")
     ref_data = _build_reference_data()
     source_name = source or url.split("/")[2] if url else ""
     pattern_label = {'a':'Rule-Break', 'b':'Contradiction', 'c':'Detail+Emotion', 'd':'Commentary', 'e':'Pressure-Cooker', 'f':'Behind-the-Scenes'}.get(pattern, 'Detail+Emotion')
+
+    # ── RECENT LEARNINGS (auto-injected from engagement feedback loop) ──
+    recent_learnings = _load_recent_learnings()
+
+    # ── Build full system prompt: base + arc template + recent learnings ──
+    if recent_learnings:
+        system = base + arc_template + "\n\n## RECENT LEARNINGS (from engagement data)\n" + recent_learnings + "\n"
+    else:
+        system = base + arc_template
     assigned_evidence = _assigned_evidence(article_text, evidence_plan) if evidence_plan else None
     if not assigned_evidence:
         return None
@@ -2390,8 +2458,8 @@ def notify_telegram(text):
 
 # ── 6. TRACK ───────────────────────────────────────────────────────
 
-def track_post(title, url, source, root_id, permalink, hotness_score=0, article_published_ts=None, slides=None):
-    """Append post metadata and exact published text for later grounding audits."""
+def track_post(title, url, source, root_id, permalink, hotness_score=0, article_published_ts=None, slides=None, engagement_trigger=None, pattern="a"):
+    """Append post metadata, engagement trigger prediction, and exact published text."""
     try:
         with open(POSTED) as f:
             data = json.load(f)
@@ -2407,6 +2475,9 @@ def track_post(title, url, source, root_id, permalink, hotness_score=0, article_
         entry["slides"] = [s.get("content", "") for s in slides]
     if hotness_score:
         entry["hotness_score"] = round(hotness_score, 2)
+    if engagement_trigger:
+        entry["engagement_trigger"] = engagement_trigger
+    entry["pillar"] = _pillar_from_pattern(pattern)
     data["topics"].append(entry)
     # Keep last 200 entries
     data["topics"] = data["topics"][-200:]
@@ -2712,17 +2783,26 @@ def main():
             break  # failed on attempt 2
 
         eval_t0 = time.time()
-        eval_decision, eval_reasons = evaluator_check(slides, article_text, url)
-        eval_time = time.time() - eval_t0
-        log(f"   🔍 Evaluator: {eval_decision} ({eval_time:.1f}s) — {'; '.join(eval_reasons[:3])}")
-        # On attempt 1: retry on REVISE or REJECT. On attempt 2: only REJECT blocks.
-        if eval_decision == "REJECT" or (gen_attempt == 1 and eval_decision != "APPROVE"):
-            all_errors = "EVALUATOR: " + "; ".join(eval_reasons[:3])
-            log(f"   ⚠️ Evaluator rejected (attempt {gen_attempt}): {all_errors}")
-            if gen_attempt == 1:
-                log("   🔁 Retrying with evaluator feedback...")
-                continue  # try again
-            break  # failed on attempt 2
+        # Patterns E (Pressure Cooker) and F (Behind-the-Scenes) skip evaluator.
+        # Structural patterns hallucinate less and evaluator adds ~50s with false REVISE on
+        # natural tension narration. High-score posts (>80) also skip.
+        skip_eval = pattern in ("e", "f") or best.get("_score", 0) >= 80
+        if skip_eval:
+            log(f"   🔍 Evaluator: SKIP (pattern={pattern.upper()}, score={best.get('_score', 0)})")
+            # No evaluator — go straight to pass
+            pass
+        else:
+            eval_decision, eval_reasons = evaluator_check(slides, article_text, url)
+            eval_time = time.time() - eval_t0
+            log(f"   🔍 Evaluator: {eval_decision} ({eval_time:.1f}s) — {'; '.join(eval_reasons[:3])}")
+            # On attempt 1: retry on REVISE or REJECT. On attempt 2: only REJECT blocks.
+            if eval_decision == "REJECT" or (gen_attempt == 1 and eval_decision != "APPROVE"):
+                all_errors = "EVALUATOR: " + "; ".join(eval_reasons[:3])
+                log(f"   ⚠️ Evaluator rejected (attempt {gen_attempt}): {all_errors}")
+                if gen_attempt == 1:
+                    log("   🔁 Retrying with evaluator feedback...")
+                    continue  # try again
+                break  # failed on attempt 2
 
         # All checks passed
         passed = True
@@ -2764,9 +2844,11 @@ def main():
         sys.exit(1)
 
     # Track
+    engagement_trigger = _predict_engagement_trigger(best, pattern)
+    log(f"   🎯 Trigger: {engagement_trigger}")
     track_post(best["title"], url, best.get("source", ""), root_id, permalink,
                hotness_score=hotness.get(url, 0), article_published_ts=best.get("published_ts"),
-               slides=slides)
+               slides=slides, engagement_trigger=engagement_trigger, pattern=pattern)
 
     log(f"✅ {best['title']} → {permalink}")
     log(f"⏱️ Total: {total:.1f}s (LLM: {llm_time:.1f}s)")
@@ -2777,11 +2859,14 @@ def main():
     _pred_views = _query_ring_predicted(best.get("source", ""), _classify_hook(best.get("title", "").lower()),
                               best.get("_topic_type", ""))
     pred_str = f"~{_pred_views:,} views" if _pred_views else ""
+    pillar = _pillar_from_pattern(pattern)
+    trigger_str = engagement_trigger.replace(" + ", ", ") if engagement_trigger else ""
     notify_telegram(
         f"✅ <b>Posted!</b>\n\n"
         f"{best['title']}\n"
         f"Score: {score} | {len(slides)} slides\n"
-        f"Pattern: {pattern.upper()}\n"
+        f"Pillar: {pillar} | Pattern: {pattern.upper()}\n"
+        f"Trigger: {trigger_str}\n"
         f"Source: {best.get('source','?')}"
         f"{' | Predicted: ' + pred_str if pred_str else ''}\n\n"
         f"<a href=\"{permalink}\">View on Threads</a>"
