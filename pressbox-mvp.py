@@ -1248,6 +1248,9 @@ _SKIP_WORDS = frozenset({
     'Make','Get','Take','Give','Find','Keep','Come','Go','Look','Think','Know','See',
     'Expect','Build','Stay','Reach','Kill','Remain','View','Image','Images','Photo',
     'Photos','Getty','Reuters','AP','AFP',
+    # Sentence-start descriptors falsely grabbed as proper nouns
+    'Teenager','Youngster','Star','Veteran','Former','Injured','Suspended',
+    'Returning','Rising','Departing','Outgoing','On-loan',
 })
 _STAGE_CANONICAL = {
     'last-16':'round_of_16','last 16':'round_of_16','round of 16':'round_of_16','r16':'round_of_16',
@@ -1295,8 +1298,8 @@ def grounding_check(slides_text, article_text, article_names, article_stages):
     warnings = []
     article_lower = article_text.lower()
     for name in _extract_proper_nouns(slides_text):
-        # Skip if in article literally
-        if name in article_text:
+        # Skip if in article literally (case-insensitive)
+        if name.lower() in article_lower:
             continue
         # Skip common knowledge entities (they're valid contextual references)
         if name in _COMMON_KNOWLEDGE_ENTITIES:
@@ -1305,7 +1308,7 @@ def grounding_check(slides_text, article_text, article_names, article_stages):
         words = name.split()
         major_words = [w for w in words if len(w) > 3 and w not in (
             "the", "fc", "ac", "fc", "united", "city", "county")]
-        if major_words and all(w in article_lower for w in major_words):
+        if major_words and all(w.lower() in article_lower for w in major_words):
             continue
         if len(name) > 4:
             warnings.append(f"HALLUCINATED_NAME: '{name}'")
