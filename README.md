@@ -443,13 +443,23 @@ Score distribution: 27% (44/161) score ≥100 (viral candidates), 21% (33/161) s
 | Daily Report | `0 8 * * *` | Engagement summary via @Szejay_bot |
 | Hourly Report | `0 * * * *` | Status report |
 
+## Reliability & Operations (Aug 2026)
+
+- **Single-run lock** (`/tmp/pressbox-mvp-internal.lock`): module-level `fcntl.flock` prevents concurrent direct invocations. Deliberately a DIFFERENT file from the wrapper lock `/tmp/pressbox-mvp.lock` (run-mvp.sh holds flock on fd 200; same-file internal flock would always fail → silent `SKIPPED_ALREADY_RUNNING` skip — fixed 11 Aug 2026).
+- **Wrapper status contract**: `run-mvp.sh` writes machine-readable state to `/tmp/pressbox-last-status` — `ok <ts>` (posted), `SKIP <ts> <reason>` (normal no-candidate), `LOCKED <ts>` (flock held), `FAILED <ts> <reason>`. Watchdog reads `last-status` and does NOT retry on `SKIP*` labels (prevents LLM-call loops on normal skips).
+- **Token budget gate**: hard reject >80k chars input, warn >48k. Evaluator + writer calls capped; `fact packet` ≤4k tokens (title + URL + source + top 15 sentences — never raw body).
+- **LLM call journal**: every LLM call logged to `~/.hermes/pressbox/llm_calls.json` (run_id, stage, input chars, output tokens, model, status). Usage report: `python3 ~/.hermes/scripts/token-cost-report.py`.
+- **Transient-only retry**: only HTTP 429 / 5xx / timeout retried (max 1). Deterministic rejects (grounding, contract, editorial) never retried. Editorials are fail-closed — thresholds never lowered to fill a slot.
+- **Candidate fallback**: top-N (`[:3]`) candidate loop — if writer/validator rejects top article, next ranked article is tried. One failed writer call no longer kills the run.
+- **Source fingerprint** (`source-fingerprints.json`): 3-title hash + 3h expiry + force fresh on any source skip. Detects RSS staleness/silent feed breakage; Mirror HTTP 202 CDN gate handled with short-UA retry.
+- **Volume gate**: 30-min minimum between posts (≤48/day).
+
 ## Rate Limits
 
 Pipeline handles Mistral API 429 gracefully with exponential backoff:
-- 1st 429 → sleep 30s, retry
-- 2nd 429 → sleep 45s, retry
-- 3rd 429 → sleep 60s, move to next article
-- All articles 429'd → exit (cron wrapper retries)
+- Attempt 1 → on 429 backoff, retry (attempt 2/2)
+- Attempt 2 → on 429 backoff, move to next candidate
+- All candidates 429'd → exit (cron wrapper retries only transient failures)
 
 ## Setup
 
