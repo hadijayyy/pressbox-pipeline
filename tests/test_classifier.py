@@ -164,7 +164,7 @@ def test_grounding_matches_accents_and_ignores_question_prefix():
 
 def test_slide_contract_requires_two_source_grounded_sentences_per_slide():
     mvp = _load_mvp()
-    slides = [{"content": "One supported source sentence."}] * 6
+    slides = [{"content": "One supported source sentence."}] * 6 + [{"content": "Source: https://example.com/story"}]
     errors = mvp._slide_contract_errors(slides)
     assert "S1 needs at least 2 sentences" in errors
     assert "S6 needs at least 2 sentences" in errors
@@ -172,13 +172,13 @@ def test_slide_contract_requires_two_source_grounded_sentences_per_slide():
 
 def test_slide_contract_accepts_two_sentences_per_slide():
     mvp = _load_mvp()
-    slides = [{"content": "One supported source sentence. A second supported source sentence."}] * 6
+    slides = [{"content": "One supported source sentence. A second supported source sentence."}] * 6 + [{"content": "Source: https://example.com/story"}]
     assert not mvp._slide_contract_errors(slides)
 
 
 def test_slide_contract_requires_two_sentences_on_every_slide():
     mvp = _load_mvp()
-    slides = [{"content": "One supported source sentence."}] * 6
+    slides = [{"content": "One supported source sentence."}] * 6 + [{"content": "Source: https://example.com/story"}]
     errors = mvp._slide_contract_errors(slides)
     assert "S1 needs at least 2 sentences" in errors
     assert "S6 needs at least 2 sentences" in errors
@@ -186,8 +186,16 @@ def test_slide_contract_requires_two_sentences_on_every_slide():
 
 def test_slide_contract_keeps_450_char_limit():
     mvp = _load_mvp()
-    overlength = [{"content": "One."}] * 5 + [{"content": "x" * 451}]
+    overlength = [{"content": "One. Two."}] * 5 + [{"content": "x" * 451}] + [{"content": "Source: https://example.com/story"}]
     assert "S6 invalid length (451)" in mvp._slide_contract_errors(overlength)
+
+
+def test_slide_7_is_english_source_url_only():
+    mvp = _load_mvp()
+    slides = [{"content": "One supported source sentence. A second supported source sentence."}] * 6
+    slides.append({"content": "Source: https://example.com/story"})
+    assert not mvp._slide_contract_errors(slides)
+    assert mvp._slide_contract_errors(slides[:-1] + [{"content": "Sumber: https://example.com/story"}]) == ["S7 invalid source URL"]
 
 
 def test_main_uses_one_candidate_and_one_final_evaluator():
