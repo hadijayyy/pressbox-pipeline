@@ -98,6 +98,54 @@ def test_generation_prompt_requires_exactly_two_sentences_per_slide():
     mvp = _load_mvp()
     source = inspect.getsource(mvp.generate_slides)
     assert "at least two complete sentences" in source
+    assert "but 1 is acceptable" not in source
+
+
+def test_commentary_article_does_not_use_rule_break_arc():
+    mvp = _load_mvp()
+    topic = {"title": "Trump says it would be terrible mistake to remove Infantino"}
+    body = (
+        "Donald Trump says removing FIFA president Gianni Infantino would be a terrible mistake. "
+        "Trump praised Infantino and discussed the president's role in football. "
+        "The comments were made during a public statement about FIFA leadership. "
+        "Infantino has worked with Trump on football events and tournament planning. "
+        "The article reports no rule violation or regulatory exemption."
+    )
+    assert mvp._select_viral_pattern(topic, body) == "d"
+
+
+def test_rule_violation_article_uses_rule_break_arc():
+    mvp = _load_mvp()
+    topic = {"title": "UEFA breaks its own regulation for final"}
+    body = (
+        "UEFA broke its own regulation by granting an exemption for the final. "
+        "The regulation normally prevents clubs from changing the designated venue. "
+        "Officials approved the exception after reviewing the request."
+    )
+    assert mvp._select_viral_pattern(topic, body) == "a"
+
+
+def test_shortlist_stores_story_text_and_evidence_plan(monkeypatch):
+    mvp = _load_mvp()
+    monkeypatch.setattr(mvp, "fetch_article", lambda url: (
+        " ".join(
+            f"Arsenal and Vinicius completed verified source detail {i} for the transfer story."
+            for i in range(1, 15)
+        ),
+        "https://img.example/cover.jpg",
+    ))
+    topic = {
+        "title": "Arsenal Vinicius transfer story",
+        "url": "https://example.com/story",
+        "published_ts": __import__("time").time(),
+        "source": "bbc",
+        "image_url": "",
+        "_score": 50,
+    }
+    result = mvp._body_first_shortlist([topic])
+    assert len(result) == 1
+    assert result[0]["_article_text"] == mvp._story_text(result[0]["_article_text"], topic["title"])
+    assert result[0]["_evidence_plan"] == mvp._evidence_plan(result[0]["_article_text"])
 
 
 def test_generation_stops_candidate_churn_after_rate_limit():

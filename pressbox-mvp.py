@@ -1894,8 +1894,18 @@ def _select_viral_pattern(topic, article_text):
     if had_bts_title:
         bts_score += 2
     
-    # Grounding check: does body text ACTUALLY contain rule words?
+    # Grounding check: Pattern A needs a positive rule/action claim in body.
+    positive_rule_break = _re.search(
+        r"\b(?:broke|violated|waived|ignored its own|bent the rules|"
+        r"fast-tracked|changed its own|granted (?:an )?exemption|"
+        r"special treatment|double standard)\b",
+        text,
+    )
     body_rule_score = sum(2 for w in rule_break_words if w in text)
+    actual_rule_break = bool(positive_rule_break) and not _re.search(
+        r"\b(?:no|not|without|never)\s+(?:a\s+)?(?:rule|regulation|violation|exemption|exception)\b",
+        text,
+    )
     
     # Pattern A pre-filter: if title has authority + rule/ban/charge/violation,
     # force Pattern A regardless of score. Parkthebus Rule-Break formula = 12M views.
@@ -1907,7 +1917,9 @@ def _select_viral_pattern(topic, article_text):
                         "overturn", "overturned", "rule", "rules", "regulation", "loophole",
                         "exemption", "cleared", "allowed", "stripped", "controversy",
                         "conspiracy", "rigged", "corruption", "scandal"]
-    if any(a in title for a in title_auths) and any(v in title for v in title_violations):
+    if (any(a in title for a in title_auths)
+            and any(v in title for v in title_violations)
+            and actual_rule_break):
         return "a"
 
     # Priority: E/F first when they score high (they outperform A in real data)
@@ -1922,7 +1934,7 @@ def _select_viral_pattern(topic, article_text):
             return "f"
     
     # Pattern D: commentary article with no actual rule violation in body
-    if commentary_score >= 3 and body_rule_score < 2 and scandal_score < 3:
+    if commentary_score >= 2 and not actual_rule_break and scandal_score < 3:
         if detail_score >= commentary_score and detail_score >= scandal_score:
             return "c"
         return "d"
@@ -1936,15 +1948,17 @@ def _select_viral_pattern(topic, article_text):
         return "f"
     
     # Decision: rule-break wins unless detail/emotion story clearly stronger
-    if scandal_score >= max(detail_score, commentary_score, pressure_score, bts_score) or (scandal_score >= 2 and scandal_score > detail_score - 2):
+    if actual_rule_break and (scandal_score >= max(detail_score, commentary_score, pressure_score, bts_score) or (scandal_score >= 2 and scandal_score > detail_score - 2)):
         return "a"
     
     # Urgency check: if deadline/urgent words present, force Rule-Break (a)
     if any(word in combined for word in ["deadline", "immediate", "now", "today", "countdown", "urgent", "last chance", "final hours", "HARI INI", "SEKARANG"]):
         return "a"
     
-    # Default to Rule-Break (a) instead of Detail+Emotion (c)
-    return "a"
+    # Safe default: do not force Rule-Break framing onto ordinary reporting.
+    if commentary_score >= 1 and not actual_rule_break:
+        return "d"
+    return "c"
 
 def _build_reference_data():
     """Build factual reference data injected into every generation prompt.
@@ -2530,7 +2544,7 @@ S6 = CIRCLE BACK: Reference S1's tension with a sharp question. "So which is it 
         f"  <source_url>{url}</source_url>\n</primary_article>\n\n"
         f"<EVIDENCE_PACK>\n{_evidence_pack(article_text)}\n</EVIDENCE_PACK>\n\n"
         f"<SLIDE_EVIDENCE>\n{assignments}\n</SLIDE_EVIDENCE>\n\n"
-        "Each slide must contain at least one complete sentence grounded in its assigned evidence. S1 may be 1-2 punchy sentences. Other slides: at least 2 sentences preferred, but 1 is acceptable when the evidence is dense. S1 must create a source-supported curiosity gap without giving away the whole story. S6 must close with a story-specific two-option question only when both outcomes are supported; otherwise use a sharp grounded takeaway. Each sentence must be a faithful,"
+        "Each slide must contain at least two complete sentences grounded in its assigned evidence. If two sentences cannot be supported, return needs_more_source. S1 must create a source-supported curiosity gap without giving away the whole story. S6 must close with a story-specific two-option question only when both outcomes are supported; otherwise use a sharp grounded takeaway. Each sentence must be a faithful,"
         " non-escalating paraphrase of its slide's assigned evidence only. Do not add a question"
         " unless one assigned sentence supports both outcomes.\n\n"
         f"{ref_data}\n\n{_number_hook_rule(article_text)}\n\n{_editorial_constraints()}")
@@ -2823,14 +2837,20 @@ def _body_first_shortlist(ranked, limit=15):
             rejected.append((title, f"stale ({age_h:.1f}h)"))
             continue
         text, image = fetch_article(url)
-        body = text[:3000].lower()
+        story_text = _story_text(text, title)
+        body = story_text[:3000].lower()
         football = sum(kw in body for kw in ("goal", "match", "league", "transfer", "manager", "player", "club", "stadium", "referee"))
         commercial = sum(kw in body for kw in ("buy now", "shop now", "discount", "sale", "voucher", "basket", "checkout", "delivery"))
-        sentences = [x for x in re.split(r'[.!?]+', text) if len(x.strip()) > 20]
+        sentences = [x for x in re.split(r'[.!?]+', story_text) if len(x.strip()) > 20]
         image = image or t.get("image_url", "")
-        if len(text.strip()) < 1000 or len(text.split()) < 150 or len(sentences) < 5:
+        evidence_plan = _evidence_plan(story_text)
+        if len(story_text.strip()) < 1000 or len(story_text.split()) < 150 or len(sentences) < 5:
             rejected.append((title, "body below publication minimum"))
             _record_failure("THIN_BODY", t.get("source", ""), title)
+            continue
+        if not evidence_plan:
+            rejected.append((title, "insufficient distinct evidence"))
+            _record_failure("INSUFFICIENT_EVIDENCE", t.get("source", ""), title)
             continue
         if football < 2 and commercial >= 2:
             rejected.append((title, "commercial body"))
@@ -2840,8 +2860,8 @@ def _body_first_shortlist(ranked, limit=15):
             rejected.append((title, "no usable lead image"))
             _record_failure("IMAGE_INVALID", t.get("source", ""), title)
             continue
-        t.update(_article_text=text, _image_url=image, _age_h=age_h)
-        t["_score"] += min(15, len(text) // 1000) + (5 if '"' in text or re.search(r'\d{3,}', text) else 0)
+        t.update(_article_text=story_text, _evidence_plan=evidence_plan, _image_url=image, _age_h=age_h)
+        t["_score"] += min(15, len(story_text) // 1000) + (5 if '"' in story_text or re.search(r'\d{3,}', story_text) else 0)
         accepted.append(t)
     accepted.sort(key=lambda t: (-t["_score"], _SOURCE_PRIORITY.get(t.get("source", ""), 99)))
     log(f"📋 Body-first Top N: {len(accepted)}/{min(limit, len(ranked))} accepted")
@@ -3074,7 +3094,7 @@ def main():
         hook_variant = _select_hook_variant(analytics_summary, len(_ENGAGEMENT_RING.get("posts", [])) + candidate_idx)
         pattern_name = {'a': 'A (Rule-Break)', 'b': 'B (deprecated)', 'c': 'C (Detail+Emotion)', 'd': 'D (Commentary)', 'e': 'E (Pressure-Cooker)', 'f': 'F (Behind-the-Scenes)'}[pattern]
         log(f"   🎯 Viral pattern: {pattern_name}")
-        evidence_plan = _evidence_plan(art_text)
+        evidence_plan = candidate.get("_evidence_plan") or _evidence_plan(art_text)
         if not evidence_plan:
             log(f"   ⚠️ Candidate #{candidate_idx+1} lacks evidence — trying next")
             _record_failure("INSUFFICIENT_EVIDENCE", candidate.get("source", ""), art_title)
