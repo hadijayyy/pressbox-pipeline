@@ -44,7 +44,7 @@ def test_wrappers_share_publisher_lock_and_post_marker_contract():
     assert 'flock -n 200 || exit 75' in runner
     assert 'flock -n 200 || exit' not in watchdog
     assert 'retryable_failure()' in runner
-    assert 'HTTP 429|HTTP 5[0-9][0-9]|timeout|timed out|connection reset|temporarily unavailable' in runner
+    assert 'HTTP 429|HTTP 5[0-9][0-9]|rate.?limited|RATE_LIMITED|timeout|timed out|connection reset|temporarily unavailable' in runner
     pipeline = PIPELINE.read_text()
     assert 'POST_MARKER = "/tmp/pressbox-posted-this-run"' in pipeline
     assert 'with open(POST_MARKER, "w") as f:' in pipeline
