@@ -161,7 +161,14 @@ def _update_ring(topics):
         title = (t.get("title") or "").lower()
         hook = _classify_hook(title)
         tt = classify_topic_type(title)
-        new_posts.append({"source": source, "hook": hook, "topic_type": tt, "views": int(t["views"])})
+        new_posts.append({
+            "source": source, "hook": hook, "topic_type": tt,
+            "pattern": t.get("pattern", ""), "hook_variant": t.get("hook_variant", ""),
+            "views": int(t.get("views", 0) or 0), "likes": int(t.get("likes", 0) or 0),
+            "replies": int(t.get("replies", 0) or 0),
+            "reposts": int(t.get("reposts", t.get("shares", 0)) or 0),
+            "quotes": int(t.get("quotes", 0) or 0),
+        })
     _ENGAGEMENT_RING["posts"] = new_posts[-50:]
     _save_ring()
 
@@ -201,6 +208,51 @@ def _query_ring_predicted(source, hook, topic_type):
     return key[len(key)//2]
 
 _load_ring()
+
+# Hook A/B loop. Rotate until variant has enough measured posts, then prefer
+# measured winner only when it beats cohort median by 15%.
+HOOK_VARIANTS = ("implication", "contradiction", "detail")
+
+
+def _engagement_score(post):
+    """Weighted quality signal; views alone can reward silent reach."""
+    views = post.get("views", 0) or 0
+    likes = post.get("likes", 0) or 0
+    replies = post.get("replies", 0) or 0
+    reposts = post.get("reposts", post.get("shares", 0)) or 0
+    quotes = post.get("quotes", 0) or 0
+    return views * 0.45 + likes * 0.25 + replies * 0.15 + reposts * 0.10 + quotes * 0.05
+
+
+def _cohort_performance(posts, field):
+    """Return measured cohort medians with min-3 sample guard."""
+    from collections import defaultdict
+    groups = defaultdict(list)
+    for post in posts:
+        key = post.get(field)
+        if key and post.get("views") is not None and _engagement_score(post) > 0:
+            groups[key].append(_engagement_score(post))
+    result = {}
+    for key, values in groups.items():
+        if len(values) >= 3:
+            result[key] = sorted(values)[len(values) // 2]
+    return result
+
+
+def _select_hook_variant(analytics_summary=None, post_count=0):
+    """A/B rotate hooks; lock measured winner only with sufficient evidence."""
+    winner = (analytics_summary or {}).get("best_hook_variant")
+    if winner in HOOK_VARIANTS:
+        return winner
+    return HOOK_VARIANTS[post_count % len(HOOK_VARIANTS)]
+
+
+def _hook_variant_instruction(variant):
+    return {
+        "implication": "Lead with strongest supported implication, not headline restatement.",
+        "contradiction": "Place two supported facts or claims in tension; do not invent contradiction.",
+        "detail": "Lead with strongest supported concrete detail, number, scene, or decision.",
+    }.get(variant, "Lead with strongest supported hook.")
 
 from pressbox_common import WIB, HOME, POSTED, load_env, log, clean_words, is_similar, classify_topic_type
 from pressbox_scoring import score_topic as base_score_topic
@@ -699,19 +751,26 @@ def detect_hot_topics(topics, window_hours=2):
     except:
         cached = []
 
-    # Merge: cache + current (dedup by URL)
+    # Merge: prefer current topics; keep cached rows only with real timestamps.
+    current_urls = {t.get("url", "") for t in topics}
     seen_urls = set()
     merged = []
-    for t in cached + topics:
+    for t in topics + cached:
         url = t.get("url", "")
         if url and url not in seen_urls:
             seen_urls.add(url)
             merged.append(t)
 
-    # 2. Prune > 4h old + save cache
+    # 2. Prune > 4h old. Missing timestamps are fresh only for current topics;
+    # old cache rows without timestamps must not become falsely hot.
     fresh = []
     for t in merged:
-        ts = t.get("published_ts") or now
+        ts = t.get("published_ts")
+        if ts is None:
+            if t.get("url", "") in current_urls:
+                ts = now
+            else:
+                continue
         if ts >= cutoff:
             fresh.append(t)
 
@@ -813,12 +872,13 @@ def detect_hot_topics(topics, window_hours=2):
                 hotness[url + "_entities"] = list(cluster_entities)
 
     if hotness:
-        hot_count = len(hotness)
-        top_hot = sorted([(k,v) for k,v in hotness.items() if isinstance(v, (int,float))], key=lambda x: -x[1])[:3]
+        hot_rows = [(k, v) for k, v in hotness.items() if isinstance(v, (int, float))]
+        hot_count = len(hot_rows)
+        title_by_url = {t.get("url", ""): t.get("title", "") for t in fresh}
+        top_hot = sorted(hot_rows, key=lambda x: -x[1])[:3]
         log(f"🔥 Hot detection: {hot_count} articles in {sum(1 for c in clusters.values() if len(c)>=2)} clusters")
         for url, score in top_hot:
-            # Find title for this URL
-            title = next((t.get("title","")[:50] for t in topics if t.get("url") == url), "?")
+            title = title_by_url.get(url, "")[:70] or "(untitled)"
             log(f"   🔥 {title}... (hotness={score:.1f})")
 
     # 5. Google Trends boost: match trending queries to article titles
@@ -965,7 +1025,7 @@ def get_analytics_summary():
         return {}
     
     topics = data.get("topics", [])
-    with_metrics = [t for t in topics if t.get("views") is not None]
+    with_metrics = [t for t in topics if t.get("views") is not None and t.get("views", 0) > 0]
     
     if len(with_metrics) < 3:
         return {}
@@ -1009,6 +1069,20 @@ def get_analytics_summary():
         "best_sources": [(s, avg(v)) for s, v in best_sources],
         "worst_topics": [(t, avg(v)) for t, v in best_topics[-3:] if avg(v) < median_views * 0.5],
     }
+
+    variant_perf = _cohort_performance(with_metrics, "hook_variant")
+    pattern_perf = _cohort_performance(with_metrics, "pattern")
+    if variant_perf:
+        ordered = sorted(variant_perf.items(), key=lambda item: item[1], reverse=True)
+        cohort_median = sorted(variant_perf.values())[len(variant_perf) // 2]
+        summary["best_hook_variant"] = ordered[0][0] if ordered[0][1] >= cohort_median * 1.15 else ""
+        summary["hook_variant_performance"] = ordered
+    if pattern_perf:
+        ordered = sorted(pattern_perf.items(), key=lambda item: item[1], reverse=True)
+        cohort_median = sorted(pattern_perf.values())[len(pattern_perf) // 2]
+        summary["best_patterns"] = [k for k, v in ordered if v >= cohort_median * 1.15]
+        summary["worst_patterns"] = [k for k, v in ordered if v < cohort_median * 0.70]
+        summary["pattern_performance"] = ordered
 
     # Hotness A/B comparison — hot vs non-hot engagement
     hot_posts = [t for t in with_metrics if t.get("hotness_score", 0) > 0]
@@ -2254,7 +2328,7 @@ def _slide_contract_errors(slides, editorial=True):
     return errors
 
 
-def generate_slides(article_text, url, title="", source="", hooks="", cta_pattern="", tone="", pattern="a", evaluator_feedback="", evidence_plan=None):
+def generate_slides(article_text, url, title="", source="", hooks="", cta_pattern="", tone="", pattern="a", evaluator_feedback="", evidence_plan=None, hook_variant="implication"):
     """Call LLM to generate 6-slide thread. Returns parsed slides or None.
     If evaluator_feedback is provided, appends correction instructions to the prompt.
     Token budget: hard reject >80k chars input, warn >48k chars.
@@ -2445,12 +2519,13 @@ S6 = CIRCLE BACK: Reference S1's tension with a sharp question. "So which is it 
         for i in range(1, 7))
     user = (
         f"<request>\n  <current_date>{datetime.now().strftime('%Y-%m-%d')}</current_date>\n"
-        f"  <selected_pattern>{pattern_label}</selected_pattern>\n</request>\n\n"
+        f"  <selected_pattern>{pattern_label}</selected_pattern>\n"
+        f"  <hook_variant>{hook_variant}: {_hook_variant_instruction(hook_variant)}</hook_variant>\n</request>\n\n"
         f"<primary_article>\n  <title>{title}</title>\n  <source_name>{source_name}</source_name>\n"
         f"  <source_url>{url}</source_url>\n</primary_article>\n\n"
         f"<EVIDENCE_PACK>\n{_evidence_pack(article_text)}\n</EVIDENCE_PACK>\n\n"
         f"<SLIDE_EVIDENCE>\n{assignments}\n</SLIDE_EVIDENCE>\n\n"
-        "Each slide must contain at least one complete sentence grounded in its assigned evidence. S1 may be 1-2 punchy sentences. Other slides: at least 2 sentences preferred, but 1 is acceptable when the evidence is dense. Each sentence must be a faithful,"
+        "Each slide must contain at least one complete sentence grounded in its assigned evidence. S1 may be 1-2 punchy sentences. Other slides: at least 2 sentences preferred, but 1 is acceptable when the evidence is dense. S1 must create a source-supported curiosity gap without giving away the whole story. S6 must close with a story-specific two-option question only when both outcomes are supported; otherwise use a sharp grounded takeaway. Each sentence must be a faithful,"
         " non-escalating paraphrase of its slide's assigned evidence only. Do not add a question"
         " unless one assigned sentence supports both outcomes.\n\n"
         f"{ref_data}\n\n{_number_hook_rule(article_text)}\n\n{_editorial_constraints()}")
@@ -2683,6 +2758,8 @@ def track_post(title, url, source, root_id, permalink, hotness_score=0, article_
         "post_id": root_id, "permalink": permalink,
         "posted_at": datetime.now(WIB).isoformat(),
         "published_ts": article_published_ts or time.time(),
+        "pattern": pattern,
+        "hook": _classify_hook(title.lower()),
     }
     if slides:
         entry["slides"] = [s.get("content", "") for s in slides]
@@ -2690,6 +2767,13 @@ def track_post(title, url, source, root_id, permalink, hotness_score=0, article_
         entry["hotness_score"] = round(hotness_score, 2)
     if engagement_trigger:
         entry["engagement_trigger"] = engagement_trigger
+    if slides:
+        entry["hook_variant"] = slides[0].get("hook_variant", "")
+        entry["score"] = slides[0].get("_score")
+        entry["s1_words"] = len(slides[0].get("content", "").split())
+        s6 = slides[5].get("content", "") if len(slides) >= 6 else ""
+        entry["s6_has_question"] = "?" in s6
+        entry["caption"] = slides[0].get("caption", "")
     entry["pillar"] = _pillar_from_pattern(pattern)
     data["topics"].append(entry)
     # Keep last 200 entries
@@ -2853,6 +2937,18 @@ def main():
         print("❌ Pipeline: no body-validated candidates", flush=True)
         sys.exit(1)
 
+    # Measured pattern adjustment after body validation. Score only; never
+    # hard-reject, so availability and safety gates remain fail-closed.
+    best_patterns = set(analytics_summary.get("best_patterns", [])) if analytics_summary else set()
+    worst_patterns = set(analytics_summary.get("worst_patterns", [])) if analytics_summary else set()
+    for topic in ranked:
+        topic["_pattern"] = _select_viral_pattern(topic, topic.get("_article_text", ""))
+        if topic["_pattern"] in best_patterns:
+            topic["_score"] += 8
+        elif topic["_pattern"] in worst_patterns:
+            topic["_score"] -= 8
+    ranked.sort(key=lambda topic: (-topic["_score"], _SOURCE_PRIORITY.get(topic.get("source", ""), 99)))
+
     # Reject fee/legal claims unless source is tier-one, then rank remaining candidates.
     ranked = [topic for topic in ranked if _high_risk_claim_allowed(
         topic.get("_article_text", ""), topic.get("source", ""))]
@@ -2932,6 +3028,7 @@ def main():
     passed = False
     candidate_idx = 0
     pattern = "a"  # default, always overwritten in loop when candidate valid
+    hook_variant = _select_hook_variant(analytics_summary, len(_ENGAGEMENT_RING.get("posts", [])))
 
     for candidate_idx in range(len(ranked[:15])):
         candidate = ranked[candidate_idx]
@@ -2968,6 +3065,7 @@ def main():
             log(f"   🖼️ Fallback to RSS thumbnail")
 
         pattern = _select_viral_pattern(candidate, art_text)
+        hook_variant = _select_hook_variant(analytics_summary, len(_ENGAGEMENT_RING.get("posts", [])) + candidate_idx)
         pattern_name = {'a': 'A (Rule-Break)', 'b': 'B (deprecated)', 'c': 'C (Detail+Emotion)', 'd': 'D (Commentary)', 'e': 'E (Pressure-Cooker)', 'f': 'F (Behind-the-Scenes)'}[pattern]
         log(f"   🎯 Viral pattern: {pattern_name}")
         evidence_plan = _evidence_plan(art_text)
@@ -2989,6 +3087,7 @@ def main():
                 pattern=pattern,
                 evidence_plan=evidence_plan,
                 evaluator_feedback=all_errors,
+                hook_variant=hook_variant,
             )
             gen_elapsed = time.time() - gen_t0
             if not slides:
@@ -3104,6 +3203,8 @@ def main():
 
     # Track
     engagement_trigger = _predict_engagement_trigger(best, pattern)
+    slides[0]["hook_variant"] = hook_variant
+    slides[0]["_score"] = best.get("_score", 0)
     log(f"   🎯 Trigger: {engagement_trigger}")
     track_post(best["title"], url, best.get("source", ""), root_id, permalink,
                hotness_score=hotness.get(url, 0), article_published_ts=best.get("published_ts"),

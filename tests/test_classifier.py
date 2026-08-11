@@ -39,6 +39,49 @@ def test_module_import_does_not_hold_runtime_pipeline_lock():
     assert hasattr(mvp, "_acquire_pipeline_lock")
 
 
+def test_engagement_loop_uses_measured_hook_winner_and_rotation():
+    mvp = _load_mvp()
+    posts = [{"views": 100, "likes": 10, "replies": 2, "hook_variant": "detail"}] * 3
+    posts += [{"views": 10, "likes": 1, "replies": 0, "hook_variant": "implication"}] * 3
+    perf = mvp._cohort_performance(posts, "hook_variant")
+    assert perf["detail"] > perf["implication"]
+    assert mvp._select_hook_variant({"best_hook_variant": "detail"}) == "detail"
+    assert mvp._select_hook_variant({}, 1) == "contradiction"
+
+
+def test_track_post_persists_score_pattern_and_hook_variant(tmp_path, monkeypatch):
+    mvp = _load_mvp()
+    path = tmp_path / "posted.json"
+    path.write_text('{"topics": []}')
+    monkeypatch.setattr(mvp, "POSTED", str(path))
+    slides = [{"content": "S1", "hook_variant": "detail", "_score": 77}]
+    mvp.track_post("Test title", "https://example.com", "bbc", "id",
+                   "https://threads.com/p/id", slides=slides, pattern="c")
+    row = __import__("json").loads(path.read_text())["topics"][0]
+    assert row["score"] == 77
+    assert row["pattern"] == "c"
+    assert row["hook_variant"] == "detail"
+
+
+def test_hot_topics_ignore_untimestamped_stale_cache_rows(tmp_path, monkeypatch):
+    mvp = _load_mvp()
+    cache = tmp_path / "article-cache.json"
+    cache.write_text(__import__("json").dumps([{
+        "url": "https://old.example/story", "title": "Manchester United old story",
+        "published_ts": None,
+    }]))
+    monkeypatch.setattr(mvp, "ARTICLE_CACHE", str(cache))
+    monkeypatch.setattr(mvp.google_trends, "fetch_google_trends", lambda: [])
+    topics = [
+        {"url": "https://new.example/one", "title": "Manchester United sign player one", "published_ts": None, "source": "bbc"},
+        {"url": "https://new.example/two", "title": "Manchester United sign player two", "published_ts": None, "source": "mirror"},
+    ]
+    hotness = mvp.detect_hot_topics(topics)
+    assert "https://old.example/story" not in hotness
+    assert "https://new.example/one" in hotness
+    assert "https://new.example/two" in hotness
+
+
 def test_grounding_matches_accents_and_ignores_question_prefix():
     mvp = _load_mvp()
     slides = "Why Julián Álvarez wants talks with Gil Marín."

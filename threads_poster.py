@@ -268,7 +268,7 @@ class ThreadsPoster:
         """
         url = f"{GRAPH_API_BASE}/{post_id}/insights"
         params = {
-            "metric": "views,likes,replies,shares",
+            "metric": "views,likes,replies,reposts,quotes",
             "access_token": self.access_token,
         }
         try:
