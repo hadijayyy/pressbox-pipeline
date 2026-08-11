@@ -132,6 +132,8 @@ EXCLUDE_KEYWORDS = {
         "mass shooting", "terror attack", "hostage",
         "earthquake", "tsunami", "hurricane",
         "pandemic", "covid", "virus outbreak",
+        # Non-football editorial categories / gambling — hard reject
+        "zodiak", "gosip artis", "betting", "gambling", "betting tips",
     ],
 }
 

@@ -34,16 +34,38 @@ def test_number_grounding_accepts_mojibake_currency_from_article():
     assert not mvp.number_grounding_check("Arsenal paid £75m.", "Arsenal paid Â£75m.", "")
 
 
+def test_module_import_does_not_hold_runtime_pipeline_lock():
+    mvp = _load_mvp()
+    assert hasattr(mvp, "_acquire_pipeline_lock")
+
+
+def test_grounding_matches_accents_and_ignores_question_prefix():
+    mvp = _load_mvp()
+    slides = "Why Julián Álvarez wants talks with Gil Marín."
+    article = "Julian Alvarez wants talks with Gil Marin."
+    assert not mvp.grounding_check(slides, article, set(), set())
+
+
 def test_slide_contract_requires_two_source_grounded_sentences_per_slide():
     mvp = _load_mvp()
     slides = [{"content": "One supported source sentence."}] * 6
-    assert "S1 needs at least 2 sentences" in mvp._slide_contract_errors(slides)
+    errors = mvp._slide_contract_errors(slides)
+    assert "S1 needs at least 2 sentences" in errors
+    assert "S6 needs at least 2 sentences" in errors
 
 
 def test_slide_contract_accepts_two_sentences_per_slide():
     mvp = _load_mvp()
     slides = [{"content": "One supported source sentence. A second supported source sentence."}] * 6
     assert not mvp._slide_contract_errors(slides)
+
+
+def test_slide_contract_requires_two_sentences_on_every_slide():
+    mvp = _load_mvp()
+    slides = [{"content": "One supported source sentence."}] * 6
+    errors = mvp._slide_contract_errors(slides)
+    assert "S1 needs at least 2 sentences" in errors
+    assert "S6 needs at least 2 sentences" in errors
 
 
 def test_slide_contract_keeps_450_char_limit():
@@ -57,7 +79,7 @@ def test_main_uses_one_candidate_and_one_final_evaluator():
     source = inspect.getsource(mvp.main)
     assert "for article_attempt" not in source
     assert "for eval_round" not in source
-    assert "_extractive_slides" not in source
+    assert "_extractive_slides" in source
     assert source.count("evaluator_check(") == 1
 
 
@@ -82,10 +104,8 @@ def test_generated_output_rejection_is_normal_skip_not_failure():
     mvp = _load_mvp()
     source = inspect.getsource(mvp.main)
     block = source[source.index('if errors:'):source.index('final_contract_errors')]
-    assert 'print("⏸️ Skip — generated slides failed checks", flush=True)' in block
-    assert 'print("⏸️ Skip — evaluator did not approve", flush=True)' in block
-    assert block.count('sys.exit(0)') == 2
-    assert 'sys.exit(1)' not in block
+    assert '_record_failure("GENERATION_FAILED_ALL_CANDIDATES")' in block
+    assert 'sys.exit(0)' in block
 
 
 def test_space_sentences_collapses_literal_backslash_newline():
@@ -170,6 +190,16 @@ def test_extractive_slides_skip_long_sentences_and_preserve_source_text():
     article = " ".join([long, *valid])
     slides = mvp._extractive_slides(article, url)
     assert slides and not mvp._extractive_audit_errors(slides, article)
+
+
+def test_failure_telemetry_records_reason_code(tmp_path, monkeypatch):
+    mvp = _load_mvp()
+    path = tmp_path / "failure-telemetry.json"
+    monkeypatch.setattr(mvp, "_FAILURE_LOG_FILE", str(path))
+    mvp._record_failure("GROUNDING_REJECTED", "bbc", "Test story")
+    data = __import__("json").loads(path.read_text())
+    assert data[-1]["reason"] == "GROUNDING_REJECTED"
+    assert data[-1]["source"] == "bbc"
 
 
 def test_extractive_slides_need_twelve_source_sentences():

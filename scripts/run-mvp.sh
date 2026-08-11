@@ -31,15 +31,27 @@ retryable_failure() {
     grep -Eiq 'HTTP 429|HTTP 5[0-9][0-9]|timeout|timed out|connection reset|temporarily unavailable' /tmp/pressbox-mvp.log
 }
 
-# Retry once only for transient upstream failures. Editorial rejects are deterministic.
-for RETRY in 1 2; do
-    python3 -u pressbox-mvp.py "${PIPE_ARGS[@]}" > /tmp/pressbox-mvp.log 2>&1
+# One bounded fresh-scrape retry for source/evidence/generation exhaustion.
+# Do not retry volume gate, normal filter skip, or grounding output indefinitely.
+python3 -u pressbox-mvp.py "${PIPE_ARGS[@]}" > /tmp/pressbox-mvp.log 2>&1
+EXIT_CODE=$?
+if [ $EXIT_CODE -eq 0 ] && [ ! -f "$POST_MARKER" ] \
+   && grep -Eiq 'all candidates failed generation|no body-validated candidates|no topics scraped' /tmp/pressbox-mvp.log; then
+    echo "Bounded fresh-scrape retry..." >> /tmp/pressbox-mvp.log
+    sleep 10
+    python3 -u pressbox-mvp.py "${PIPE_ARGS[@]}" --fresh-scrape >> /tmp/pressbox-mvp.log 2>&1
     EXIT_CODE=$?
-    [ $EXIT_CODE -eq 0 ] && break
-    [ "$RETRY" -eq 1 ] && retryable_failure || break
+fi
+
+# Retry once only for transient upstream failures. Editorial rejects are deterministic.
+if [ $EXIT_CODE -ne 0 ] && retryable_failure; then
     sleep 120
-    echo "Retry $RETRY..." >> /tmp/pressbox-mvp.log
-done
+    echo "Transient retry..." >> /tmp/pressbox-mvp.log
+    python3 -u pressbox-mvp.py "${PIPE_ARGS[@]}" --fresh-scrape >> /tmp/pressbox-mvp.log 2>&1
+    EXIT_CODE=$?
+fi
+
+# Never reuse a stale marker after a retry.
 
 NOW_WIB=$(TZ=Asia/Jakarta date '+%H:%M WIB')
 

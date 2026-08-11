@@ -7,25 +7,83 @@ _parser = argparse.ArgumentParser(description="Pressbox football carousel publis
 _parser.add_argument("--dry-run", action="store_true", help="render without publishing")
 _parser.add_argument("--with-jitter", action="store_true", help="delay startup by up to 30 seconds")
 _parser.add_argument("--watchdog", action="store_true", help=argparse.SUPPRESS)
-ARGS = argparse.Namespace(dry_run=False, with_jitter=False, watchdog=False)
+_parser.add_argument("--fresh-scrape", action="store_true", help="ignore source fingerprints and refresh source candidates")
+ARGS = argparse.Namespace(dry_run=False, with_jitter=False, watchdog=False, fresh_scrape=False)
 if __name__ == "__main__":
     ARGS = _parser.parse_args()
 for _p, _m in [("requests","requests"),("httpx","httpx"),("beautifulsoup4","bs4"),("python-dotenv","dotenv")]:
     try: __import__(_m)
     except ImportError: _sp.check_call([_sys.executable,"-m","pip","install","--quiet","--root-user-action=ignore",_p],stdout=_sp.DEVNULL,stderr=_sp.DEVNULL)
 
-import html as html_mod, json, os, re, sys, time, random, fcntl, uuid
+import html as html_mod, json, os, re, sys, time, random, fcntl, uuid, unicodedata
 from datetime import datetime, timezone, timedelta
 from concurrent.futures import ThreadPoolExecutor
 
 # ── SINGLE-RUN LOCK ─────────────────────────────────────────────────────────
 _PIPELINE_LOCK = "/tmp/pressbox-mvp-internal.lock"
-_lf = open(_PIPELINE_LOCK, "w")
-try:
-    fcntl.flock(_lf.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-except BlockingIOError:
-    print("SKIPPED_ALREADY_RUNNING", flush=True)
-    sys.exit(0)
+_lf = None
+
+def _acquire_pipeline_lock():
+    """Acquire runtime lock only when executing pipeline, never on import/tests."""
+    global _lf
+    _lf = open(_PIPELINE_LOCK, "w")
+    try:
+        fcntl.flock(_lf.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print("SKIPPED_ALREADY_RUNNING", flush=True)
+        sys.exit(0)
+
+
+def _release_pipeline_lock():
+    global _lf
+    if _lf is not None:
+        try:
+            fcntl.flock(_lf.fileno(), fcntl.LOCK_UN)
+            _lf.close()
+        except Exception:
+            pass
+        _lf = None
+
+# Runtime lock acquired in __main__, after imports and CLI tests are safe.
+
+# ── FAILURE TELEMETRY ────────────────────────────────────────────────────────
+_FAILURE_LOG_FILE = os.path.expanduser("~/.hermes/pressbox/failure_telemetry.json")
+def _record_failure(reason, source="", title=""):
+    """Append bounded machine-readable no-post reason telemetry."""
+    try:
+        rows = []
+        if os.path.exists(_FAILURE_LOG_FILE):
+            try: rows = json.load(open(_FAILURE_LOG_FILE))
+            except: rows = []
+        rows.append({
+            "ts": datetime.now(timezone(timedelta(hours=7))).isoformat(),
+            "reason": reason,
+            "source": source,
+            "title": title[:160],
+        })
+        os.makedirs(os.path.dirname(_FAILURE_LOG_FILE), exist_ok=True)
+        with open(_FAILURE_LOG_FILE, "w") as f:
+            json.dump(rows[-500:], f, ensure_ascii=False)
+    except Exception:
+        pass
+
+
+def _strip_accents(value):
+    return "".join(c for c in unicodedata.normalize("NFKD", value)
+                   if unicodedata.category(c) != "Mn")
+
+
+def _normalise_entity(value):
+    value = _strip_accents(value).lower()
+    value = re.sub(r"[^a-z0-9]+", " ", value)
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def _entity_in_text(entity, text):
+    """Accent-insensitive, punctuation-tolerant entity match."""
+    needle = _normalise_entity(entity)
+    haystack = _normalise_entity(text)
+    return bool(needle and re.search(r"(?<![a-z0-9])" + re.escape(needle) + r"(?![a-z0-9])", haystack))
 
 # ── TOKEN BUDGET GATE ────────────────────────────────────────────────────────
 # Rough char→token estimate (4 chars/token). Hard cap 20k tokens ≈ 80k chars.
@@ -548,7 +606,7 @@ def scrape_all():
         old_fp = fingerprints.get(name, "")
         old_ts = fingerprints.get(f"{name}_ts", 0)
         age_h = (time.time() - old_ts) / 3600 if old_ts else 999
-        if fp == old_fp and age_h < 3.0:
+        if not getattr(ARGS, "fresh_scrape", False) and fp == old_fp and age_h < 3.0:
             return [], False  # unchanged + not expired
         return topics, True
 
@@ -1515,7 +1573,7 @@ def fetch_article(url):
 
 # Grounding validator — kept from v7
 _SKIP_WORDS = frozenset({
-    'The','This','That','These','Those','A','An','When','Where','What','Which','While',
+    'The','This','That','These','Those','A','An','When','Where','What','Which','Why','How','While',
     'After','Before','During','Under','Over','Since','Until','Between','Among','Through',
     'Against','Into','Upon','Within','Without','From','With','About','Above','Across',
     'Along','Around','Behind','Below','Beneath','Beside','Beyond','Down','Inside','Near',
@@ -1579,7 +1637,7 @@ def grounding_check(slides_text, article_text, article_names, article_stages):
     article_lower = article_text.lower()
     for name in _extract_proper_nouns(slides_text):
         # Skip if in article literally (case-insensitive)
-        if name.lower() in article_lower:
+        if _entity_in_text(name, article_text):
             continue
         # Skip common knowledge entities (they're valid contextual references)
         if name in _COMMON_KNOWLEDGE_ENTITIES:
@@ -2001,26 +2059,30 @@ def _source_units(article_text):
     rather than dumping them into a long quote block that kills the count).
     """
     text = " ".join(article_text.split())
-    units, start = [], 0
-    # Split on sentence boundaries first, then filter for quote-safety per unit.
-    # This avoids the state-machine pitfall entirely.
-    raw_sentences = re.split(r'(?<=[.!?])\s+', text)
-    for sent in raw_sentences:
+    # Protect complete quotes before sentence splitting. Drop unclosed quote
+    # fragments; they are scrape noise or incomplete evidence.
+    protected = {}
+    def protect(match):
+        key = f"__QUOTE_{len(protected)}__"
+        quote = match.group(0)
+        protected[key] = quote
+        ending = "."
+        if len(quote) > 1 and quote[-2] in ".!?":
+            ending = quote[-2]
+        return key + ending
+    safe = re.sub(r'"[^"\n]+"|“[^”\n]+”', protect, text)
+    units = []
+    for sent in re.split(r'(?<=[.!?])\s+', safe):
         sent = sent.strip()
-        if len(sent) < 20:
+        if len(sent) < 20 or '"' in sent or '“' in sent:
             continue
-        # Accept any unit with even quote count; units with odd quotes (unclosed or
-        # opening-only) are still accepted — we prefer sentence coverage over purity.
-        # Reject only units with 0 or >50 chars that are clearly garbage.
-        if len(sent) > MAX_CHARS:
-            # Sub-split long units on commas/semicolons for sub-sentences
-            chunks = re.split(r'(?<=[,;])\s+', sent)
-            for ch in chunks:
-                ch = ch.strip()
-                if 20 <= len(ch) <= MAX_CHARS:
-                    units.append(ch)
-        elif 20 <= len(sent):
+        for key, quote in protected.items():
+            sent = sent.replace(key + ".", quote).replace(key + "!", quote).replace(key + "?", quote)
+        if len(sent) <= MAX_CHARS:
             units.append(sent)
+        else:
+            units.extend(ch.strip() for ch in re.split(r'(?<=[,;])\s+', sent)
+                         if 20 <= len(ch) <= MAX_CHARS)
     return units
 
 
@@ -2187,11 +2249,7 @@ def _slide_contract_errors(slides, editorial=True):
         text = _space_sentences(slide.get("content", ""))
         if not text or len(text) > MAX_CHARS:
             errors.append(f"S{i} invalid length ({len(text)})")
-        elif i == 6 and len(_source_units(text.split("\n\nhttp", 1)[0])) < 1:
-            errors.append(f"S{i} needs at least 1 sentence")
-        elif i == 1 and len(_source_units(text.split("\n\nhttp", 1)[0])) < 1:
-            errors.append(f"S1 needs at least 1 sentence")
-        elif 2 <= i <= 5 and len(_source_units(text.split("\n\nhttp", 1)[0])) < 2:
+        elif len(_source_units(text.split("\n\nhttp", 1)[0])) < 2:
             errors.append(f"S{i} needs at least 2 sentences")
     return errors
 
@@ -2682,12 +2740,15 @@ def _body_first_shortlist(ranked, limit=15):
         image = image or t.get("image_url", "")
         if len(text.strip()) < 1000 or len(text.split()) < 150 or len(sentences) < 5:
             rejected.append((title, "body below publication minimum"))
+            _record_failure("THIN_BODY", t.get("source", ""), title)
             continue
         if football < 2 and commercial >= 2:
             rejected.append((title, "commercial body"))
+            _record_failure("COMMERCIAL_BODY", t.get("source", ""), title)
             continue
         if not image:
             rejected.append((title, "no usable lead image"))
+            _record_failure("IMAGE_INVALID", t.get("source", ""), title)
             continue
         t.update(_article_text=text, _image_url=image, _age_h=age_h)
         t["_score"] += min(15, len(text) // 1000) + (5 if '"' in text or re.search(r'\d{3,}', text) else 0)
@@ -2759,6 +2820,7 @@ def main():
     topics = scrape_all()
     if not topics:
         log("❌ No topics scraped")
+        _record_failure("NO_TOPICS_SCRAPED")
         print("❌ Pipeline: no topics scraped", flush=True)
         sys.exit(1)
 
@@ -2782,10 +2844,12 @@ def main():
     ranked = filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_summary, hotness, _last_sources)
     if not ranked:
         log("❌ No topics after filter")
+        _record_failure("ALL_TOPICS_FILTERED")
         print("❌ Pipeline: all topics filtered out", flush=True)
         sys.exit(1)
     ranked = _body_first_shortlist(ranked)
     if not ranked:
+        _record_failure("NO_BODY_VALIDATED_CANDIDATES")
         print("❌ Pipeline: no body-validated candidates", flush=True)
         sys.exit(1)
 
@@ -2793,6 +2857,7 @@ def main():
     ranked = [topic for topic in ranked if _high_risk_claim_allowed(
         topic.get("_article_text", ""), topic.get("source", ""))]
     if not ranked:
+        _record_failure("HIGH_RISK_SOURCE_REJECTED")
         print("⏸️ Skip — no tier-one source for high-risk claim", flush=True)
         sys.exit(0)
 
@@ -2806,6 +2871,7 @@ def main():
     if best["_score"] < threshold:
         log(f"   ⏸️ Best score {best['_score']} < {threshold} threshold — skipping")
         print(f"⏸️ Skip — best topic score {best['_score']} below threshold", flush=True)
+        _record_failure("SCORE_BELOW_THRESHOLD", best.get("source", ""), best.get("title", ""))
         sys.exit(1)
     log(f"   🏆 Best: {best['title']} (score={best['_score']}, type={best.get('_topic_type','')})")
 
@@ -2907,6 +2973,7 @@ def main():
         evidence_plan = _evidence_plan(art_text)
         if not evidence_plan:
             log(f"   ⚠️ Candidate #{candidate_idx+1} lacks evidence — trying next")
+            _record_failure("INSUFFICIENT_EVIDENCE", candidate.get("source", ""), art_title)
             continue
 
         all_errors = ""
@@ -2980,9 +3047,31 @@ def main():
         time.sleep(3 + random.random() * 2)  # 3-5s jitter between candidates
 
     if not passed:
-        log("⏸️ Skip — all candidates failed generation")
-        print("⏸️ Skip — all candidates failed generation", flush=True)
-        sys.exit(0)
+        # Last-resort source-verbatim fallback. It never adds facts and reuses
+        # the same two-sentence slide contract plus exact-source audit.
+        for candidate in ranked[:5]:
+            fallback = _extractive_slides(
+                candidate.get("_article_text", ""), candidate.get("url", ""), candidate.get("title", "")
+            )
+            if not fallback:
+                continue
+            slides = fallback
+            best = candidate
+            url = candidate.get("url", "")
+            image_url = candidate.get("_image_url", "") or candidate.get("image_url", "")
+            article_text = candidate.get("_article_text", "")
+            pattern = _select_viral_pattern(candidate, article_text)
+            passed = True
+            log(f"   ✅ Extractive fallback accepted: {candidate.get('title', '')[:80]}")
+            break
+        if passed:
+            _record_failure("LLM_GENERATION_FALLBACK", best.get("source", ""), best.get("title", ""))
+            log("   ✅ Source-verbatim fallback passed all checks")
+        else:
+            _record_failure("GENERATION_FAILED_ALL_CANDIDATES")
+            log("⏸️ Skip — all candidates failed generation")
+            print("⏸️ Skip — all candidates failed generation", flush=True)
+            sys.exit(0)
 
 
     final_contract_errors = _slide_contract_errors(slides)
@@ -3058,6 +3147,7 @@ Score: {score} | {slide_count} slides | {total:.1f}s
     print(report, flush=True)
 
 if __name__ == "__main__":
+    _acquire_pipeline_lock()
     _self_check()
     import random as _rnd
     if ARGS.with_jitter:
@@ -3072,5 +3162,8 @@ if __name__ == "__main__":
         import traceback
         err = traceback.format_exc()
         log(f"❌ CRASH: {err[:500]}")
+        _record_failure("CRASH", title=err.splitlines()[-1] if err else "")
         notify_telegram(f"❌ <b>Pipeline Crash</b>\n\n{err[:1000]}")
         sys.exit(1)
+    finally:
+        _release_pipeline_lock()
