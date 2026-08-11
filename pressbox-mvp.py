@@ -138,6 +138,7 @@ _load_eval_cache()
 
 # Engagement ring buffer — realtime per-(source, hook) performance tracking
 _ENGAGEMENT_RING = {"posts": []}
+_LAST_GENERATION_FAILURE = ""
 _RING_PATH = os.path.expanduser("~/.hermes/pressbox/engagement_ring.json")
 
 def _load_ring():
@@ -2251,7 +2252,9 @@ def _story_text(article_text, title):
     # Do not shrink a publishable source below the carousel minimum. Body cleaner
     # already removed structural noise; title filtering is only safe with enough evidence.
     filtered = " ".join(related)
-    return filtered if len(filtered) >= 1000 and len(related) >= 6 else article_text
+    # Keep title-filtered text only when it retains enough distinct evidence.
+    # Roundup pages often mention title entities in a few unrelated lines.
+    return filtered if len(filtered) >= 1800 and len(related) >= 10 else article_text
 
 
 _TIER_ONE_SOURCES = ("bbc", "reuters", "associated press", "ap news", "sky sports", "the athletic", "official", "fifa", "uefa")
@@ -2334,6 +2337,8 @@ def generate_slides(article_text, url, title="", source="", hooks="", cta_patter
     Token budget: hard reject >80k chars input, warn >48k chars.
     Retry only for HTTP 429 / transient network errors. Max 1 retry.
     """
+    global _LAST_GENERATION_FAILURE
+    _LAST_GENERATION_FAILURE = ""
     if not MISTRAL_KEY:
         log("❌ No MISTRAL_API_KEY — cannot generate")
         return None
@@ -2403,7 +2408,7 @@ S5 Final Verified Angle and Attribution: strongest remaining verified detail. At
 S6 Payoff: sharp source-supported takeaway. Ask a question only when source supports two real outcomes.
 
 ## LENGTH AND STYLE RULES
-Every slide must have at least two complete sentences, each grounded in its assigned evidence lines. If two supported sentences cannot fit, return needs_more_source. Keep writing compact, natural, and easy for football fans to scan. One new insight per slide. Avoid repeated facts. Use numbers only when source explicitly provides them. Paraphrase quotes accurately; never reproduce long quote. Keep each slide at or below 450 characters.
+Every slide must have at least two complete sentences, each grounded in its assigned evidence lines. Never submit one-sentence slides. If two supported sentences cannot fit, return needs_more_source. Keep writing compact, natural, and easy for football fans to scan. One new insight per slide. Avoid repeated facts. Use numbers only when source explicitly provides them. Paraphrase quotes accurately; never reproduce long quote. Keep each slide at or below 450 characters.
 
 ## CAPTION
 - Exactly one sentence.
@@ -2565,6 +2570,7 @@ S6 = CIRCLE BACK: Reference S1's tension with a sharp question. "So which is it 
                     continue
                 else:
                     _log_llm(RUN_ID, "generate_slides", total_input_chars, 0, False, "mistral-large-latest", "RATE_LIMITED")
+                    _LAST_GENERATION_FAILURE = "LLM_RATE_LIMITED"
                     log("   ❌ Rate-limited after retry, exiting")
                     return None
             elif r.status_code >= 500:
@@ -3091,6 +3097,11 @@ def main():
             )
             gen_elapsed = time.time() - gen_t0
             if not slides:
+                if _LAST_GENERATION_FAILURE == "LLM_RATE_LIMITED":
+                    _record_failure("LLM_RATE_LIMITED", candidate.get("source", ""), art_title)
+                    log("❌ Stop candidate churn after provider rate limit")
+                    print("❌ Pipeline: provider rate limited", flush=True)
+                    sys.exit(1)
                 if gen_attempt == 1:
                     log(f"   ⚠️ LLM empty (attempt 1), retrying...")
                     all_errors = "LLM returned empty response"

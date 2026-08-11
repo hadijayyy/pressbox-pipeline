@@ -28,7 +28,7 @@ PIPE_ARGS=(--with-jitter)
 [ "${1:-}" = "--watchdog" ] && PIPE_ARGS+=(--watchdog)
 
 retryable_failure() {
-    grep -Eiq 'HTTP 429|HTTP 5[0-9][0-9]|timeout|timed out|connection reset|temporarily unavailable' /tmp/pressbox-mvp.log
+    grep -Eiq 'HTTP 429|HTTP 5[0-9][0-9]|rate.?limited|RATE_LIMITED|timeout|timed out|connection reset|temporarily unavailable' /tmp/pressbox-mvp.log
 }
 
 # One bounded fresh-scrape retry for source/evidence/generation exhaustion.

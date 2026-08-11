@@ -82,6 +82,31 @@ def test_hot_topics_ignore_untimestamped_stale_cache_rows(tmp_path, monkeypatch)
     assert "https://new.example/two" in hotness
 
 
+def test_story_text_keeps_original_when_title_filter_is_thin():
+    mvp = _load_mvp()
+    title = "Arsenal Vinicius"
+    relevant = " ".join(
+        f"Arsenal discussed Vinicius detail {i} with the club and player representatives."
+        for i in range(12)
+    )
+    article = relevant + " " + ("Unrelated article context. " * 80)
+    filtered = mvp._story_text(article, title)
+    assert len(filtered) >= 1800
+
+
+def test_generation_prompt_requires_exactly_two_sentences_per_slide():
+    mvp = _load_mvp()
+    source = inspect.getsource(mvp.generate_slides)
+    assert "at least two complete sentences" in source
+
+
+def test_generation_stops_candidate_churn_after_rate_limit():
+    mvp = _load_mvp()
+    source = inspect.getsource(mvp.main)
+    assert "LLM_RATE_LIMITED" in source
+    assert "provider rate limit" in source
+
+
 def test_grounding_matches_accents_and_ignores_question_prefix():
     mvp = _load_mvp()
     slides = "Why Julián Álvarez wants talks with Gil Marín."
