@@ -43,6 +43,7 @@ done
 
 NOW_WIB=$(TZ=Asia/Jakarta date '+%H:%M WIB')
 
+# Success with posted content
 if [ $EXIT_CODE -eq 0 ] && [ -f "$POST_MARKER" ] && [ -f /tmp/pressbox-last-report ]; then
     TS=$(date -Iseconds)
     echo "ok $TS" > /tmp/pressbox-last-post
@@ -50,8 +51,22 @@ if [ $EXIT_CODE -eq 0 ] && [ -f "$POST_MARKER" ] && [ -f /tmp/pressbox-last-repo
     REPORT=$(cat /tmp/pressbox-last-report)
     echo "$REPORT"
     notify "$REPORT"
+# Lock held — another instance already running. Not an error.
 elif [ $EXIT_CODE -eq 75 ]; then
-    exit 75
+    echo "MVP: lock held (another instance running)"
+    TS=$(date -Iseconds)
+    echo "LOCKED $TS" > /tmp/pressbox-last-status
+    exit 0
+# Normal skip — exit 0, write SKIP status so watchdog doesn't retry
+elif [ $EXIT_CODE -eq 0 ]; then
+    SKIP_REASON=$(grep -E '^(Pipeline:.*Skip|Pipeline:.*no eligible|Skip —)' /tmp/pressbox-mvp.log | tail -1 | sed 's/^Pipeline: *//' | sed 's/^Skip — *//')
+    [ -z "$SKIP_REASON" ] && SKIP_REASON=$(grep -E 'Pipeline:' /tmp/pressbox-mvp.log | tail -1 | sed 's/^Pipeline: *//')
+    [ -z "$SKIP_REASON" ] && SKIP_REASON="normal_skip"
+    TS=$(date -Iseconds)
+    echo "SKIP $TS $SKIP_REASON" > /tmp/pressbox-last-status
+    echo "Pressbox MVP: SKIP — $SKIP_REASON"
+    exit 0
+# Actual error — notify and propagate exit code
 else
     STAGE_REASON=$(grep -E 'Pipeline:|Skip —|generated slides failed checks|CRASH:|Post failed:' /tmp/pressbox-mvp.log | tail -1)
     [ -n "$STAGE_REASON" ] || STAGE_REASON="no stage reason captured"
@@ -59,6 +74,8 @@ else
     echo "$MSG"
     tail -20 /tmp/pressbox-mvp.log >&2
     notify "$MSG"
+    TS=$(date -Iseconds)
+    echo "FAILED $TS $STAGE_REASON" > /tmp/pressbox-last-status
 fi
 
 exit $EXIT_CODE

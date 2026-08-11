@@ -14,9 +14,52 @@ for _p, _m in [("requests","requests"),("httpx","httpx"),("beautifulsoup4","bs4"
     try: __import__(_m)
     except ImportError: _sp.check_call([_sys.executable,"-m","pip","install","--quiet","--root-user-action=ignore",_p],stdout=_sp.DEVNULL,stderr=_sp.DEVNULL)
 
-import html as html_mod, json, os, re, sys, time, random
+import html as html_mod, json, os, re, sys, time, random, fcntl, uuid
 from datetime import datetime, timezone, timedelta
 from concurrent.futures import ThreadPoolExecutor
+
+# ── SINGLE-RUN LOCK ─────────────────────────────────────────────────────────
+_PIPELINE_LOCK = "/tmp/pressbox-mvp-internal.lock"
+_lf = open(_PIPELINE_LOCK, "w")
+try:
+    fcntl.flock(_lf.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+except BlockingIOError:
+    print("SKIPPED_ALREADY_RUNNING", flush=True)
+    sys.exit(0)
+
+# ── TOKEN BUDGET GATE ────────────────────────────────────────────────────────
+# Rough char→token estimate (4 chars/token). Hard cap 20k tokens ≈ 80k chars.
+_MAX_INPUT_CHARS = 80_000
+_WARN_INPUT_CHARS = 48_000   # >12k tokens warning threshold
+
+# ── LLM CALL LOG ─────────────────────────────────────────────────────────────
+_LLM_LOG_FILE = os.path.expanduser("~/.hermes/pressbox/llm_calls.json")
+def _log_llm(run_id, stage, input_chars, output_tokens, cache_hit, model, status):
+    try:
+        rows = []
+        if os.path.exists(_LLM_LOG_FILE):
+            try: rows = json.loads(open(_LLM_LOG_FILE).read())
+            except: rows = []
+        rows.append({
+            "ts": datetime.now(timezone(timedelta(hours=7))).isoformat(),
+            "run_id": run_id,
+            "stage": stage,
+            "input_chars": input_chars,
+            "input_tokens_est": input_chars // 4,
+            "output_tokens": output_tokens,
+            "cache_hit": cache_hit,
+            "model": model,
+            "status": status,
+        })
+        # Keep last 1000 entries
+        with open(_LLM_LOG_FILE, "w") as f:
+            json.dump(rows[-1000:], f, ensure_ascii=False)
+    except Exception:
+        pass
+
+def _est_tokens(text: str) -> int:
+    """Estimate token count from text."""
+    return len(text) // 4
 
 # Evaluator cache — persist URL→result so retried articles skip re-eval
 _EVAL_CACHE = {}
@@ -1610,6 +1653,11 @@ def evaluator_check(slides, article_text, url, verbatim=False, assigned_evidence
         "Review these slides. Be skeptical. Find problems."
     )
 
+    # Token budget gate for evaluator
+    total_input = len(system) + len(user)
+    if total_input > _MAX_INPUT_CHARS:
+        return "ERROR", ["token budget exceeded in evaluator"]
+
     try:
         r = requests.post(
             "https://api.mistral.ai/v1/chat/completions",
@@ -1617,6 +1665,7 @@ def evaluator_check(slides, article_text, url, verbatim=False, assigned_evidence
             json=_evaluator_request_payload(system, user),
             timeout=30)
         if r.status_code != 200:
+            _log_llm("pb-ev", "evaluator_check", total_input, 0, False, "mistral-small-latest", f"HTTP_{r.status_code}")
             return "ERROR", [f"evaluator HTTP {r.status_code}"]
         content = r.json()["choices"][0]["message"]["content"].strip()
         # Parse JSON response
@@ -1627,8 +1676,10 @@ def evaluator_check(slides, article_text, url, verbatim=False, assigned_evidence
         reasons = data.get("reasons", [])
         if decision not in ("APPROVE", "REVISE", "REJECT"):
             decision = "ERROR"
+        _log_llm("pb-ev", "evaluator_check", total_input, len(content) // 4, False, "mistral-small-latest", decision)
         return decision, reasons
     except Exception as e:
+        _log_llm("pb-ev", "evaluator_check", total_input, 0, False, "mistral-small-latest", f"EXCEPTION_{type(e).__name__}")
         return "ERROR", [f"evaluator error: {e}"]
 
 def _count_sentences(text):
@@ -2028,6 +2079,33 @@ def _assigned_evidence(article_text, evidence_plan):
     return resolved if len(resolved) == 6 else None
 
 
+def _build_fact_packet(title, body, url, source, published_at="") -> str:
+    """Build compact fact packet for LLM: ≤4000 tokens (≈16,000 chars).
+    Stripped of HTML, no prompt file content, no conversation history.
+    """
+    # Truncate body — keep first 8,000 chars (≈2k tokens) for context
+    body_snippet = body[:8000].strip()
+    facts = []
+    sentences = re.split(r'(?<=[.!?])\s+', body_snippet)
+    for s in sentences:
+        s = s.strip()
+        if len(s) >= 20 and len(facts) < 15:
+            facts.append(s)
+    facts_str = "\n".join(f"[F{i+1}] {f}" for i, f in enumerate(facts))
+
+    parts = [
+        f"TITLE: {title}",
+        f"URL: {url}",
+        f"SOURCE: {source}",
+        f"PUBLISHED: {published_at or 'unknown'}",
+        "",
+        "VERIFIED FACTS (use only these):",
+        facts_str,
+    ]
+    # Sources list only — no article body
+    return "\n".join(parts)
+
+
 def _story_text(article_text, title):
     """Drop roundup tangents that do not mention the title's main entities."""
     ignored = {"news", "transfer", "transfers", "latest", "update", "updates", "major", "hint"}
@@ -2120,12 +2198,22 @@ def _slide_contract_errors(slides, editorial=True):
 
 def generate_slides(article_text, url, title="", source="", hooks="", cta_pattern="", tone="", pattern="a", evaluator_feedback="", evidence_plan=None):
     """Call LLM to generate 6-slide thread. Returns parsed slides or None.
-    If evaluator_feedback is provided, appends correction instructions to the prompt."""
+    If evaluator_feedback is provided, appends correction instructions to the prompt.
+    Token budget: hard reject >80k chars input, warn >48k chars.
+    Retry only for HTTP 429 / transient network errors. Max 1 retry.
+    """
     if not MISTRAL_KEY:
         log("❌ No MISTRAL_API_KEY — cannot generate")
         return None
 
+    RUN_ID = f"pb-{uuid.uuid4().hex[:8]}" if 'uuid' in dir() else f"pb-{int(time.time())}"
+    # ── TOKEN BUDGET GATE ──
     article_text = _story_text(article_text, title)
+    # Gate on article text alone (system prompt is ~1500 tokens = 6000 chars, stable)
+    if _est_tokens(article_text) > _MAX_INPUT_CHARS // 4:
+        _log_llm(RUN_ID, "generate_slides", len(article_text), 0, False, "mistral-large-latest", "TOKEN_BUDGET_EXCEEDED")
+        log(f"❌ Token budget exceeded: {_est_tokens(article_text)} tokens (max {_MAX_INPUT_CHARS//4})")
+        return None
     # ── Build system prompt dynamically ──
     base = """You are the editorial content engine for @parkthebus.football.
 
@@ -2311,10 +2399,21 @@ S6 = CIRCLE BACK: Reference S1's tension with a sharp question. "So which is it 
     if evaluator_feedback:
         user += f"\n\n## ⚠️ EVALUATOR REJECTED YOUR PREVIOUS ATTEMPT — FIX THESE ERRORS:\n{evaluator_feedback}\nRegenerate ALL 6 slides. Do NOT repeat the errors above."
 
-    last_errors = ""
-    for attempt in range(1, 3):
-        attempt_suffix = f" (attempt {attempt}/2)"
-        log(f"   LLM attempt{attempt_suffix}...")
+    # ── TOKEN BUDGET GATE (final check after user message built) ──
+    total_input_chars = len(system) + len(user)
+    if total_input_chars > _WARN_INPUT_CHARS:
+        log(f"⚠️ Input token warning: ~{total_input_chars // 4} tokens (>{_WARN_INPUT_CHARS // 4})")
+    if total_input_chars > _MAX_INPUT_CHARS:
+        _log_llm(RUN_ID, "generate_slides", total_input_chars, 0, False, "mistral-large-latest", "TOKEN_BUDGET_EXCEEDED")
+        log(f"❌ Token budget hard cap exceeded: ~{total_input_chars // 4} tokens (max {_MAX_INPUT_CHARS // 4})")
+        return None
+
+    # ── LLM CALL: transient-only retry (max 1), no retry for content/quality failures ──
+    # Retry triggers: HTTP 429, network/timeout errors only.
+    # Non-retryable: 4xx (except 429), empty response, JSON parse fail, contract violations.
+    attempt = 1
+    while attempt <= 2:
+        log(f"   LLM attempt {attempt}/2...")
         try:
             r = requests.post(
                 "https://api.mistral.ai/v1/chat/completions",
@@ -2324,16 +2423,33 @@ S6 = CIRCLE BACK: Reference S1's tension with a sharp question. "So which is it 
                     "max_tokens":4000,"temperature":0.3,"stream":True},
                 timeout=120, stream=True)
 
-            if r.status_code != 200:
-                log(f"   ❌ HTTP {r.status_code}: {r.text[:200]}")
-                if r.status_code == 429:
-                    wait = 2 ** attempt + random.random()
-                    log(f"   ⏭️ Rate-limited — waiting {wait:.1f}s")
+            if r.status_code == 429:
+                wait = 2 ** attempt + random.random()
+                log(f"   ⏭️ Rate-limited — backoff {wait:.1f}s")
+                if attempt < 2:
                     time.sleep(wait)
+                    attempt += 1
                     continue
                 else:
-                    time.sleep(2 + attempt)
-                continue
+                    _log_llm(RUN_ID, "generate_slides", total_input_chars, 0, False, "mistral-large-latest", "RATE_LIMITED")
+                    log("   ❌ Rate-limited after retry, exiting")
+                    return None
+            elif r.status_code >= 500:
+                # Transient server error — retry
+                wait = 2 ** attempt + random.random()
+                log(f"   ❌ Server error {r.status_code} — backoff {wait:.1f}s")
+                if attempt < 2:
+                    time.sleep(wait)
+                    attempt += 1
+                    continue
+                else:
+                    _log_llm(RUN_ID, "generate_slides", total_input_chars, 0, False, "mistral-large-latest", f"HTTP_{r.status_code}")
+                    return None
+            elif r.status_code != 200:
+                # Non-transient client error — do NOT retry
+                _log_llm(RUN_ID, "generate_slides", total_input_chars, 0, False, "mistral-large-latest", f"HTTP_{r.status_code}")
+                log(f"   ❌ HTTP {r.status_code} — non-transient, no retry")
+                return None
 
             parts = []
             for line in r.iter_lines():
@@ -2347,8 +2463,10 @@ S6 = CIRCLE BACK: Reference S1's tension with a sharp question. "So which is it 
                 except: continue
             content = "".join(parts).strip()
             if not content:
-                log("   ❌ Empty response")
-                continue
+                # Empty response — non-transient, no retry
+                _log_llm(RUN_ID, "generate_slides", total_input_chars, 0, False, "mistral-large-latest", "EMPTY_RESPONSE")
+                log("   ❌ Empty LLM response — non-transient, no retry")
+                return None
             # Clean thinking tags
             content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
             content = re.sub(r"^```(?:json|text)?\s*", "", content)
@@ -2409,12 +2527,18 @@ S6 = CIRCLE BACK: Reference S1's tension with a sharp question. "So which is it 
                 if len(new_last) > 480:
                     new_last = last.rstrip()[:480] + "...\n\n" + url
                 slides[-1]["content"] = new_last
+            # Log success
+            output_tokens_est = sum(len(s["content"]) for s in slides) // 4
+            _log_llm(RUN_ID, "generate_slides", total_input_chars, output_tokens_est, False, "mistral-large-latest", "OK")
+            log(f"   ✅ Generated ({output_tokens_est} output tokens est, {total_input_chars // 4} input tokens est)")
             return slides
         except Exception as e:
             log(f"   ❌ LLM exception: {e}")
-            continue
+            _log_llm(RUN_ID, "generate_slides", total_input_chars, 0, False, "mistral-large-latest", f"EXCEPTION_{type(e).__name__}")
+            return None
 
     log("❌ Failed after 2 attempts")
+    _log_llm(RUN_ID, "generate_slides", total_input_chars, 0, False, "mistral-large-latest", "ALL_ATTEMPTS_FAILED")
     return None
 
 # ── 5. POST TO THREADS ─────────────────────────────────────────────
