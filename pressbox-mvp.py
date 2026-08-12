@@ -1826,6 +1826,11 @@ def _select_viral_pattern(topic, article_text):
     text = article_text.lower()[:2000]
     combined = title + " " + text
     import re as _re
+
+    # Question + Reasons arc: use only when source exposes multiple distinct reasons.
+    reason_markers = len(_re.findall(r"\b(?:first|second|third|another reason|key reason|reasons why)\b", combined))
+    if ("reason" in title or "why" in title) and reason_markers >= 2:
+        return "q"
     
     # Pattern A signals (Rule-Break): authority violates own rules, scandal, double standard
     rule_break_words = ["rule", "regulation", "tradition", "golden rule", "broke its own",
@@ -2451,6 +2456,15 @@ If source is insufficient return:
 
     # Pattern-specific arc template
     arc_templates = {
+        "q": """## ARC: Question + Reasons (Reference Pattern)
+Use only when the supplied article contains multiple distinct, attributed reasons or turning points.
+S1 = Ask one specific unresolved question and promise only the supported number of reasons. Do not invent mystery or count.
+S2 = Give the timeline and explain how close the outcome came to happening.
+S3-S5 = Deliver one concrete sourced reason or turning point per slide. Preserve attribution and uncertainty.
+S6 = Return to the opening question. Ask a grounded either/or or judgment question. Add no new fact.
+Copy structure, never wording. If evidence does not support a reason, return needs_more_source.
+
+""",
         "a": """## ARC: Rule-Break (Pattern A)
 S1 = CURIOSITY HOOK: Name the authority, the rule they broke, and the specific consequence — all in one breath.
 Bad (vague): "FIFA just broke its own golden rule for England vs Argentina."
@@ -2525,7 +2539,7 @@ S6 = CIRCLE BACK: Reference S1's tension with a sharp question. "So which is it 
     arc_template = arc_templates.get(pattern, "")
     ref_data = _build_reference_data()
     source_name = source or url.split("/")[2] if url else ""
-    pattern_label = {'a':'Rule-Break', 'b':'Contradiction', 'c':'Detail+Emotion', 'd':'Commentary', 'e':'Pressure-Cooker', 'f':'Behind-the-Scenes'}.get(pattern, 'Detail+Emotion')
+    pattern_label = {'q':'Question+Reasons', 'a':'Rule-Break', 'b':'Contradiction', 'c':'Detail+Emotion', 'd':'Commentary', 'e':'Pressure-Cooker', 'f':'Behind-the-Scenes'}.get(pattern, 'Detail+Emotion')
 
     # ── RECENT LEARNINGS (auto-injected from engagement feedback loop) ──
     recent_learnings = _load_recent_learnings()
@@ -3091,7 +3105,7 @@ def main():
 
         pattern = _select_viral_pattern(candidate, art_text)
         hook_variant = _select_hook_variant(analytics_summary, len(_ENGAGEMENT_RING.get("posts", [])) + candidate_idx)
-        pattern_name = {'a': 'A (Rule-Break)', 'b': 'B (deprecated)', 'c': 'C (Detail+Emotion)', 'd': 'D (Commentary)', 'e': 'E (Pressure-Cooker)', 'f': 'F (Behind-the-Scenes)'}[pattern]
+        pattern_name = {'q': 'Q (Question+Reasons)', 'a': 'A (Rule-Break)', 'b': 'B (deprecated)', 'c': 'C (Detail+Emotion)', 'd': 'D (Commentary)', 'e': 'E (Pressure-Cooker)', 'f': 'F (Behind-the-Scenes)'}[pattern]
         log(f"   🎯 Viral pattern: {pattern_name}")
         evidence_plan = candidate.get("_evidence_plan") or _evidence_plan(art_text)
         if not evidence_plan:
