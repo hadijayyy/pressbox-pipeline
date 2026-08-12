@@ -3157,22 +3157,19 @@ def main():
                 log("   ❌ Checks failed (attempt 2) — trying next candidate")
                 break
 
-            skip_eval = pattern in ("e", "f") or candidate.get("_score", 0) >= 80
-            if skip_eval:
-                log(f"   🔍 Evaluator: SKIP (pattern={pattern.upper()}, score={candidate.get('_score', 0)})")
-            else:
-                eval_t0 = time.time()
-                eval_decision, eval_reasons = evaluator_check(editorial_slides, art_text, art_url)
-                eval_time = time.time() - eval_t0
-                log(f"   🔍 Evaluator: {eval_decision} ({eval_time:.1f}s) — {'; '.join(eval_reasons[:3])}")
-                if eval_decision == "REJECT" or (gen_attempt == 1 and eval_decision != "APPROVE"):
-                    all_errors = "EVALUATOR: " + "; ".join(eval_reasons[:3])
-                    log(f"   ⚠️ Evaluator rejected (attempt {gen_attempt}): {all_errors}")
-                    if gen_attempt == 1:
-                        log("   🔁 Retrying with evaluator feedback...")
-                        continue
-                    log("   ❌ Evaluator rejected (attempt 2) — trying next candidate")
-                    break
+            eval_t0 = time.time()
+            eval_decision, eval_reasons = evaluator_check(
+                editorial_slides, art_text, art_url, assigned_evidence=evidence_plan)
+            eval_time = time.time() - eval_t0
+            log(f"   🔍 Evaluator: {eval_decision} ({eval_time:.1f}s) — {'; '.join(eval_reasons[:3])}")
+            if not _evaluator_accepts(eval_decision):
+                all_errors = "EVALUATOR: " + "; ".join(eval_reasons[:3])
+                log(f"   ⚠️ Evaluator rejected (attempt {gen_attempt}): {all_errors}")
+                if gen_attempt == 1:
+                    log("   🔁 Retrying with evaluator feedback...")
+                    continue
+                log("   ❌ Evaluator rejected (attempt 2) — trying next candidate")
+                break
 
             # All checks passed
             passed = True

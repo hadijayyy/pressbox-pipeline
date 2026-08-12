@@ -244,6 +244,13 @@ def test_evaluator_is_required_for_every_generated_post():
     assert mvp._requires_evaluator("a", 1)
 
 
+def test_main_does_not_skip_evaluator_for_pattern_or_score():
+    mvp = _load_mvp()
+    source = inspect.getsource(mvp.main)
+    assert "skip_eval = pattern in (\"e\", \"f\")" not in source
+    assert "candidate.get(\"_score\", 0) >= 80" not in source[source.index("contract_errors ="):source.index("# All checks passed")]
+
+
 def test_evaluator_revise_does_not_authorize_posting():
     mvp = _load_mvp()
     assert not mvp._evaluator_accepts("REVISE")
