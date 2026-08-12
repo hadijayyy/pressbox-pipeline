@@ -245,6 +245,24 @@ def _cohort_performance(posts, field):
     return result
 
 
+def _content_attributes(slides):
+    """Classify observable S1/S6 features; no LLM inference."""
+    s1 = (slides[0].get("content", "") if slides else "").strip().lower()
+    s6 = (slides[5].get("content", "") if len(slides or []) >= 6 else "").strip().lower()
+    reversal = ("u-turn", "blocked", "blocks", "reject", "refuse", "complaint", "scandal", "crisis", "standoff", "collapse", "banned", "sacked", "controversy")
+    conflict = ("against", "clash", "battle", "rival", "war", "row", "rift", "feud", "dispute")
+    detail_re = r"(?:\d+[,.]?\d*|£|€|\$|million|billion|first|second)"
+    if any(w in s1 for w in reversal): hook_type = "reversal"
+    elif any(w in s1 for w in conflict): hook_type = "conflict"
+    elif re.search(detail_re, s1): hook_type = "detail"
+    else: hook_type = "statement"
+    has_detail = bool(re.search(detail_re, s1))
+    if "?" not in s6: cta_type = "none"
+    elif re.search(r"\b(?:or|either|both|which|would you)\b", s6): cta_type = "binary"
+    else: cta_type = "open-ended"
+    return {"s1_hook_type": hook_type, "s1_has_specific_detail": has_detail, "s6_cta_type": cta_type}
+
+
 def _select_hook_variant(analytics_summary=None, post_count=0):
     """A/B rotate hooks; lock measured winner only with sufficient evidence."""
     winner = (analytics_summary or {}).get("best_hook_variant")
@@ -1098,6 +1116,14 @@ def get_analytics_summary():
         summary["best_patterns"] = [k for k, v in ordered if v >= cohort_median * 1.15]
         summary["worst_patterns"] = [k for k, v in ordered if v < cohort_median * 0.70]
         summary["pattern_performance"] = ordered
+
+    # Element-level feedback. Require three measured posts per cohort.
+    for field in ("s1_hook_type", "s1_has_specific_detail", "s6_cta_type"):
+        perf = _cohort_performance(with_metrics, field)
+        if perf:
+            ordered = sorted(perf.items(), key=lambda item: item[1], reverse=True)
+            summary[f"{field}_performance"] = ordered
+            summary[f"best_{field}"] = ordered[0][0]
 
     # Hotness A/B comparison — hot vs non-hot engagement
     hot_posts = [t for t in with_metrics if t.get("hotness_score", 0) > 0]
@@ -2820,6 +2846,7 @@ def track_post(title, url, source, root_id, permalink, hotness_score=0, article_
         entry["s1_words"] = len(slides[0].get("content", "").split())
         s6 = slides[5].get("content", "") if len(slides) >= 6 else ""
         entry["s6_has_question"] = "?" in s6
+        entry.update(_content_attributes(slides))
         entry["caption"] = slides[0].get("caption", "")
     entry["pillar"] = _pillar_from_pattern(pattern)
     data["topics"].append(entry)

@@ -63,6 +63,20 @@ def test_track_post_persists_score_pattern_and_hook_variant(tmp_path, monkeypatc
     assert row["hook_variant"] == "detail"
 
 
+def test_track_post_persists_writing_element_attributes(tmp_path, monkeypatch):
+    mvp = _load_mvp()
+    path = tmp_path / "posted.json"
+    path.write_text('{"topics": []}')
+    monkeypatch.setattr(mvp, "POSTED", str(path))
+    slides = [{"content": "The club blocked a £113m transfer."}, {}, {}, {}, {},
+              {"content": "Will they accept it or fight the decision?"}]
+    mvp.track_post("Test", "https://example.com", "bbc", "id", "https://threads.com/p/id", slides=slides)
+    row = __import__("json").loads(path.read_text())["topics"][0]
+    assert row["s1_hook_type"] == "reversal"
+    assert row["s1_has_specific_detail"] is True
+    assert row["s6_cta_type"] == "binary"
+
+
 def test_pull_engagement_persists_reposts_and_quotes(tmp_path, monkeypatch):
     mvp = _load_mvp()
     path = tmp_path / "posted.json"
