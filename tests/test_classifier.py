@@ -49,6 +49,23 @@ def test_engagement_loop_uses_measured_hook_winner_and_rotation():
     assert mvp._select_hook_variant({}, 1) == "contradiction"
 
 
+def test_element_guidance_prefers_winner_but_explores_quarterly():
+    mvp = _load_mvp()
+    summary = {"best_s1_hook_type": "reversal", "best_s6_cta_type": "binary"}
+    guidance, selected = mvp._element_guidance(summary, 1)
+    assert "Measured S1 winner: reversal" in guidance
+    assert selected["exploration"] is False
+    guidance, selected = mvp._element_guidance(summary, 4)
+    assert selected["exploration"] is True
+    assert "Exploration slot" in guidance
+
+
+def test_cohort_performance_honors_minimum_sample():
+    mvp = _load_mvp()
+    posts = [{"views": 100, "reposts": 3, "s1_hook_type": "reversal"}] * 3
+    assert mvp._cohort_performance(posts, "s1_hook_type", min_sample=5) == {}
+
+
 def test_track_post_persists_score_pattern_and_hook_variant(tmp_path, monkeypatch):
     mvp = _load_mvp()
     path = tmp_path / "posted.json"

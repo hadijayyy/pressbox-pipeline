@@ -230,8 +230,8 @@ def _engagement_score(post):
             + quotes * per_k * 0.20)
 
 
-def _cohort_performance(posts, field):
-    """Return measured cohort medians with min-3 sample guard."""
+def _cohort_performance(posts, field, min_sample=3):
+    """Return measured cohort medians with minimum sample guard."""
     from collections import defaultdict
     groups = defaultdict(list)
     for post in posts:
@@ -240,7 +240,7 @@ def _cohort_performance(posts, field):
             groups[key].append(_engagement_score(post))
     result = {}
     for key, values in groups.items():
-        if len(values) >= 3:
+        if len(values) >= min_sample:
             result[key] = sorted(values)[len(values) // 2]
     return result
 
@@ -269,6 +269,21 @@ def _select_hook_variant(analytics_summary=None, post_count=0):
     if winner in HOOK_VARIANTS:
         return winner
     return HOOK_VARIANTS[post_count % len(HOOK_VARIANTS)]
+
+
+def _element_guidance(summary, post_count=0):
+    """Prefer measured winners, retain 25% exploration."""
+    summary = summary or {}
+    explore = post_count % 4 == 0
+    hook = summary.get("best_s1_hook_type") if not explore else ""
+    cta = summary.get("best_s6_cta_type") if not explore else ""
+    if hook not in {"reversal", "conflict", "detail", "statement"}: hook = ""
+    if cta not in {"binary", "open-ended", "none"}: cta = ""
+    parts = ["Use only when supported by assigned evidence; never invent conflict or a second outcome."]
+    if hook: parts.append(f"Measured S1 winner: {hook}. Prioritize this hook type.")
+    if cta: parts.append(f"Measured S6 winner: {cta}. Prefer this CTA type when source supports it.")
+    if explore: parts.append("Exploration slot: do not force measured winners; choose best source-supported form.")
+    return " ".join(parts), {"s1_hook_type": hook or "source-supported", "s6_cta_type": cta or "source-supported", "exploration": explore}
 
 
 def _hook_variant_instruction(variant):
@@ -1119,11 +1134,13 @@ def get_analytics_summary():
 
     # Element-level feedback. Require three measured posts per cohort.
     for field in ("s1_hook_type", "s1_has_specific_detail", "s6_cta_type"):
-        perf = _cohort_performance(with_metrics, field)
+        perf = _cohort_performance(with_metrics, field, min_sample=5)
         if perf:
             ordered = sorted(perf.items(), key=lambda item: item[1], reverse=True)
             summary[f"{field}_performance"] = ordered
-            summary[f"best_{field}"] = ordered[0][0]
+            cohort_median = sorted(perf.values())[len(perf) // 2]
+            if ordered[0][1] >= cohort_median * 1.15:
+                summary[f"best_{field}"] = ordered[0][0]
 
     # Hotness A/B comparison — hot vs non-hot engagement
     hot_posts = [t for t in with_metrics if t.get("hotness_score", 0) > 0]
@@ -2395,7 +2412,7 @@ def _slide_contract_errors(slides, editorial=True):
     return errors
 
 
-def generate_slides(article_text, url, title="", source="", hooks="", cta_pattern="", tone="", pattern="a", evaluator_feedback="", evidence_plan=None, hook_variant="implication"):
+def generate_slides(article_text, url, title="", source="", hooks="", cta_pattern="", tone="", pattern="a", evaluator_feedback="", evidence_plan=None, hook_variant="implication", element_guidance=""):
     """Call LLM to generate 6 editorial slides; caller adds English source slide 7.
     If evaluator_feedback is provided, appends correction instructions to the prompt.
     Token budget: hard reject >80k chars input, warn >48k chars.
@@ -2598,7 +2615,7 @@ S6 = CIRCLE BACK: Reference S1's tension with a sharp question. "So which is it 
     user = (
         f"<request>\n  <current_date>{datetime.now().strftime('%Y-%m-%d')}</current_date>\n"
         f"  <selected_pattern>{pattern_label}</selected_pattern>\n"
-        f"  <hook_variant>{hook_variant}: {_hook_variant_instruction(hook_variant)}</hook_variant>\n</request>\n\n"
+        f"  <hook_variant>{hook_variant}: {_hook_variant_instruction(hook_variant)}</hook_variant>\n  <element_guidance>{element_guidance}</element_guidance>\n</request>\n\n"
         f"<primary_article>\n  <title>{title}</title>\n  <source_name>{source_name}</source_name>\n"
         f"  <source_url>{url}</source_url>\n</primary_article>\n\n"
         f"<EVIDENCE_PACK>\n{_evidence_pack(article_text)}\n</EVIDENCE_PACK>\n\n"
@@ -2843,6 +2860,7 @@ def track_post(title, url, source, root_id, permalink, hotness_score=0, article_
     if slides:
         entry["hook_variant"] = slides[0].get("hook_variant", "")
         entry["score"] = slides[0].get("_score")
+        entry["element_selection"] = slides[0].get("element_selection", {})
         entry["s1_words"] = len(slides[0].get("content", "").split())
         s6 = slides[5].get("content", "") if len(slides) >= 6 else ""
         entry["s6_has_question"] = "?" in s6
@@ -3109,6 +3127,7 @@ def main():
     candidate_idx = 0
     pattern = "a"  # default, always overwritten in loop when candidate valid
     hook_variant = _select_hook_variant(analytics_summary, len(_ENGAGEMENT_RING.get("posts", [])))
+    element_guidance, element_selection = _element_guidance(analytics_summary, len(_ENGAGEMENT_RING.get("posts", [])))
 
     for candidate_idx in range(len(ranked[:15])):
         candidate = ranked[candidate_idx]
@@ -3146,6 +3165,7 @@ def main():
 
         pattern = _select_viral_pattern(candidate, art_text)
         hook_variant = _select_hook_variant(analytics_summary, len(_ENGAGEMENT_RING.get("posts", [])) + candidate_idx)
+        element_guidance, element_selection = _element_guidance(analytics_summary, len(_ENGAGEMENT_RING.get("posts", [])) + candidate_idx)
         pattern_name = {'q': 'Q (Question+Reasons)', 'a': 'A (Rule-Break)', 'b': 'B (deprecated)', 'c': 'C (Detail+Emotion)', 'd': 'D (Commentary)', 'e': 'E (Pressure-Cooker)', 'f': 'F (Behind-the-Scenes)'}[pattern]
         log(f"   🎯 Viral pattern: {pattern_name}")
         evidence_plan = candidate.get("_evidence_plan") or _evidence_plan(art_text)
@@ -3168,6 +3188,7 @@ def main():
                 evidence_plan=evidence_plan,
                 evaluator_feedback=all_errors,
                 hook_variant=hook_variant,
+                element_guidance=element_guidance,
             )
             gen_elapsed = time.time() - gen_t0
             if not slides:
@@ -3288,6 +3309,7 @@ def main():
     engagement_trigger = _predict_engagement_trigger(best, pattern)
     slides[0]["hook_variant"] = hook_variant
     slides[0]["_score"] = best.get("_score", 0)
+    slides[0]["element_selection"] = element_selection
     log(f"   🎯 Trigger: {engagement_trigger}")
     track_post(best["title"], url, best.get("source", ""), root_id, permalink,
                hotness_score=hotness.get(url, 0), article_published_ts=best.get("published_ts"),
