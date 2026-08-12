@@ -66,6 +66,23 @@ def test_cohort_performance_honors_minimum_sample():
     assert mvp._cohort_performance(posts, "s1_hook_type", min_sample=5) == {}
 
 
+def test_element_performance_returns_normalized_share_rates():
+    mvp = _load_mvp()
+    posts = [{"views": 1000, "reposts": 5, "quotes": 2, "replies": 3,
+              "s1_hook_type": "reversal"}] * 5
+    perf = mvp._element_performance(posts, "s1_hook_type")
+    assert perf["reversal"]["n"] == 5
+    assert perf["reversal"]["repost_rate"] == 5
+    assert perf["reversal"]["quote_rate"] == 2
+    assert perf["reversal"]["reply_rate"] == 3
+
+
+def test_element_performance_excludes_small_cohorts():
+    mvp = _load_mvp()
+    posts = [{"views": 100, "reposts": 1, "s1_hook_type": "detail"}] * 4
+    assert mvp._element_performance(posts, "s1_hook_type") == {}
+
+
 def test_track_post_persists_score_pattern_and_hook_variant(tmp_path, monkeypatch):
     mvp = _load_mvp()
     path = tmp_path / "posted.json"

@@ -245,6 +245,27 @@ def _cohort_performance(posts, field, min_sample=3):
     return result
 
 
+def _element_performance(posts, field, min_sample=5):
+    """Return rate-based element cohorts; reposts/quotes lead, views context."""
+    from collections import defaultdict
+    groups = defaultdict(list)
+    for post in posts:
+        key = post.get(field)
+        views = post.get("views", 0) or 0
+        if key and views > 0:
+            groups[key].append(post)
+    result = {}
+    for key, rows in groups.items():
+        if len(rows) < min_sample:
+            continue
+        def rate(name):
+            return sum((r.get(name, 0) or 0) * 1000 / (r.get("views", 0) or 1) for r in rows) / len(rows)
+        result[key] = {"n": len(rows), "repost_rate": rate("reposts"),
+                       "quote_rate": rate("quotes"), "reply_rate": rate("replies"),
+                       "median_views": sorted(r["views"] for r in rows)[len(rows) // 2]}
+    return result
+
+
 def _content_attributes(slides):
     """Classify observable S1/S6 features; no LLM inference."""
     s1 = (slides[0].get("content", "") if slides else "").strip().lower()
@@ -1132,14 +1153,18 @@ def get_analytics_summary():
         summary["worst_patterns"] = [k for k, v in ordered if v < cohort_median * 0.70]
         summary["pattern_performance"] = ordered
 
-    # Element-level feedback. Require three measured posts per cohort.
+    # Element-level feedback: normalized share rates, not weighted score.
     for field in ("s1_hook_type", "s1_has_specific_detail", "s6_cta_type"):
-        perf = _cohort_performance(with_metrics, field, min_sample=5)
+        perf = _element_performance(with_metrics, field, min_sample=5)
         if perf:
-            ordered = sorted(perf.items(), key=lambda item: item[1], reverse=True)
+            ordered = sorted(perf.items(), key=lambda item: (
+                item[1]["repost_rate"] + item[1]["quote_rate"],
+                item[1]["reply_rate"]), reverse=True)
             summary[f"{field}_performance"] = ordered
-            cohort_median = sorted(perf.values())[len(perf) // 2]
-            if ordered[0][1] >= cohort_median * 1.15:
+            top = ordered[0][1]
+            others = [v for _, v in ordered[1:]]
+            baseline = (sum(v["repost_rate"] + v["quote_rate"] for v in others) / len(others)) if others else 0
+            if not others or (top["repost_rate"] + top["quote_rate"]) >= baseline * 1.15:
                 summary[f"best_{field}"] = ordered[0][0]
 
     # Hotness A/B comparison — hot vs non-hot engagement
