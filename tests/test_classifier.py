@@ -94,6 +94,13 @@ def test_analytics_summary_tracks_shareability(tmp_path, monkeypatch):
     assert summary["avg_quotes"] == 3
 
 
+def test_engagement_score_prioritizes_reposts_and_quotes_rate():
+    mvp = _load_mvp()
+    high_reach = {"views": 100000, "likes": 100, "reposts": 0, "quotes": 0}
+    highly_shared = {"views": 1000, "likes": 20, "reposts": 10, "quotes": 5}
+    assert mvp._engagement_score(highly_shared) > mvp._engagement_score(high_reach)
+
+
 def test_hot_topics_ignore_untimestamped_stale_cache_rows(tmp_path, monkeypatch):
     mvp = _load_mvp()
     cache = tmp_path / "article-cache.json"

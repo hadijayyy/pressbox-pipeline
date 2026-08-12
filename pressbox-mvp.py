@@ -182,13 +182,13 @@ def _query_ring(source, hook, topic_type):
     measured = [p for p in posts if p.get("views", 0) > 0]
     if len(measured) < 5:
         return 0
-    exact = sorted(p["views"] for p in measured if p["source"] == source and p["hook"] == hook)
-    fallback = sorted(p["views"] for p in measured if p["source"] == source)
+    exact = sorted(_engagement_score(p) for p in measured if p["source"] == source and p["hook"] == hook)
+    fallback = sorted(_engagement_score(p) for p in measured if p["source"] == source)
     key = exact if len(exact) >= 2 else (fallback if len(fallback) >= 2 else [])
     if not key:
         return 0
     med = key[len(key)//2]
-    all_v = sorted(p["views"] for p in measured)
+    all_v = sorted(_engagement_score(p) for p in measured)
     overall = all_v[len(all_v)//2] or 1
     r = med / overall
     return 15 if r >= 1.5 else (5 if r >= 1.0 else (0 if r >= 0.5 else -10))
@@ -216,13 +216,18 @@ HOOK_VARIANTS = ("implication", "contradiction", "detail")
 
 
 def _engagement_score(post):
-    """Weighted quality signal; views alone can reward silent reach."""
+    """Shareability-led quality signal; rates prevent views dominating."""
     views = post.get("views", 0) or 0
+    if views <= 0:
+        return 0
+    per_k = 1000 / views
     likes = post.get("likes", 0) or 0
     replies = post.get("replies", 0) or 0
     reposts = post.get("reposts", post.get("shares", 0)) or 0
     quotes = post.get("quotes", 0) or 0
-    return views * 0.45 + likes * 0.25 + replies * 0.15 + reposts * 0.10 + quotes * 0.05
+    return (min(20, views ** 0.5) * 0.20 + likes * per_k * 0.15
+            + replies * per_k * 0.10 + reposts * per_k * 0.35
+            + quotes * per_k * 0.20)
 
 
 def _cohort_performance(posts, field):
@@ -1072,6 +1077,8 @@ def get_analytics_summary():
         "avg_replies": avg([t.get("replies", 0) for t in with_metrics]),
         "avg_reposts": avg([t.get("reposts", t.get("shares", 0)) or 0 for t in with_metrics]),
         "avg_quotes": avg([t.get("quotes", 0) or 0 for t in with_metrics]),
+        "avg_repost_rate": avg([(t.get("reposts", t.get("shares", 0)) or 0) * 1000 / t["views"] for t in with_metrics]),
+        "avg_quote_rate": avg([(t.get("quotes", 0) or 0) * 1000 / t["views"] for t in with_metrics]),
         "best_hooks": [(h, avg(v)) for h, v in best_hooks[:3]],
         "best_topics": [(t, avg(v)) for t, v in best_topics[:5]],
         "best_sources": [(s, avg(v)) for s, v in best_sources],
