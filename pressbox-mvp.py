@@ -1001,7 +1001,11 @@ def pull_engagement(poster):
             topic["views"] = metrics.get("views", 0)
             topic["likes"] = metrics.get("likes", 0)
             topic["replies"] = metrics.get("replies", 0)
-            topic["shares"] = metrics.get("shares", 0)
+            # Threads Insights calls shares "reposts"; preserve both names for
+            # old reports and make shareability scoring use real data.
+            topic["reposts"] = metrics.get("reposts", metrics.get("shares", 0))
+            topic["shares"] = topic["reposts"]
+            topic["quotes"] = metrics.get("quotes", 0)
             topic.pop("metrics_failed", None)
             updated += 1
         else:
@@ -1064,7 +1068,10 @@ def get_analytics_summary():
         "total_posts_with_metrics": len(with_metrics),
         "avg_views": avg([t.get("views", 0) for t in with_metrics]),
         "median_views": median_views,
+        "avg_likes": avg([t.get("likes", 0) for t in with_metrics]),
         "avg_replies": avg([t.get("replies", 0) for t in with_metrics]),
+        "avg_reposts": avg([t.get("reposts", t.get("shares", 0)) or 0 for t in with_metrics]),
+        "avg_quotes": avg([t.get("quotes", 0) or 0 for t in with_metrics]),
         "best_hooks": [(h, avg(v)) for h, v in best_hooks[:3]],
         "best_topics": [(t, avg(v)) for t, v in best_topics[:5]],
         "best_sources": [(s, avg(v)) for s, v in best_sources],
@@ -2424,12 +2431,12 @@ Use natural global English. Say football, never soccer. Sound casual, informed, 
 Never use: Did you know?; Let's dive in!; You won't believe; This changes everything; Only time will tell; Agree or disagree?
 
 ## SIX-SLIDE ARC
-S1 Hook: strongest supported fact. Name person, club, competition, or authority. No question unless source poses one.
+S1 Hook: strongest supported fact. Name person, club, competition, or authority. When source supports it, lead with a concrete reversal, conflict, block, rejection, complaint, or unexpected action plus one specific detail. Use an unusual or ironic detail only when explicitly in source. No question unless source poses one.
 S2 Evidence: clearest verified detail, decision, statement, number, or scene.
 S3 Context: supplied rule, timeline, relationship, or background needed for central development.
 S4 Stakes: who is affected and confirmed consequence. Qualify implications.
 S5 Final Verified Angle and Attribution: strongest remaining verified detail. Attribute naturally to SOURCE_NAME or original reporter.
-S6 Payoff: sharp source-supported takeaway. Ask a question only when source supports two real outcomes.
+S6 Payoff: sharp source-supported takeaway. Ask one specific either/or question only when source supports two real outcomes; make it about the decision, consequence, or conflict so fans can take a side. Never ask generic engagement bait.
 
 ## LENGTH AND STYLE RULES
 Every slide must have at least two complete sentences, each grounded in its assigned evidence lines. Never submit one-sentence slides. If two supported sentences cannot fit, return needs_more_source. Keep writing compact, natural, and easy for football fans to scan. One new insight per slide. Avoid repeated facts. Use numbers only when source explicitly provides them. Paraphrase quotes accurately; never reproduce long quote. Keep each slide at or below 450 characters.

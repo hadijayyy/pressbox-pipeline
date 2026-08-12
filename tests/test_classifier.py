@@ -63,6 +63,37 @@ def test_track_post_persists_score_pattern_and_hook_variant(tmp_path, monkeypatc
     assert row["hook_variant"] == "detail"
 
 
+def test_pull_engagement_persists_reposts_and_quotes(tmp_path, monkeypatch):
+    mvp = _load_mvp()
+    path = tmp_path / "posted.json"
+    path.write_text('{"topics": [{"post_id": "p1", "posted_at": "2020-01-01T00:00:00+00:00"}]}')
+    monkeypatch.setattr(mvp, "POSTED", str(path))
+
+    class Poster:
+        def get_metrics(self, post_id):
+            return {"views": 100, "likes": 5, "replies": 2, "reposts": 3, "quotes": 4}
+
+    mvp.pull_engagement(Poster())
+    row = __import__("json").loads(path.read_text())["topics"][0]
+    assert row["reposts"] == 3
+    assert row["shares"] == 3
+    assert row["quotes"] == 4
+
+
+def test_analytics_summary_tracks_shareability(tmp_path, monkeypatch):
+    mvp = _load_mvp()
+    path = tmp_path / "posted.json"
+    path.write_text(__import__("json").dumps({"topics": [
+        {"title": "A", "views": 100, "likes": 5, "replies": 1, "reposts": 2, "quotes": 1},
+        {"title": "B", "views": 200, "likes": 10, "replies": 2, "reposts": 4, "quotes": 3},
+        {"title": "C", "views": 300, "likes": 15, "replies": 3, "reposts": 6, "quotes": 5},
+    ]}))
+    monkeypatch.setattr(mvp, "POSTED", str(path))
+    summary = mvp.get_analytics_summary()
+    assert summary["avg_reposts"] == 4
+    assert summary["avg_quotes"] == 3
+
+
 def test_hot_topics_ignore_untimestamped_stale_cache_rows(tmp_path, monkeypatch):
     mvp = _load_mvp()
     cache = tmp_path / "article-cache.json"
