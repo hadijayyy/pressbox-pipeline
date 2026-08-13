@@ -480,6 +480,34 @@ def test_fallback_evidence_prefers_compact_complete_source_units():
     assert long not in selected[:6]
 
 
+def test_fallback_role_evidence_prefers_story_details_and_keeps_source_units():
+    mvp = _load_mvp()
+    facts = [
+        "The manager discussed several issues at length during the interview.",
+        "The player signed a new contract on Tuesday after three months of negotiations with the club.",
+        "The decision followed three months of negotiations with the club.",
+        "Supporters will see the player return for the next league match.",
+        "The midfielder said the move was important for his career.",
+    ] + [f"Additional source fact {i} gives enough clear context about the club decision today." for i in range(1, 10)]
+    selected = mvp._fallback_role_evidence(facts, "player club contract")
+    assert len(selected) == 12
+    assert facts[1] in selected
+    assert facts[0] not in selected or selected.index(facts[1]) < selected.index(facts[0])
+    assert all(fact in facts for fact in selected)
+
+
+def test_hard_news_adjustment_penalizes_opinion_titles():
+    mvp = _load_mvp()
+    assert mvp._hard_news_adjustment("Why this manager is on the wrong track", "manager discussed tactics") < 0
+    assert mvp._hard_news_adjustment("Club confirms player signed new contract", "club confirmed the signing") > 0
+
+
+def test_generation_temperature_is_low_for_factual_drafts():
+    mvp = _load_mvp()
+    source = inspect.getsource(mvp.generate_slides)
+    assert '"temperature":0.1' in source
+
+
 def test_narrative_fallback_keeps_source_order_after_compact_selection():
     mvp = _load_mvp()
     article = " ".join([

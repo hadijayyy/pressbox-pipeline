@@ -2404,6 +2404,35 @@ def _fallback_evidence(facts):
     return sorted(selected, key=lambda fact: (abs(len(fact) - 180), len(fact)))
 
 
+def _fallback_role_evidence(facts, title=""):
+    """Pick literal fallback units with hard-news detail before commentary."""
+    candidates = _fallback_evidence(facts)
+    title_words = set(re.findall(r"[A-Za-zÀ-ÿ]{4,}", title.lower()))
+    positive = ("confirmed", "signed", "appointed", "won", "lost", "rejected",
+                "returned", "will", "decision", "deadline", "final", "match")
+    negative = ("why", "wrong track", "reminiscent", "analysis", "opinion", "column",
+                "likely", "could", "might", "suggests")
+    ranked = []
+    for position, fact in enumerate(candidates):
+        lower = fact.lower()
+        score = (sum(word in lower for word in positive) * 4 +
+                 sum(word in lower for word in title_words) * 2 -
+                 sum(word in lower for word in negative) * 4 +
+                 2 * bool(re.search(r"\b\d+(?:[.,]\d+)?\b|[£$€]", fact)))
+        ranked.append((-score, position, fact))
+    chosen = {fact for _, _, fact in sorted(ranked)[:12]}
+    return [fact for fact in candidates if fact in chosen]
+
+
+def _hard_news_adjustment(title, body):
+    """Prefer reportable developments over opinion/profile framing."""
+    text = f"{title} {body}".lower()
+    positive = ("confirmed", "appointed", "signed", "rejected", "announced", "won", "lost",
+                "debut", "final", "result", "returns", "transfer")
+    negative = ("why ", "wrong track", "reminiscent", "analysis", "opinion", "column", "profile")
+    return 5 * sum(word in text for word in positive) - 8 * sum(word in text for word in negative)
+
+
 def _narrative_fallback_evidence(article_text):
     """Use compact factual units in source order so fallback retains story flow."""
     units = _source_units(article_text)
@@ -2414,7 +2443,7 @@ def _narrative_fallback_evidence(article_text):
 def _extractive_slides(article_text, url, title=""):
     """Last-resort grounded draft. Must meet and be auditable against source contract."""
     article_text = _story_text(article_text, title)
-    facts = _narrative_fallback_evidence(article_text)
+    facts = _fallback_role_evidence(_source_units(article_text), title)
     entities = [w.lower() for w in re.findall(r"[A-Za-zÀ-ÿ]{4,}", title) if w.lower() not in _SKIP_WORDS]
     related = [s for s in facts if sum(word in s.lower() for word in entities) >= 2]
     facts = related if len(related) >= 6 else facts
@@ -2683,7 +2712,7 @@ S6 = CIRCLE BACK: Reference S1's tension with a sharp question. "So which is it 
                 headers={"Authorization": f"Bearer {MISTRAL_KEY}", "Content-Type": "application/json"},
                 json={"model":"mistral-large-latest","messages":[
                     {"role":"system","content":system},{"role":"user","content":user}],
-                    "max_tokens":4000,"temperature":0.3,"stream":True},
+                    "max_tokens":4000,"temperature":0.1,"stream":True},
                 timeout=120, stream=True)
 
             if r.status_code == 429:
@@ -2968,7 +2997,9 @@ def _body_first_shortlist(ranked, limit=15):
             _record_failure("IMAGE_INVALID", t.get("source", ""), title)
             continue
         t.update(_article_text=story_text, _evidence_plan=evidence_plan, _image_url=image, _age_h=age_h)
-        t["_score"] += min(15, len(story_text) // 1000) + (5 if '"' in story_text or re.search(r'\d{3,}', story_text) else 0)
+        t["_score"] += (min(15, len(story_text) // 1000) +
+                         (5 if '"' in story_text or re.search(r'\d{3,}', story_text) else 0) +
+                         _hard_news_adjustment(title, story_text))
         accepted.append(t)
     accepted.sort(key=lambda t: (-t["_score"], _SOURCE_PRIORITY.get(t.get("source", ""), 99)))
     log(f"📋 Body-first Top N: {len(accepted)}/{min(limit, len(ranked))} accepted")
