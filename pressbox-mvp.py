@@ -2421,7 +2421,8 @@ def _fallback_role_evidence(facts, title=""):
                  2 * bool(re.search(r"\b\d+(?:[.,]\d+)?\b|[£$€]", fact)))
         ranked.append((-score, position, fact))
     chosen = {fact for _, _, fact in sorted(ranked)[:12]}
-    return [fact for fact in candidates if fact in chosen]
+    # Keep article order after scoring; score only decides membership.
+    return [fact for fact in facts if fact in chosen]
 
 
 def _hard_news_adjustment(title, body):
@@ -2444,9 +2445,8 @@ def _extractive_slides(article_text, url, title=""):
     """Last-resort grounded draft. Must meet and be auditable against source contract."""
     article_text = _story_text(article_text, title)
     facts = _fallback_role_evidence(_source_units(article_text), title)
-    entities = [w.lower() for w in re.findall(r"[A-Za-zÀ-ÿ]{4,}", title) if w.lower() not in _SKIP_WORDS]
-    related = [s for s in facts if sum(word in s.lower() for word in entities) >= 2]
-    facts = related if len(related) >= 6 else facts
+    # ARTICLE_TITLE is a label, not evidence. Never discard body facts because
+    # title/entity wording differs from source body.
     if len(facts) < 6:
         return None
     if len(facts) < 12:
@@ -3196,7 +3196,8 @@ def main():
     hook_variant = _select_hook_variant(analytics_summary, len(_ENGAGEMENT_RING.get("posts", [])))
     element_guidance, element_selection = _element_guidance(analytics_summary, len(_ENGAGEMENT_RING.get("posts", [])))
 
-    for candidate_idx in range(len(ranked[:15])):
+    # ponytail: cap expensive LLM churn; deterministic fallback scans full validated pool.
+    for candidate_idx in range(min(2, len(ranked[:15]))):
         candidate = ranked[candidate_idx]
         art_text = candidate.get("_article_text", "")
         art_url = candidate["url"]
@@ -3321,7 +3322,7 @@ def main():
     if not passed:
         # Last-resort source-verbatim fallback. It never adds facts and reuses
         # the same two-sentence slide contract plus exact-source audit.
-        for candidate in ranked[:5]:
+        for candidate in ranked[:15]:
             fallback = _extractive_slides(
                 candidate.get("_article_text", ""), candidate.get("url", ""), candidate.get("title", "")
             )
