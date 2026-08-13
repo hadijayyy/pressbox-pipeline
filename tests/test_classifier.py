@@ -359,6 +359,24 @@ def test_editorial_constraints_preserve_source_wording():
     assert "Do not invent a question, conflict, urgency, motive, winner, loser, or consequence" in rules
 
 
+def test_generation_evidence_override_blocks_arc_speculation():
+    mvp = _load_mvp()
+    rules = mvp._generation_evidence_override()
+    assert "assigned evidence lines are the only factual authority" in rules
+    assert "ARTICLE_TITLE is a label, not evidence" in rules
+    assert "If assigned evidence cannot support two complete sentences, return needs_more_source" in rules
+    assert "Do not invent stakes, motives, consequences, reactions, or either/or outcomes" in rules
+
+
+def test_rate_limit_reaches_literal_fallback_without_more_llm_candidates():
+    mvp = _load_mvp()
+    source = inspect.getsource(mvp.main)
+    rate_block = source[source.index('if _LAST_GENERATION_FAILURE == "LLM_RATE_LIMITED"'):source.index('contract_errors = _slide_contract_errors')]
+    assert 'rate_limited = True' in rate_block
+    assert 'sys.exit(1)' not in rate_block
+    assert 'if rate_limited:' in source
+
+
 def test_evaluator_request_uses_json_mode_and_full_article():
     mvp = _load_mvp()
     payload = mvp._evaluator_request_payload("system", "user")

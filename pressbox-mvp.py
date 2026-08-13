@@ -2226,6 +2226,16 @@ Do not invent a question, conflict, urgency, motive, winner, loser, or consequen
 A stance is optional; add one only when clearly marked as interpretation and supported by the source."""
 
 
+def _generation_evidence_override():
+    return """GENERATION OVERRIDE: The assigned evidence lines are the only factual authority for each slide.
+ARTICLE_TITLE is a label, not evidence. If title and body/evidence differ, follow body/evidence and never repeat unsupported title wording.
+The arc template is structure only; it never authorizes facts, context, stakes, motives, reactions, or consequences outside assigned evidence lines.
+If assigned evidence cannot support two complete sentences, return needs_more_source.
+Do not invent stakes, motives, consequences, reactions, or either/or outcomes.
+Do not turn a question, implication, possibility, or interpretation into a fact.
+Use a grounded takeaway for S6 unless both sides of a question are explicit in assigned evidence."""
+
+
 def _source_units(article_text):
     """Complete source sentences only; never split inside a double-quoted quote.
     
@@ -2648,7 +2658,7 @@ S6 = CIRCLE BACK: Reference S1's tension with a sharp question. "So which is it 
         "Each slide must contain at least two complete sentences grounded in its assigned evidence. If two sentences cannot be supported, return needs_more_source. S1 must create a source-supported curiosity gap without giving away the whole story. S6 must close with a story-specific two-option question only when both outcomes are supported; otherwise use a sharp grounded takeaway. Each sentence must be a faithful,"
         " non-escalating paraphrase of its slide's assigned evidence only. Do not add a question"
         " unless one assigned sentence supports both outcomes.\n\n"
-        f"{ref_data}\n\n{_number_hook_rule(article_text)}\n\n{_editorial_constraints()}")
+        f"{ref_data}\n\n{_number_hook_rule(article_text)}\n\n{_editorial_constraints()}\n\n{_generation_evidence_override()}")
     if evaluator_feedback:
         user += f"\n\n## ⚠️ EVALUATOR REJECTED YOUR PREVIOUS ATTEMPT — FIX THESE ERRORS:\n{evaluator_feedback}\nRegenerate ALL 6 editorial slides. Do NOT repeat the errors above."
 
@@ -3150,6 +3160,7 @@ def main():
     llm_time = 0.0
     passed = False
     candidate_idx = 0
+    rate_limited = False
     pattern = "a"  # default, always overwritten in loop when candidate valid
     hook_variant = _select_hook_variant(analytics_summary, len(_ENGAGEMENT_RING.get("posts", [])))
     element_guidance, element_selection = _element_guidance(analytics_summary, len(_ENGAGEMENT_RING.get("posts", [])))
@@ -3219,9 +3230,9 @@ def main():
             if not slides:
                 if _LAST_GENERATION_FAILURE == "LLM_RATE_LIMITED":
                     _record_failure("LLM_RATE_LIMITED", candidate.get("source", ""), art_title)
-                    log("❌ Stop candidate churn after provider rate limit")
-                    print("❌ Pipeline: provider rate limited", flush=True)
-                    sys.exit(1)
+                    rate_limited = True
+                    log("❌ Stop candidate churn after provider rate limit — trying literal fallback")
+                    break
                 if gen_attempt == 1:
                     log(f"   ⚠️ LLM empty (attempt 1), retrying...")
                     all_errors = "LLM returned empty response"
@@ -3269,6 +3280,8 @@ def main():
 
         if passed:
             break  # success, exit candidate loop
+        if rate_limited:
+            break  # preserve provider cooldown; use only literal fallback
         # Reset for next candidate — backoff to avoid rate limit spiral
         slides = None
         all_errors = ""
