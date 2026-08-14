@@ -2236,7 +2236,7 @@ Do not turn a question, implication, possibility, or interpretation into a fact.
 Use a grounded takeaway for S6 unless both sides of a question are explicit in assigned evidence."""
 
 
-def _source_units(article_text):
+def _source_units(article_text, split_long=True):
     """Complete source sentences only; never split inside a double-quoted quote.
     
     Quote-state fix (2026-08-10): articles with odd quote counts were absorbing
@@ -2264,7 +2264,7 @@ def _source_units(article_text):
             continue
         for key, quote in protected.items():
             sent = sent.replace(key + ".", quote).replace(key + "!", quote).replace(key + "?", quote)
-        if len(sent) <= MAX_CHARS:
+        if len(sent) <= MAX_CHARS or not split_long:
             units.append(sent)
         else:
             units.extend(ch.strip() for ch in re.split(r'(?<=[,;])\s+', sent)
@@ -2444,15 +2444,40 @@ def _narrative_fallback_evidence(article_text):
 def _extractive_slides(article_text, url, title=""):
     """Last-resort grounded draft. Must meet and be auditable against source contract."""
     article_text = _story_text(article_text, title)
-    facts = _fallback_role_evidence(_source_units(article_text), title)
+    # Use complete source sentences only. Splitting long sentences at commas
+    # creates fragments that can exceed slide limits when paired and fail audit.
+    source_units = [unit for unit in _source_units(article_text, split_long=False)
+                    if len(unit) <= MAX_CHARS]
+    ranked_facts = _fallback_role_evidence(source_units, title)
+    fallback_facts = _fallback_evidence(source_units)
+    candidates = []
+    for fact in source_units:
+        if fact in ranked_facts or fact in fallback_facts:
+            candidates.append(fact)
+
+    # Choose six ordered pairs that fit slide limit. Fixed adjacent pairing
+    # rejected valid source pools when one long sentence sat beside another.
+    def pair_facts(start, pairs):
+        if len(pairs) == 6:
+            return pairs
+        if len(candidates) - start < (6 - len(pairs)) * 2:
+            return None
+        for first in range(start, len(candidates)):
+            for second in range(first + 1, len(candidates)):
+                if len(candidates[first]) + 1 + len(candidates[second]) > MAX_CHARS:
+                    continue
+                result = pair_facts(second + 1, pairs + [(candidates[first], candidates[second])])
+                if result:
+                    return result
+        return None
+
+    pairs = pair_facts(0, [])
+    if not pairs:
+        return None
     # ARTICLE_TITLE is a label, not evidence. Never discard body facts because
     # title/entity wording differs from source body.
-    if len(facts) < 6:
-        return None
-    if len(facts) < 12:
-        return None
-    slides = [{"title": f"S{i + 1}", "content": " ".join(facts[i * 2:i * 2 + 2]), "_extractive": True}
-              for i in range(6)]
+    slides = [{"title": f"S{i + 1}", "content": " ".join(pair), "_extractive": True}
+              for i, pair in enumerate(pairs)]
     slides.append({"title": "S7", "content": f"Source: {url}", "_source": True})
     return slides if not _extractive_audit_errors(slides, article_text) else None
 

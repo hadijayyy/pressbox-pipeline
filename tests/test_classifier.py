@@ -427,6 +427,26 @@ def test_extractive_slides_skip_long_sentences_and_preserve_source_text():
     assert slides and not mvp._extractive_audit_errors(slides, article)
 
 
+def test_extractive_slides_ignore_long_complete_sentence_when_selecting_fallback():
+    mvp = _load_mvp()
+    url = "https://example.com/story"
+    long = "This complete source sentence is too long " + ("word " * 100) + "."
+    valid = [f"Clean source sentence {i} has enough words and remains short for a slide." for i in range(1, 13)]
+    slides = mvp._extractive_slides(" ".join([long, *valid]), url)
+    assert slides and not mvp._extractive_audit_errors(slides, " ".join([long, *valid]))
+
+
+def test_extractive_slides_repack_ordered_facts_when_adjacent_pair_is_too_long():
+    mvp = _load_mvp()
+    url = "https://example.com/story"
+    long_facts = ["Long source fact %s has enough detail to exceed half of the slide budget when paired." % i for i in (1, 2)]
+    short_facts = ["Short source fact %s has enough detail for literal fallback." % i for i in range(1, 13)]
+    article = " ".join(long_facts + short_facts)
+    slides = mvp._extractive_slides(article, url)
+    assert slides and not mvp._extractive_audit_errors(slides, article)
+    assert all(len(slide["content"]) <= mvp.MAX_CHARS for slide in slides[:6])
+
+
 def test_failure_telemetry_records_reason_code(tmp_path, monkeypatch):
     mvp = _load_mvp()
     path = tmp_path / "failure-telemetry.json"
