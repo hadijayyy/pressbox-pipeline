@@ -58,6 +58,7 @@ class ThreadsAPIError(Exception):
         super().__init__(message)
         self.status_code = status_code
         self.payload = payload
+        self.results = []
 
 
 @dataclass
@@ -174,6 +175,30 @@ class ThreadsPoster:
         except Exception:
             return ""
 
+    def _find_existing_reply(
+        self,
+        parent_id: Optional[str],
+        text: str,
+        image_url: Optional[str] = None,
+    ) -> Optional[ThreadPostResult]:
+        """Recover post committed by API before error reached client."""
+        try:
+            url = (f"{GRAPH_API_BASE}/{parent_id}/replies"
+                   if parent_id else f"{GRAPH_API_BASE}/{self.user_id}/threads")
+            params = {"fields": "id,text,permalink", "limit": 25, "access_token": self.access_token}
+            data = self._parse_response(self.session.get(url, params=params, timeout=DEFAULT_TIMEOUT))
+            wanted = " ".join(text.split())
+            for item in data.get("data", []):
+                if " ".join((item.get("text") or "").split()) == wanted:
+                    return ThreadPostResult(
+                        text=text,
+                        post_id=item["id"],
+                        image_url=image_url,
+                    )
+        except Exception:
+            return None
+        return None
+
     @staticmethod
     def _parse_response(resp: requests.Response) -> dict:
         try:
@@ -242,14 +267,31 @@ class ThreadsPoster:
             try:
                 post_id = self.post_single(text, reply_to_id=reply_to_id, image_url=img)
             except ThreadsAPIError as e:
-                logger.error("Failed posting part %d/%d: %s", i + 1, len(parts), e)
-                if stop_on_error:
-                    logger.error(
-                        "Thread partially posted: %d/%d parts succeeded before failure.",
-                        len(results), len(parts),
-                    )
-                    raise
-                continue
+                recovered = self._find_existing_reply(reply_to_id, text, img)
+                if recovered:
+                    logger.warning("Recovered already-published part %d/%d after API error", i + 1, len(parts))
+                    results.append(recovered)
+                    reply_to_id = recovered.post_id
+                    continue
+                try:
+                    time.sleep(2)
+                    post_id = self.post_single(text, reply_to_id=reply_to_id, image_url=img)
+                except ThreadsAPIError as retry_error:
+                    recovered = self._find_existing_reply(reply_to_id, text, img)
+                    if recovered:
+                        logger.warning("Recovered retry-published part %d/%d after API error", i + 1, len(parts))
+                        results.append(recovered)
+                        reply_to_id = recovered.post_id
+                        continue
+                    retry_error.results = results
+                    logger.error("Failed posting part %d/%d: %s", i + 1, len(parts), retry_error)
+                    if stop_on_error:
+                        logger.error(
+                            "Thread partially posted: %d/%d parts succeeded before failure.",
+                            len(results), len(parts),
+                        )
+                        raise
+                    continue
 
             results.append(ThreadPostResult(text=text, post_id=post_id, image_url=img))
             reply_to_id = post_id  # next part replies to THIS published post
