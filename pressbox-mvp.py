@@ -2390,7 +2390,8 @@ def _fallback_evidence(facts):
         attribution_only = bool(re.fullmatch(
             r"[A-Z][A-Za-z .'-]+ (?:said|told|wrote|added|confirmed) [^.]+\.", fact))
         quote_without_speaker = fact.lstrip().startswith(('"', '“'))
-        if len(words) >= 8 and not attribution_only and not quote_without_speaker:
+        if (len(words) >= 8 and not attribution_only and not quote_without_speaker
+                and not _leading_fragment_reason(fact)):
             selected.append(fact)
     # ponytail: extractive only; add validated paraphrase when semantic verifier exists.
     return sorted(selected, key=lambda fact: (abs(len(fact) - 180), len(fact)))
@@ -3323,10 +3324,12 @@ def main():
             _record_failure("LLM_GENERATION_FALLBACK", best.get("source", ""), best.get("title", ""))
             log("   ✅ Source-verbatim fallback passed all checks")
         else:
+            # Editorial exhaustion is a normal no-post outcome, not a cron error.
+            # Next scheduled run gets a fresh candidate; fail closed, never publish.
             _record_failure("GENERATION_FAILED_ALL_CANDIDATES")
-            log("❌ Pipeline: all candidates failed generation")
-            print("❌ Pipeline: all candidates failed generation", flush=True)
-            sys.exit(1)
+            log("⏸️ No source-grounded draft passed; skipping this cycle")
+            print("⏸️ Skip — no source-grounded draft passed", flush=True)
+            return
 
 
     final_contract_errors = _slide_contract_errors(slides)

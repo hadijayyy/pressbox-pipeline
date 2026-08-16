@@ -341,12 +341,13 @@ def test_high_risk_candidate_is_skipped_for_next_eligible_article():
     assert source.index('ranked = [topic for topic in ranked if _high_risk_claim_allowed(') < source.index('best = ranked[0]')
 
 
-def test_generated_output_rejection_is_failure_for_watchdog_retry():
+def test_generated_output_exhaustion_is_normal_skip_for_watchdog():
     mvp = _load_mvp()
     source = inspect.getsource(mvp.main)
     block = source[source.index('if errors:'):source.index('final_contract_errors')]
     assert '_record_failure("GENERATION_FAILED_ALL_CANDIDATES")' in block
-    assert 'sys.exit(1)' in block
+    assert 'print("⏸️ Skip — no source-grounded draft passed", flush=True)' in block
+    assert 'sys.exit(1)' not in block
 
 
 def test_space_sentences_collapses_literal_backslash_newline():
@@ -495,6 +496,28 @@ def test_extractive_slides_need_twelve_source_sentences():
         *[f"Clean source sentence {i} has enough words and remains literal article evidence." for i in range(1, 12)],
     ])
     assert mvp._extractive_slides(article, "https://example.com", "Arsenal Bruno Guimaraes")
+
+
+def test_extractive_fallback_drops_source_units_that_start_as_fragments():
+    mvp = _load_mvp()
+    article = " ".join([
+        "The Community Shield takes place before the Premier League season begins.",
+        "Since 1992 only eight winners have also lifted the league trophy that season.",
+        "The losing teams have won ten league titles in that period.",
+        "The upcoming season will provide another comparison between the finalists.",
+        "The winners have finished above the losers in 18 of 34 seasons.",
+        "The two teams have finished as the top two on ten occasions.",
+        "The previous league champions have won eight of the past twelve Shields.",
+        "The result therefore offers limited evidence about the season ahead.",
+        "And the source records the historical comparison rather than a prediction.",
+        "Raheem Sterling scored for City in the 2019 Shield match.",
+        "Cole Palmer scored for City in the 2023 game against Arsenal.",
+        "The match was decided after Arsenal lost on penalties.",
+        "The article compares the trophy result with the later league outcome.",
+    ])
+    slides = mvp._extractive_slides(article, "https://example.com/community-shield")
+    assert slides and not mvp._slide_contract_errors(slides)
+    assert all(not slide["content"].lstrip().startswith("And ") for slide in slides[:6])
 
 
 def test_source_units_keep_quote_together_and_drop_open_quote_fragment():
