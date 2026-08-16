@@ -3167,8 +3167,9 @@ def main():
     hook_variant = _select_hook_variant(analytics_summary, len(_ENGAGEMENT_RING.get("posts", [])))
     element_guidance, element_selection = _element_guidance(analytics_summary, len(_ENGAGEMENT_RING.get("posts", [])))
 
-    # ponytail: cap expensive LLM churn; deterministic fallback scans full validated pool.
-    for candidate_idx in range(min(2, len(ranked[:15]))):
+    # Try more validated candidates before literal fallback. Two was too narrow
+    # for feeds where top stories were editorially rejected.
+    for candidate_idx in range(min(5, len(ranked[:15]))):
         candidate = ranked[candidate_idx]
         art_text = candidate.get("_article_text", "")
         art_url = candidate["url"]
@@ -3323,9 +3324,9 @@ def main():
             log("   ✅ Source-verbatim fallback passed all checks")
         else:
             _record_failure("GENERATION_FAILED_ALL_CANDIDATES")
-            log("⏸️ Skip — all candidates failed generation")
-            print("⏸️ Skip — all candidates failed generation", flush=True)
-            sys.exit(0)
+            log("❌ Pipeline: all candidates failed generation")
+            print("❌ Pipeline: all candidates failed generation", flush=True)
+            sys.exit(1)
 
 
     final_contract_errors = _slide_contract_errors(slides)

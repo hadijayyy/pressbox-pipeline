@@ -341,12 +341,12 @@ def test_high_risk_candidate_is_skipped_for_next_eligible_article():
     assert source.index('ranked = [topic for topic in ranked if _high_risk_claim_allowed(') < source.index('best = ranked[0]')
 
 
-def test_generated_output_rejection_is_normal_skip_not_failure():
+def test_generated_output_rejection_is_failure_for_watchdog_retry():
     mvp = _load_mvp()
     source = inspect.getsource(mvp.main)
     block = source[source.index('if errors:'):source.index('final_contract_errors')]
     assert '_record_failure("GENERATION_FAILED_ALL_CANDIDATES")' in block
-    assert 'sys.exit(0)' in block
+    assert 'sys.exit(1)' in block
 
 
 def test_space_sentences_collapses_literal_backslash_newline():

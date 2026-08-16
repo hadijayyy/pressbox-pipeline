@@ -35,7 +35,7 @@ retryable_failure() {
 # Do not retry volume gate, normal filter skip, or grounding output indefinitely.
 python3 -u pressbox-mvp.py "${PIPE_ARGS[@]}" > /tmp/pressbox-mvp.log 2>&1
 EXIT_CODE=$?
-if [ $EXIT_CODE -eq 0 ] && [ ! -f "$POST_MARKER" ] \
+if [ ! -f "$POST_MARKER" ] \
    && grep -Eiq 'all candidates failed generation|no body-validated candidates|no topics scraped' /tmp/pressbox-mvp.log; then
     echo "Bounded fresh-scrape retry..." >> /tmp/pressbox-mvp.log
     sleep 10
