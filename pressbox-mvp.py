@@ -2207,15 +2207,11 @@ def _evaluator_accepts(decision):
     return decision == "APPROVE"
 
 
-# Max evaluator retries before giving up on LLM draft (was 3 — too many, 1 is enough)
-EVAL_MAX_RETRIES = 1
-
-
 def _editorial_constraints():
     return """Do not replace source terms with stronger or different terms. Keep
 'reportedly' and other uncertainty words. Do not turn conditional claims into current facts.
 Do not invent a question, conflict, urgency, motive, winner, loser, or consequence.
-A stance is optional; add one only when clearly marked as interpretation and supported by the source."""
+A stance is optional; add one only when clearly marked as interpretation and supported by the source. First-person markers such as "For me" or "In my eyes" may frame that supported interpretation, but must not claim eyewitness knowledge, private emotion, source confirmation, or unseen motive."""
 
 
 def _generation_evidence_override():
@@ -2465,6 +2461,11 @@ def _extractive_slides(article_text, url, title=""):
         return None
 
     pairs = pair_facts(0, [])
+    if not pairs and len(candidates) >= 8:
+        # Sources often contain 8-11 usable sentences. Reuse facts across slides
+        # rather than making fallback impossible; never synthesize or split text.
+        pairs = [(candidates[i % len(candidates)], candidates[(i + 1) % len(candidates)])
+                 for i in range(6)]
     if not pairs:
         return None
     # ARTICLE_TITLE is a label, not evidence. Never discard body facts because
@@ -2584,7 +2585,7 @@ Before drafting: identify central development and strongest supported hook; extr
 Return needs_more_source if body is missing, inaccessible, or headline-only; central development is unclear; material contradictions remain; main claim lacks reliable attribution; S2-S5 lack distinct insights; six slides require speculation or outside knowledge; or unrelated stories cannot be separated safely.
 
 ## VOICE
-Use natural global English. Say football, never soccer. Sound like a passionate fan analyst speaking directly after watching the match: casual, personal, concrete, and confident without pretending certainty. Open with a blunt reaction or verdict when the source supports it. Use direct address sparingly, such as "bro" or "look at this", only when natural. Explain football actions in plain language: a defender watches the ball, leaves space, fails to cover, or a passing move cuts through the back four. Name the exact player, moment, movement, or comparison from the source. Let one clear opinion drive each slide; do not stack generic adjectives. Prefer precise match detail over dramatic language. Tactical terms are allowed when the source explains them or they are immediately made concrete. No emoji, hashtags, em dash, all-caps emphasis, rage bait, fake suspense, generic engagement bait, tabloid certainty, or unsupported moral judgement.
+Use natural global English. Say football, never soccer. Sound like a passionate fan analyst speaking directly after watching the match: casual, personal, concrete, and confident without pretending certainty. Open with a blunt reaction or verdict when the source supports it. Use direct address sparingly, such as "bro" or "look at this", only when natural. Explain football actions in plain language: a defender watches the ball, leaves space, fails to cover, or a passing move cuts through the back four. Name the exact player, moment, movement, or comparison from the source. Let one clear opinion drive each slide; do not stack generic adjectives. Use first-person editorial markers sparingly, such as "For me" or "In my eyes", only to frame an interpretation already supported by the source. Never use first person to claim eyewitness knowledge, private emotion, source confirmation, or unseen motive; do not add a marker to every slide. Prefer precise match detail over dramatic language. Tactical terms are allowed when the source explains them or they are immediately made concrete. No emoji, hashtags, em dash, all-caps emphasis, rage bait, fake suspense, generic engagement bait, tabloid certainty, or unsupported moral judgement.
 Never use: Did you know?; Let's dive in!; You won't believe; This changes everything; Only time will tell; Agree or disagree?
 
 ## SIX-SLIDE ARC
@@ -2653,7 +2654,7 @@ The article body and assigned evidence lines are the complete factual universe. 
         "Build one story, not six reports. Each slide needs one or two complete sentences; one strong sentence beats filler. S1 opens with source-backed tension or scene. S2-S5 move through proof, context, and confirmed impact. S6 returns to S1 with a grounded takeaway or specific question only when source supports both options. Use assigned evidence for order, then verify wording against full article. Every sentence must be faithful, non-escalating paraphrase.\n\n"
         f"{ref_data}\n\n{_number_hook_rule(article_text)}\n\n{_editorial_constraints()}\n\n{_generation_evidence_override()}")
     if evaluator_feedback:
-        user += f"\n\n## ⚠️ EVALUATOR REJECTED YOUR PREVIOUS ATTEMPT — FIX THESE ERRORS:\n{evaluator_feedback}\nRegenerate ALL 6 editorial slides. Do NOT repeat the errors above."
+        user += f"\n\n## SAFE REPAIR MODE\nThe previous draft was rejected for source drift. For flagged claims, copy the exact source wording or use a shorter sentence copied from assigned evidence. Do not paraphrase flagged names, quantities, scope words such as every/all/first/finally, attribution, timing, motive, emotion, consequence, or quote. Do not add a fan verdict or CTA premise unless its factual premise is explicit in assigned evidence. If a slide cannot be written safely from assigned evidence, return needs_more_source.\n\n## EVALUATOR REJECTION\n{evaluator_feedback}\nRegenerate ALL 6 editorial slides. Remove every flagged claim; do not defend or reinterpret it."
 
     # ── TOKEN BUDGET GATE (final check after user message built) ──
     total_input_chars = len(system) + len(user)
@@ -2764,7 +2765,8 @@ The article body and assigned evidence lines are the complete factual universe. 
                         slides.append({"title": f"S{num}", "content": text})
             if len(slides) != 6:
                 log(f"   ❌ Expected exactly 6 editorial slides, got {len(slides)}")
-                continue
+                _log_llm(RUN_ID, "generate_slides", total_input_chars, 0, False, "mistral-large-latest", "INVALID_SLIDE_COUNT")
+                return None
             # Store caption/hashtags on slides for later use
             if caption:
                 slides[0]["caption"] = caption
@@ -3107,54 +3109,7 @@ def main():
         sys.exit(1)
     log(f"   🏆 Best: {best['title']} (score={best['_score']}, type={best.get('_topic_type','')})")
 
-    # 3. Fetch article — try top 3 topics, verify body is football news
-    url = best["url"]
-    log(f"   Fetching: {url}")
-    article_text, image_url = best["_article_text"], best["_image_url"]
-    fetch_tries = 1
-
-    def _is_commercial_body(text):
-        """Check if article body is commercial/shopping, not football news."""
-        bl = text[:3000].lower()
-        football = sum(1 for kw in ["goal","match","score","league","cup","transfer",
-            "manager","player","team","club","stadium","referee","penalty",
-            "red card","yellow card","world cup","champions league",
-            "premier league","tournament","qualifier","fixture","midfielder",
-            "striker","defender","goalkeeper","captain","substitute"] if kw in bl)
-        commercial = sum(1 for kw in ["price","buy now","shop now","discount",
-            "sale","voucher","coupon","basket","checkout","delivery",
-            "add to basket","purchase","save £","save $","% off","free shipping",
-            "snap up","bargain","order now","next day delivery"] if kw in bl)
-        return football < 2 and commercial >= 2
-
-    while fetch_tries < len(ranked[:15]):
-        # Check length
-        if not article_text or len(article_text) < 100:
-            log(f"   ❌ Article too short on '{best['title']}' — trying next")
-        elif _is_commercial_body(article_text):
-            log(f"   🛒 Body is commercial, not football — trying next")
-        elif len(article_text.strip()) < 1000:
-            log(f"   ⚠️ Article too short ({len(article_text)} chars) — trying next")
-        elif len(article_text.split()) < 150:
-            log(f"   ⚠️ Article too thin ({len(article_text.split())} words) — trying next")
-        elif len([s for s in re.split(r'[.!?]+', article_text) if len(s.strip()) > 20]) < 5:
-            log(f"   ⚠️ Article too few sentences (< 5) — trying next")
-        else:
-            break  # Article is valid
-        best = ranked[fetch_tries]
-        url = best["url"]
-        log(f"   Fetching next: {url}")
-        article_text, image_url = best["_article_text"], best["_image_url"]
-        fetch_tries += 1
-    if not article_text or len(article_text) < 100:
-        log("❌ All top articles too short")
-        print("❌ Pipeline: all articles too short", flush=True)
-        sys.exit(1)
-    if _is_commercial_body(article_text):
-        log("❌ All top articles are commercial/shopping")
-        print("❌ Pipeline: all articles are commercial, not football news", flush=True)
-        sys.exit(1)
-    # 4. Generate — try candidates in ranked order until one succeeds.
+    # 4. Generate — try validated candidates in ranked order until one succeeds.
     # Each candidate: validate article, then up to 2 LLM attempts with feedback.
     # Falls back to next candidate on any failure.
     t0 = time.time()
@@ -3162,15 +3117,16 @@ def main():
     slides = None
     llm_time = 0.0
     passed = False
-    candidate_idx = 0
     rate_limited = False
+    article_text = ""
+    image_url = ""
+    url = ""
     pattern = "a"  # default, always overwritten in loop when candidate valid
     hook_variant = _select_hook_variant(analytics_summary, len(_ENGAGEMENT_RING.get("posts", [])))
     element_guidance, element_selection = _element_guidance(analytics_summary, len(_ENGAGEMENT_RING.get("posts", [])))
 
-    # Try more validated candidates before literal fallback. Two was too narrow
-    # for feeds where top stories were editorially rejected.
-    for candidate_idx in range(min(5, len(ranked[:15]))):
+    # Keep candidate churn bounded; body-first shortlist handles source validation.
+    for candidate_idx in range(min(3, len(ranked[:15]))):
         candidate = ranked[candidate_idx]
         art_text = candidate.get("_article_text", "")
         art_url = candidate["url"]
@@ -3180,9 +3136,6 @@ def main():
         # Validate article body
         if not art_text or len(art_text) < 100:
             log(f"   ❌ Candidate #{candidate_idx+1} too short — trying next")
-            continue
-        if _is_commercial_body(art_text):
-            log(f"   🛒 Candidate #{candidate_idx+1} is commercial — trying next")
             continue
         art_text = _story_text(art_text, art_title)
         if not _high_risk_claim_allowed(art_text, candidate.get("source", "")):
@@ -3218,7 +3171,6 @@ def main():
 
         all_errors = ""
         for gen_attempt in range(1, 3):
-            gen_t0 = time.time()
             generation_hook = hook_variant
             if gen_attempt == 2:
                 variants = [v for v in HOOK_VARIANTS if v != hook_variant]
@@ -3236,7 +3188,6 @@ def main():
                 hook_variant=generation_hook,
                 element_guidance=element_guidance,
             )
-            gen_elapsed = time.time() - gen_t0
             if not slides:
                 if _LAST_GENERATION_FAILURE == "LLM_RATE_LIMITED":
                     _record_failure("LLM_RATE_LIMITED", candidate.get("source", ""), art_title)
@@ -3272,6 +3223,11 @@ def main():
                 editorial_slides, art_text, art_url, assigned_evidence=assigned_evidence)
             eval_time = time.time() - eval_t0
             log(f"   🔍 Evaluator: {eval_decision} ({eval_time:.1f}s) — {'; '.join(eval_reasons[:3])}")
+            if eval_decision == "ERROR":
+                _record_failure("EVALUATOR_UNAVAILABLE", candidate.get("source", ""), art_title)
+                rate_limited = any("429" in reason or "rate" in reason.lower() for reason in eval_reasons)
+                log("   ⏭️ Evaluator unavailable — skip LLM retry, use source-verbatim fallback")
+                break
             if not _evaluator_accepts(eval_decision):
                 all_errors = "EVALUATOR: " + "; ".join(eval_reasons[:3])
                 _write_claim_audit(
@@ -3315,7 +3271,6 @@ def main():
             best = candidate
             url = candidate.get("url", "")
             image_url = candidate.get("_image_url", "") or candidate.get("image_url", "")
-            article_text = candidate.get("_article_text", "")
             pattern = _select_viral_pattern(candidate, article_text)
             passed = True
             log(f"   ✅ Extractive fallback accepted: {candidate.get('title', '')[:80]}")
@@ -3323,6 +3278,7 @@ def main():
         if passed:
             _record_failure("LLM_GENERATION_FALLBACK", best.get("source", ""), best.get("title", ""))
             log("   ✅ Source-verbatim fallback passed all checks")
+            llm_time = time.time() - t0
         else:
             # Editorial exhaustion is a normal no-post outcome, not a cron error.
             # Next scheduled run gets a fresh candidate; fail closed, never publish.

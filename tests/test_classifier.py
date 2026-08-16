@@ -389,6 +389,8 @@ def test_editorial_constraints_preserve_source_wording():
     assert "A stance is optional" in rules
     assert "Do not turn conditional claims into current facts" in rules
     assert "Do not invent a question, conflict, urgency, motive, winner, loser, or consequence" in rules
+    assert 'First-person markers such as "For me" or "In my eyes"' in rules
+    assert "must not claim eyewitness knowledge" in rules
 
 
 def test_generation_evidence_override_blocks_arc_speculation():
@@ -496,6 +498,16 @@ def test_extractive_slides_need_twelve_source_sentences():
         *[f"Clean source sentence {i} has enough words and remains literal article evidence." for i in range(1, 12)],
     ])
     assert mvp._extractive_slides(article, "https://example.com", "Arsenal Bruno Guimaraes")
+
+
+def test_extractive_fallback_reuses_facts_when_source_has_fewer_than_twelve():
+    mvp = _load_mvp()
+    article = " ".join(
+        f"Verified source sentence {i} contains enough detail for a literal fallback slide."
+        for i in range(1, 9)
+    )
+    slides = mvp._extractive_slides(article, "https://example.com/story")
+    assert slides and not mvp._extractive_audit_errors(slides, article)
 
 
 def test_extractive_fallback_drops_source_units_that_start_as_fragments():
