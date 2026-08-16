@@ -30,9 +30,9 @@ def test_unknown_flag_fails_closed():
 
 
 def test_wrappers_share_publisher_lock_and_post_marker_contract():
-    root = Path(__file__).parent.parent.parent
+    root = Path(__file__).parent.parent
     runner = (root / "scripts" / "run-mvp.sh").read_text()
-    watchdog = (root / "scripts" / "watchdog-pressbox.sh").read_text()
+    watchdog = (root / "watchdog-pressbox.sh").read_text()
     assert 'POST_MARKER="/tmp/pressbox-posted-this-run"' in runner
     assert 'rm -f "$POST_MARKER"' in runner
     assert '[ -f "$POST_MARKER" ]' in runner
@@ -51,10 +51,18 @@ def test_wrappers_share_publisher_lock_and_post_marker_contract():
 
 
 def test_publisher_wrapper_reports_stage_reason_and_never_uses_stale_report():
-    runner = (Path(__file__).parent.parent.parent / "scripts" / "run-mvp.sh").read_text()
+    runner = (Path(__file__).parent.parent / "scripts" / "run-mvp.sh").read_text()
     assert 'STAGE_REASON=$(grep -E' in runner
     assert 'tail -20 /tmp/pressbox-mvp.log >&2' in runner
     assert '[ -f "$POST_MARKER" ] && [ -f /tmp/pressbox-last-report ]' in runner
-    assert 'rm -f "$POST_MARKER" /tmp/pressbox-last-report' in runner
+    assert 'rm -f "$POST_MARKER"' in runner
+    assert 'RUNNING $(date -Iseconds)' in runner
+    assert 'last successful report visible' in runner
     assert 'exit 75' in runner
     assert 'flock -n 200 || exit 0' not in runner
+
+
+def test_watchdog_does_not_retry_active_run():
+    watchdog = (Path(__file__).parent.parent.parent / "watchdog-pressbox.sh").read_text()
+    assert '[[ "$LABEL" == "RUNNING"* ]]' in watchdog
+    assert 'pipeline running' in watchdog

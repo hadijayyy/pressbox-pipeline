@@ -17,12 +17,15 @@ notify() {
 LOCKFILE="/tmp/pressbox-mvp.lock"
 exec 200>"$LOCKFILE"
 flock -n 200 || exit 75
-rm -f "$POST_MARKER" /tmp/pressbox-last-report
+# Keep last successful report visible while next run is in progress.
+rm -f "$POST_MARKER"
 
 case "${1:-}" in
     ""|--watchdog) ;;
     *) echo "Usage: $0 [--watchdog]" >&2; exit 2 ;;
 esac
+
+echo "RUNNING $(date -Iseconds)" > /tmp/pressbox-last-status
 
 PIPE_ARGS=(--with-jitter)
 [ "${1:-}" = "--watchdog" ] && PIPE_ARGS+=(--watchdog)
