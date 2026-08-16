@@ -13,3 +13,7 @@ def test_system_prompt_enforces_untrusted_source_contract():
     assert "cover_image_keywords" in text
     assert "Each slide needs one or two complete sentences" in text
     assert "maximum 15 words per sentence" not in text
+    assert "passionate fan analyst speaking directly after watching the match" in text
+    assert "Explain football actions in plain language" in text
+    assert "Replay-worthy detail" in text
+    assert "Never invent a benchmark" in text
