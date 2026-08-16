@@ -59,3 +59,14 @@ def test_post_thread_recovers_root_after_publish_error(monkeypatch):
     result = poster.post_thread(["S1"])
 
     assert [item.post_id for item in result] == ["root"]
+
+
+def test_post_thread_rejects_over_limit_without_truncating(monkeypatch):
+    poster = tp.ThreadsPoster("token", "123")
+    called = []
+    poster.post_single = lambda *args, **kwargs: called.append(args) or "root"
+
+    import pytest
+    with pytest.raises(ValueError, match="exceeds Threads limit"):
+        poster.post_thread(["x" * 501])
+    assert called == []

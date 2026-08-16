@@ -258,10 +258,12 @@ class ThreadsPoster:
         reply_to_id: Optional[str] = None
 
         for i, text in enumerate(parts):
-            # Defensive: Threads API rejects >500 chars. Trim at 500 (no ellipsis — chars is chars).
+            # Never truncate audited content at transport. Truncation can publish
+            # an incomplete sentence and hide an upstream contract failure.
             if len(text) > 500:
-                logger.warning("Slide %d/%d is %d chars — trimming to 500", i + 1, len(parts), len(text))
-                text = text[:500].rstrip()
+                raise ValueError(
+                    f"Slide {i + 1}/{len(parts)} exceeds Threads limit: {len(text)} > 500"
+                )
 
             img = image_urls[i] if image_urls else None
             try:

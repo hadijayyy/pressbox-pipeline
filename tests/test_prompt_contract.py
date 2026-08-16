@@ -11,5 +11,5 @@ def test_system_prompt_enforces_untrusted_source_contract():
     assert "If the article and evidence pack conflict on a material fact, return needs_more_source." in text
     assert "CAPTION\n- Exactly one sentence." in text
     assert "cover_image_keywords" in text
-    assert "Every slide must have at least two complete sentences" in text
+    assert "Each slide needs one or two complete sentences" in text
     assert "maximum 15 words per sentence" not in text

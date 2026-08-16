@@ -48,6 +48,7 @@ def _release_pipeline_lock():
 
 # ── FAILURE TELEMETRY ────────────────────────────────────────────────────────
 _FAILURE_LOG_FILE = os.path.expanduser("~/.hermes/pressbox/failure_telemetry.json")
+_CLAIM_AUDIT_FILE = os.path.expanduser("~/.hermes/pressbox/claim_audit.jsonl")
 def _record_failure(reason, source="", title=""):
     """Append bounded machine-readable no-post reason telemetry."""
     try:
@@ -64,6 +65,25 @@ def _record_failure(reason, source="", title=""):
         os.makedirs(os.path.dirname(_FAILURE_LOG_FILE), exist_ok=True)
         with open(_FAILURE_LOG_FILE, "w") as f:
             json.dump(rows[-500:], f, ensure_ascii=False)
+    except Exception:
+        pass
+
+
+def _write_claim_audit(claim_rows, decision, url, title=""):
+    """Persist claim/evidence/rejection telemetry without affecting publishing."""
+    if not claim_rows:
+        return
+    try:
+        os.makedirs(os.path.dirname(_CLAIM_AUDIT_FILE), exist_ok=True)
+        with open(_CLAIM_AUDIT_FILE, "a") as f:
+            f.write(json.dumps({
+                "ts": datetime.now(timezone(timedelta(hours=7))).isoformat(),
+                "title": title[:160], "source_url": url, "decision": decision,
+                "claims": claim_rows,
+            }, ensure_ascii=False) + "\n")
+        for row in claim_rows:
+            if row.get("reason") != "supported" or decision != "PREVALIDATION_PASS":
+                log(f"CLAIM_AUDIT S{row.get('slide')}: claim={row.get('claim','')[:180]} | evidence={' / '.join(row.get('evidence', []))[:240]} | reason={row.get('reason','')} | decision={decision} | source={url}")
     except Exception:
         pass
 
@@ -1851,16 +1871,17 @@ def evaluator_check(slides, article_text, url, verbatim=False, assigned_evidence
         "7. QUALITY: grammar errors, incoherent flow, too many slides\n"
         "8. MISLEADING: headline says X but article says Y\n"
         "9. TONE: flag analysis only when it adds an unsupported claim. A slide may report verified facts without a stance.\n\n"
-        "RULE: For each slide, can you point to the EXACT assigned evidence sentence that supports every claim? "
-        "If a claim requires inference beyond the literal text, flag it.\n\n"
+        "RULE: Check every claim against the full source article. Flag added facts, changed numbers, stronger certainty, invented motive, or unsupported consequence. Do not flag a natural idiom or faithful paraphrase when meaning is unchanged.\n\n"
         "Respond in EXACTLY this JSON format:\n"
         '{"decision": "APPROVE|REVISE|REJECT", "reasons": ["reason1", "reason2"]}\n'
         "An exact source sentence is supported even if it contains a quote, uncertainty, opinion, or attribution. "
         "Do not invent a stricter claim than the source. APPROVE = post as-is. REVISE = has issues but fixable. REJECT = do not post."
     )
-    evidence_text = "\n".join(
-        f"[Slide {i}] " + " ".join(assigned_evidence.get(f'slide_{i}', []))
-        for i in range(1, 7)) if assigned_evidence else art_short
+    evidence_text = art_short
+    if assigned_evidence:
+        evidence_text += "\n\nSTORY ORDER HINTS (not exclusive evidence):\n" + "\n".join(
+            f"[Slide {i}] " + " ".join(assigned_evidence.get(f'slide_{i}', []))
+            for i in range(1, 7))
     user = (
         f"ASSIGNED SOURCE EVIDENCE:\n{evidence_text}\n\n"
         f"SLIDES (to review):\n{slides_text}\n\n"
@@ -2048,79 +2069,10 @@ def _select_viral_pattern(topic, article_text):
     return "c"
 
 def _build_reference_data():
-    """Build factual reference data injected into every generation prompt.
-    Includes current date, WC timeline, and common player ages.
-    Returns string to prepend to the user message."""
-    from datetime import date
-    today = date.today()
+    """No external facts; article text is sole factual authority."""
+    return """EXTERNAL REFERENCE DATA: DISABLED.
+Use only explicit facts in supplied source text."""
 
-    players = [
-        ("Harry Kane", 7, 28, 1993),
-        ("Lionel Messi", 6, 24, 1987),
-        ("Kylian Mbappe", 12, 20, 1998),
-        ("Erling Haaland", 7, 21, 2000),
-        ("Jude Bellingham", 6, 29, 2003),
-        ("Bukayo Saka", 9, 5, 2001),
-        ("Mohamed Salah", 6, 15, 1992),
-        ("Lamine Yamal", 7, 13, 2007),
-        ("Vinicius Jr", 7, 12, 2000),
-        ("Rodri", 6, 22, 1996),
-        ("Florian Wirtz", 5, 3, 2003),
-        # Extras (added Jul 2026)
-        ("Phil Foden", 5, 28, 2000),
-        ("Cole Palmer", 5, 6, 2002),
-        ("Jamal Musiala", 2, 26, 2003),
-        ("Joshua Kimmich", 2, 8, 1995),
-        ("Declan Rice", 1, 14, 1999),
-        ("Martin Odegaard", 12, 17, 1998),
-        ("Alessandro Bastoni", 4, 13, 1999),
-        ("Viktor Gyokeres", 2, 4, 1998),
-        ("Victor Osimhen", 12, 29, 1998),
-        ("Khvicha Kvaratskhelia", 2, 12, 2001),
-        ("Pau Cubarsi", 1, 22, 2007),
-        ("Nico Williams", 7, 12, 2002),
-        ("Federico Valverde", 7, 22, 1998),
-        ("Gavi", 8, 5, 2004),
-        ("Pedri", 11, 25, 2002),
-        # Batch 3 (no-risk, Jul 2026)
-        ("Kai Havertz", 6, 11, 1999),
-        ("Gabriel Jesus", 4, 3, 1997),
-        ("Ollie Watkins", 12, 30, 1995),
-        ("Bruno Fernandes", 9, 8, 1994),
-        ("Dominik Szoboszlai", 10, 25, 2000),
-        ("Josko Gvardiol", 1, 23, 2002),
-        ("William Saliba", 3, 24, 2001),
-        ("Marcus Rashford", 10, 31, 1997),
-        ("Trent Alexander-Arnold", 10, 7, 1998),
-        ("Cristiano Ronaldo", 2, 5, 1985),
-    ]
-
-    wc_years = 2030 - today.year
-    lines = [f"## FACTUAL REFERENCE DATA (ground truth for all math)"]
-    lines.append(f"Current date: {today.strftime('%A, %B %d, %Y')}")
-    lines.append(f"Next FIFA World Cup: 2030 (June-July) → ~{wc_years} years from now")
-    lines.append("")
-    lines.append(f"Player ages (mid-{today.year}):")
-    _months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
-    for name, m, d, y in players:
-        age = today.year - y
-        if (today.month, today.day) < (m, d):
-            age -= 1
-        lines.append(f"- {name}: {age} (born {d} {_months[m-1]} {y})")
-    lines.append("")
-    lines.append("2030 FIFA World Cup age hints (for future-age questions only):")
-    for name, m, d, y in players:
-        age_2030 = 2030 - y
-        if (6, m) < (m, d):
-            age_2030 -= 1
-        lines.append(f"- {name}: ~{age_2030} at 2030 WC (use only for future-age questions)")
-    lines.append("")
-    lines.append("")
-    lines.append("RULES for numbers in your output:")
-    lines.append("- Every number MUST come from the article OR this reference data.")
-    lines.append("- NEVER calculate ages, future dates, or fees not listed above.")
-    lines.append("- When in doubt: omit the number. Wrong is worse than vague.")
-    return "\n".join(lines)
 
 
 def number_grounding_check(slides_text, article_text, ref_text):
@@ -2201,6 +2153,46 @@ def number_grounding_check(slides_text, article_text, ref_text):
     return warnings
 
 
+def _claim_tokens(text):
+    stop = {"about", "after", "again", "also", "been", "being", "could", "from", "have", "into", "more", "only", "said", "that", "their", "there", "these", "they", "this", "through", "under", "what", "when", "where", "which", "will", "with", "would", "your"}
+    return {w.lower() for w in re.findall(r"[A-Za-zÀ-ÿ0-9£€$]+", text) if len(w) > 2 and w.lower() not in stop}
+
+
+def _claim_audit(slides, article_text, url, assigned_evidence=None):
+    """Pre-evaluator lexical entailment gate. Fail closed; source URL is attached."""
+    source_units = _source_units(article_text)
+    rows, errors = [], []
+    for i, slide in enumerate((slides or [])[:6], 1):
+        # Assigned pairs guide story order; full source units prevent false rejects
+        # when faithful paraphrase uses words from another source sentence.
+        evidence = source_units
+        evidence_text = " ".join(evidence)
+        evidence_tokens = _claim_tokens(evidence_text)
+        for claim in re.split(r"(?<=[.!?])\s+", slide.get("content", "").strip()):
+            claim = claim.strip()
+            if not claim:
+                continue
+            tokens = _claim_tokens(claim)
+            overlap = sorted(tokens & evidence_tokens)
+            numbers = re.findall(r"(?:£|€|\$)\s?[\d,.]+|\b\d+(?:[.,]\d+)?%?", claim)
+            missing_numbers = [n for n in numbers if n.replace(",", "") not in evidence_text.replace(",", "")]
+            best_ratio = max([
+                len(tokens & _claim_tokens(unit)) / max(1, len(tokens)) for unit in evidence
+            ] or [0])
+            reason = ""
+            if missing_numbers:
+                reason = f"unsupported number(s): {', '.join(missing_numbers)}"
+            elif len(tokens) >= 4 and best_ratio < 0.20:
+                reason = f"review: low lexical overlap {best_ratio:.0%}"
+            elif len(overlap) < 2:
+                reason = "review: compact paraphrase"
+            row = {"slide": i, "claim": claim, "evidence": evidence[:2], "source_url": url, "reason": reason or "supported"}
+            rows.append(row)
+            if reason and reason.startswith("unsupported"):
+                errors.append(f"PREVALIDATION: S{i} {reason}: {claim[:180]}")
+    return errors, rows
+
+
 def _number_hook_rule(article_text):
     """Keep viral-hook guidance from pressuring the model to invent figures."""
     return "NUMBER is optional unless explicitly supported by the article."
@@ -2230,10 +2222,10 @@ def _generation_evidence_override():
     return """GENERATION OVERRIDE: The assigned evidence lines are the only factual authority for each slide.
 ARTICLE_TITLE is a label, not evidence. If title and body/evidence differ, follow body/evidence and never repeat unsupported title wording.
 The arc template is structure only; it never authorizes facts, context, stakes, motives, reactions, or consequences outside assigned evidence lines.
-If assigned evidence cannot support two complete sentences, return needs_more_source.
+If source cannot support a complete sentence, omit that detail; do not pad with generic filler.
 Do not invent stakes, motives, consequences, reactions, or either/or outcomes.
 Do not turn a question, implication, possibility, or interpretation into a fact.
-Use a grounded takeaway for S6 unless both sides of a question are explicit in assigned evidence."""
+Never output dangling quote fragments or unattributed 'it says'/'reads one reaction' clauses. Use a grounded takeaway for S6 unless both sides of a question are explicit in assigned evidence."""
 
 
 def _source_units(article_text, split_long=True):
@@ -2482,6 +2474,27 @@ def _extractive_slides(article_text, url, title=""):
     return slides if not _extractive_audit_errors(slides, article_text) else None
 
 
+_LEADING_FRAGMENT_RE = re.compile(
+    r"^(?:and|but|or|so|because|while|as|in|to|before|after)\b|"
+    r"^(?:he|she|they|it)\s+(?:said|added|noted|told)\b",
+    re.I,
+)
+
+
+def _leading_fragment_reason(text):
+    """Reject sentence continuations created by unsafe source/model splitting."""
+    raw = text.strip()
+    if not raw:
+        return "leading continuation fragment"
+    # A complete quote may intentionally start lowercase; only inspect plain prose.
+    if raw[0] in "\"“‘'":
+        return ""
+    start = raw.lstrip()
+    if start[0].islower() or _LEADING_FRAGMENT_RE.match(start):
+        return "leading continuation fragment"
+    return ""
+
+
 def _slide_contract_errors(slides, editorial=True):
     """All drafts must satisfy the same publish contract."""
     if len(slides) != 7:
@@ -2491,8 +2504,12 @@ def _slide_contract_errors(slides, editorial=True):
         text = _space_sentences(slide.get("content", ""))
         if not text or len(text) > MAX_CHARS:
             errors.append(f"S{i} invalid length ({len(text)})")
-        elif len(_source_units(text.split("\n\nhttp", 1)[0])) < 2:
-            errors.append(f"S{i} needs at least 2 sentences")
+        elif re.search(r"\b(?:it says|reads one reaction|reads:|says:|writes:)\b", text, re.I):
+            errors.append(f"S{i} dangling attribution fragment")
+        elif _leading_fragment_reason(text):
+            errors.append(f"S{i} leading continuation fragment")
+        elif len(_source_units(text.split("\n\nhttp", 1)[0])) < 1:
+            errors.append(f"S{i} has no complete sentence")
     source = slides[6].get("content", "").strip()
     if not re.fullmatch(r"Source: https?://\S+", source):
         errors.append("S7 invalid source URL")
@@ -2575,10 +2592,10 @@ S2 Evidence: clearest verified detail, decision, statement, number, or scene.
 S3 Context: supplied rule, timeline, relationship, or background needed for central development.
 S4 Stakes: who is affected and confirmed consequence. Qualify implications.
 S5 Final Verified Angle and Attribution: strongest remaining verified detail. Attribute naturally to SOURCE_NAME or original reporter.
-S6 Payoff: sharp source-supported takeaway. Ask one specific either/or question only when source supports two real outcomes; make it about the decision, consequence, or conflict so fans can take a side. Never ask generic engagement bait.
+S6 Payoff: sharp source-supported takeaway. Ask one specific either/or question only when source supports two real outcomes; make it about the decision, consequence, or conflict so fans can take a side. Never ask generic engagement bait. Do not add numeric comparisons, age bands, rankings, or labels in S6 unless exact wording appears in source.
 
 ## LENGTH AND STYLE RULES
-Every slide must have at least two complete sentences, each grounded in its assigned evidence lines. Never submit one-sentence slides. If two supported sentences cannot fit, return needs_more_source. Keep writing compact, natural, and easy for football fans to scan. One new insight per slide. Avoid repeated facts. Use numbers only when source explicitly provides them. Paraphrase quotes accurately; never reproduce long quote. Keep each slide at or below 450 characters.
+Each slide needs one or two complete sentences. One strong sentence beats two filler sentences. Every editorial slide must begin at a sentence boundary: capitalized prose or an intentional opening quote, never a continuation such as 'and ...', 'he said ...', or 'in ...'. S1 and S6 should be short, punchy story beats; S2-S5 add distinct evidence or context. Keep writing natural and easy to scan. Use only source-supported numbers. Use a quote only when complete and clearly attributed; never leave fragments such as 'it says', 'reads one reaction', or a dangling colon. If quote attribution is unclear, paraphrase the source or omit the quote. Keep each slide at or below 450 characters.
 
 ## CAPTION
 - Exactly one sentence.
@@ -2600,89 +2617,8 @@ If source is insufficient return:
 {"slide_1":"needs_more_source","slide_2":"","slide_3":"","slide_4":"","slide_5":"","slide_6":"","caption":"","cover_image_keywords":""}
 """
 
-    # Pattern-specific arc template
-    arc_templates = {
-        "q": """## ARC: Question + Reasons (Reference Pattern)
-Use only when the supplied article contains multiple distinct, attributed reasons or turning points.
-S1 = Ask one specific unresolved question and promise only the supported number of reasons. Do not invent mystery or count.
-S2 = Give the timeline and explain how close the outcome came to happening.
-S3-S5 = Deliver one concrete sourced reason or turning point per slide. Preserve attribution and uncertainty.
-S6 = Return to the opening question. Ask a grounded either/or or judgment question. Add no new fact.
-Copy structure, never wording. If evidence does not support a reason, return needs_more_source.
-
-""",
-        "a": """## ARC: Rule-Break (Pattern A)
-S1 = CURIOSITY HOOK: Name the authority, the rule they broke, and the specific consequence — all in one breath.
-Bad (vague): "FIFA just broke its own golden rule for England vs Argentina."
-Good (specific): "FIFA's own handbook says sponsors stay off the pitch. Then Mercedes-Benz appeared at Wembley. The rulebook went out the window."
-Open with the contradiction itself — authority vs its own standards. EXACTLY 1-2 punchy sentences. No generic "broke its own rule" — always name the specific rule.
-
-S2 = PHYSICAL DETAIL: ONE vivid detail — the logo, the banner, the document, the statement. Make the reader SEE it. NOT "what the rule says."
-S3 = LORE + CONTEXT: The existing rule, how long it stood, who it protected, why this is unprecedented.
-S4 = STAKES: Who loses? Who wins? What precedent does this set for the NEXT time?
-S5 = THE PATTERN: Has this authority done this before? Is this a one-off or a pattern?
-S6 = BRING IT HOME: "So what happens when [next team] asks for the same treatment?" Make it about the NEXT case — fear of what comes after. For sensitive topics (injuries/abuse/discrimination): reflective question per base rules.
-
-""",
-        "b": """## ARC: Contradiction (Pattern B)
-S1 = HOOK: "[Thing] is [claim] — but [contradicting evidence]. [Implication] — [Binary Q]"
-EXACTLY 2 sentences. Example: "Premier League says player welfare comes first. Yet Man Utd played 3 matches in 6 days — while earning £5m per game."
-
-S2 = THE CONTRADICTION: The two opposing facts/claims. Make the gap explicit.
-S3 = EVIDENCE: Data, timeline, or statement proving the contradiction exists.
-S4 = WHY IT MATTERS: Who benefits from the contradiction being exposed.
-S5 = THE REAL STORY: What the contradiction reveals about motives or priorities.
-S6 = BINARY: "Is this [excuse] or [underlying issue]?" — name two interpretations. For sensitive topics (injuries/abuse/discrimination): reflective question per base rules.
-
-""",
-        "c": """## ARC: Detail+Emotion (Pattern C)
-S1 = CURIOSITY HOOK: Lead with the specific number, decision, or human-cost detail.
-Bad (vague): "Sources close to the negotiations have revealed the asking price."
-Good (specific): "€150m. That's the number Barcelona slapped on Pedri after City's approach."
-If article has a €/£/US$ figure, a concrete deadline (hours/days), or a life-changing consequence — lead with it. EXACTLY 1-2 sentences. No "Revealed" or "Admitted" unless the REVELATION is the hook.
-
-S2 = DATA: The specific number, quote, or report driving the story. Make it tangible.
-S3 = CONTEXT: Background making the data meaningful — comparison, precedent, or timing.
-S4 = STAKEHOLDER: Affected party — player, club, fans, league. Humanize it. Who loses sleep over this?
-S5 = IRONY: Why this is unexpected, contradictory, or the opposite of what fans assumed.
-S6 = CIRCLE BACK: Question that references the S1 detail. "€150m — worth it, or Barcelona pricing him out on purpose?" For sensitive topics (injuries/abuse/discrimination): reflective question per base rules.
-""",
-        "e": """## ARC: Pressure Cooker (Pattern E)
-S1 = CURIOSITY HOOK: Name the person + the tension signal + the trigger.
-Bad (flat): "Erling Haaland was not happy after Norway's late collapse."
-Good (curiosity gap): "Erling Haaland walked straight past the cameras. Didn't stop. Didn't speak. Two words to a teammate, then gone. That silence says more than any interview."
-Open with a VIVID moment — walked out, refused to train, deleted social media, silent treatment. Let the visual do the work. EXACTLY 1-2 sentences.
-
-S2 = TENSION CONTEXT: What triggered the reaction. Specific incident/decision/quote.
-S3 = PLAYERS INVOLVED: Other parties — teammates, board, fans, media. Who benefits if this blows up?
-S4 = STAKES: What happens if tension escalates. Job, transfer, board meeting, dressing room fracture.
-S5 = HISTORY: Has this happened before? Pattern or one-off? Contract situation, past friction.
-S6 = BRING IT HOME: "[Name] has a decision to make. [Option A] or [Option B]?" For sensitive topics (injuries/abuse/discrimination): reflective question per base rules.
-""",
-        "f": """## ARC: Behind-the-Scenes (Pattern F)
-S1 = HOOK: "Why [team/authority] [did/decided] [specific thing]. [Detail] — [Binary Q]" EXACTLY 2 sentences.
-S2 = THE SITUATION: What happened, when, where. Specific logistics detail.
-S3 = WHY IT MATTERS: Impact on match, players, or tournament.
-S4 = WHO BENEFITS/WHO LOSES: Advantage or disadvantage created.
-S5 = THE REAL STORY: What this reveals about the organization behind the scenes.
-S6 = BINARY: "Will [factor] affect [result], or is it just [dismissive explanation]?" For sensitive topics (injuries/abuse/discrimination): reflective question per base rules.
-""",
-        "d": """## ARC: Commentary (Pattern D)
-S1 = CURIOSITY HOOK: The strongest implication from the quote, NOT restating the quote.
-Bad (reporting): "Frank Leboeuf has backed Arsenal to retain the Premier League title."
-Good (curiosity gap): "Arsenal's biggest rival just endorsed them. That should terrify Mikel Arteta."
-Rule: if article has a number in S1 position, LEAD with it. "£80m. For a player his own manager calls 'not ready.' The Salah replacement plan just got messy."
-EXACTLY 1-2 punchy sentences. Open with: name, number, or contradiction. Never "X says Y."
-
-S2 = THE CLAIM: Exact quote or specific claim. Attribute clearly. What was actually said.
-S3 = WHY THIS PERSON: Why their words carry weight — role, history, track record, or stake in the outcome.
-S4 = THE UNSAID: What the quote implies but doesn't say. Between-the-lines reading, framed as interpretation. "Reading between the lines, this sounds like..."
-S5 = STAKES + RECEIPTS: How this affects real decisions. Transfer, selection, contract, morale. Use a specific downstream effect.
-S6 = CIRCLE BACK: Reference S1's tension with a sharp question. "So which is it — genuine belief, or damage control?" Name two real interpretations. For sensitive topics (injuries/abuse/discrimination): reflective question per base rules.
-""",
-    }
-    # Pattern-specific arc template injected into system prompt.
-    arc_template = arc_templates.get(pattern, "")
+    # Pattern templates are intentionally not injected. Source/evidence contract is canonical.
+    arc_template = ""
     ref_data = _build_reference_data()
     source_name = source or url.split("/")[2] if url else ""
     pattern_label = {'q':'Question+Reasons', 'a':'Rule-Break', 'b':'Contradiction', 'c':'Detail+Emotion', 'd':'Commentary', 'e':'Pressure-Cooker', 'f':'Behind-the-Scenes'}.get(pattern, 'Detail+Emotion')
@@ -2691,10 +2627,14 @@ S6 = CIRCLE BACK: Reference S1's tension with a sharp question. "So which is it 
     recent_learnings = _load_recent_learnings()
 
     # ── Build full system prompt: base + arc template + recent learnings ──
+    hard_grounding = """
+## NON-NEGOTIABLE SOURCE-ONLY OVERRIDE
+The article body and assigned evidence lines are the complete factual universe. Ignore all arc examples, reference data, general knowledge, title wording, and learned context. Every claim must be literal or a faithful, non-escalating paraphrase of its assigned evidence. Delete unsupported detail. If any slide needs a missing fact, return needs_more_source. Do not add fees, clubs, players, trophies, transfer interest, contract effects, motives, reactions, stakes, or outcomes unless explicit in assigned evidence.
+"""
     if recent_learnings:
-        system = base + arc_template + "\n\n## RECENT LEARNINGS (from engagement data)\n" + recent_learnings + "\n"
+        system = base + arc_template + hard_grounding + "\n\n## RECENT LEARNINGS (from engagement data)\n" + recent_learnings + "\n"
     else:
-        system = base + arc_template
+        system = base + arc_template + hard_grounding
     assigned_evidence = _assigned_evidence(article_text, evidence_plan) if evidence_plan else None
     if not assigned_evidence:
         return None
@@ -2709,9 +2649,7 @@ S6 = CIRCLE BACK: Reference S1's tension with a sharp question. "So which is it 
         f"  <source_url>{url}</source_url>\n</primary_article>\n\n"
         f"<EVIDENCE_PACK>\n{_evidence_pack(article_text)}\n</EVIDENCE_PACK>\n\n"
         f"<SLIDE_EVIDENCE>\n{assignments}\n</SLIDE_EVIDENCE>\n\n"
-        "Each slide must contain at least two complete sentences grounded in its assigned evidence. If two sentences cannot be supported, return needs_more_source. S1 must create a source-supported curiosity gap without giving away the whole story. S6 must close with a story-specific two-option question only when both outcomes are supported; otherwise use a sharp grounded takeaway. Each sentence must be a faithful,"
-        " non-escalating paraphrase of its slide's assigned evidence only. Do not add a question"
-        " unless one assigned sentence supports both outcomes.\n\n"
+        "Build one story, not six reports. Each slide needs one or two complete sentences; one strong sentence beats filler. S1 opens with source-backed tension or scene. S2-S5 move through proof, context, and confirmed impact. S6 returns to S1 with a grounded takeaway or specific question only when source supports both options. Use assigned evidence for order, then verify wording against full article. Every sentence must be faithful, non-escalating paraphrase.\n\n"
         f"{ref_data}\n\n{_number_hook_rule(article_text)}\n\n{_editorial_constraints()}\n\n{_generation_evidence_override()}")
     if evaluator_feedback:
         user += f"\n\n## ⚠️ EVALUATOR REJECTED YOUR PREVIOUS ATTEMPT — FIX THESE ERRORS:\n{evaluator_feedback}\nRegenerate ALL 6 editorial slides. Do NOT repeat the errors above."
@@ -2908,20 +2846,28 @@ def post_to_threads(slides, image_url=None):
 # ── 5b. TELEGRAM NOTIFY ───────────────────────────────────────────
 
 def notify_telegram(text):
-    """Send notification via @szejay_bot."""
+    """Best-effort notification; never changes publishing result."""
     try:
         token_file = os.path.expanduser("~/.szejay_token")
-        if not os.path.exists(token_file):
-            return
-        with open(token_file) as f:
-            token = f.read().strip()
-        requests.post(
+        token = env.get("SZEJAY_BOT_TOKEN", "")
+        if not token and os.path.exists(token_file):
+            with open(token_file) as f:
+                token = f.read().strip()
+        if not token:
+            return False
+        chat_id = os.getenv("PRESSBOX_NOTIFY_CHAT_ID", "1022032312")
+        response = requests.post(
             f"https://api.telegram.org/bot{token}/sendMessage",
-            json={"chat_id": 1022032312, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True},
+            json={"chat_id": chat_id, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True},
             timeout=10,
         )
-    except Exception:
-        pass
+        if response.status_code != 200:
+            log(f"⚠️ Telegram notification failed (publishing unaffected): HTTP {response.status_code} target={chat_id}")
+            return False
+        return True
+    except Exception as e:
+        log(f"⚠️ Telegram notification error (publishing unaffected): {e}")
+        return False
 
 # ── 6. TRACK ───────────────────────────────────────────────────────
 
@@ -3262,7 +3208,8 @@ def main():
         pattern_name = {'q': 'Q (Question+Reasons)', 'a': 'A (Rule-Break)', 'b': 'B (deprecated)', 'c': 'C (Detail+Emotion)', 'd': 'D (Commentary)', 'e': 'E (Pressure-Cooker)', 'f': 'F (Behind-the-Scenes)'}[pattern]
         log(f"   🎯 Viral pattern: {pattern_name}")
         evidence_plan = candidate.get("_evidence_plan") or _evidence_plan(art_text)
-        if not evidence_plan:
+        assigned_evidence = _assigned_evidence(art_text, evidence_plan) if evidence_plan else None
+        if not assigned_evidence:
             log(f"   ⚠️ Candidate #{candidate_idx+1} lacks evidence — trying next")
             _record_failure("INSUFFICIENT_EVIDENCE", candidate.get("source", ""), art_title)
             continue
@@ -3270,6 +3217,10 @@ def main():
         all_errors = ""
         for gen_attempt in range(1, 3):
             gen_t0 = time.time()
+            generation_hook = hook_variant
+            if gen_attempt == 2:
+                variants = [v for v in HOOK_VARIANTS if v != hook_variant]
+                generation_hook = variants[0] if variants else "detail"
             slides = generate_slides(
                 art_text, art_url,
                 title=art_title,
@@ -3280,7 +3231,7 @@ def main():
                 pattern=pattern,
                 evidence_plan=evidence_plan,
                 evaluator_feedback=all_errors,
-                hook_variant=hook_variant,
+                hook_variant=generation_hook,
                 element_guidance=element_guidance,
             )
             gen_elapsed = time.time() - gen_t0
@@ -3302,7 +3253,9 @@ def main():
             slides_text = " ".join(s["content"] for s in editorial_slides)
             grounding_errors = grounding_check(slides_text, art_text, _extract_proper_nouns(art_text), _extract_stages(art_text))
             number_errors = number_grounding_check(slides_text, art_text, _build_reference_data())
-            errors = contract_errors + grounding_errors + number_errors
+            prevalidation_errors, claim_rows = _claim_audit(editorial_slides, art_text, art_url, assigned_evidence)
+            errors = contract_errors + grounding_errors + number_errors + prevalidation_errors
+            _write_claim_audit(claim_rows, "PREVALIDATION_REJECT" if prevalidation_errors else "PREVALIDATION_PASS", art_url, art_title)
             if errors:
                 all_errors = "; ".join(errors)
                 log(f"   ⚠️ Checks failed (attempt {gen_attempt}): {all_errors}")
@@ -3314,11 +3267,14 @@ def main():
 
             eval_t0 = time.time()
             eval_decision, eval_reasons = evaluator_check(
-                editorial_slides, art_text, art_url, assigned_evidence=evidence_plan)
+                editorial_slides, art_text, art_url, assigned_evidence=assigned_evidence)
             eval_time = time.time() - eval_t0
             log(f"   🔍 Evaluator: {eval_decision} ({eval_time:.1f}s) — {'; '.join(eval_reasons[:3])}")
             if not _evaluator_accepts(eval_decision):
                 all_errors = "EVALUATOR: " + "; ".join(eval_reasons[:3])
+                _write_claim_audit(
+                    [dict(row, evaluator_reasons=eval_reasons[:3]) for row in claim_rows],
+                    f"EVALUATOR_{eval_decision}", art_url, art_title)
                 log(f"   ⚠️ Evaluator rejected (attempt {gen_attempt}): {all_errors}")
                 if gen_attempt == 1:
                     log("   🔁 Retrying with evaluator feedback...")

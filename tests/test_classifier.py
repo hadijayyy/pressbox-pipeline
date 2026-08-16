@@ -29,6 +29,39 @@ def test_number_hook_rule_does_not_force_unsourced_numbers():
     assert "NUMBER is optional unless explicitly supported by the article" in mvp._number_hook_rule("Rodri could join Madrid.")
 
 
+def test_slide_contract_rejects_leading_continuation_fragment():
+    mvp = _load_mvp()
+    slides = [
+        {"title": f"S{i}", "content": "A complete sentence with source-backed detail."}
+        for i in range(1, 7)
+    ] + [{"title": "S7", "content": "Source: https://example.com/story"}]
+    slides[0]["content"] = "and have money to spend to get it despite dropping out of Europe."
+    errors = mvp._slide_contract_errors(slides)
+    assert any("S1" in error and "fragment" in error for error in errors)
+
+
+def test_slide_contract_rejects_lowercase_continuation_on_any_editorial_slide():
+    mvp = _load_mvp()
+    slides = [
+        {"title": f"S{i}", "content": "A complete sentence with source-backed detail."}
+        for i in range(1, 7)
+    ] + [{"title": "S7", "content": "Source: https://example.com/story"}]
+    slides[2]["content"] = "he said before Sunday's match."
+    errors = mvp._slide_contract_errors(slides)
+    assert any("S3" in error and "fragment" in error for error in errors)
+
+
+def test_slide_contract_allows_complete_quote_starting_lowercase():
+    mvp = _load_mvp()
+    slides = [
+        {"title": f"S{i}", "content": "A complete sentence with source-backed detail."}
+        for i in range(1, 7)
+    ] + [{"title": "S7", "content": "Source: https://example.com/story"}]
+    slides[0]["content"] = "‘we need to improve,’ the manager said."
+    assert not any("S1 leading continuation fragment" == error
+                   for error in mvp._slide_contract_errors(slides))
+
+
 def test_number_grounding_accepts_mojibake_currency_from_article():
     mvp = _load_mvp()
     assert not mvp.number_grounding_check("Arsenal paid £75m.", "Arsenal paid Â£75m.", "")
@@ -180,11 +213,11 @@ def test_story_text_keeps_original_when_title_filter_is_thin():
     assert len(filtered) >= 1800
 
 
-def test_generation_prompt_requires_exactly_two_sentences_per_slide():
+def test_generation_prompt_allows_storytelling_without_filler():
     mvp = _load_mvp()
     source = inspect.getsource(mvp.generate_slides)
-    assert "at least two complete sentences" in source
-    assert "but 1 is acceptable" not in source
+    assert "one strong sentence beats filler" in source
+    assert "at least two complete sentences" not in source
 
 
 def test_commentary_article_does_not_use_rule_break_arc():
@@ -252,8 +285,7 @@ def test_slide_contract_requires_two_source_grounded_sentences_per_slide():
     mvp = _load_mvp()
     slides = [{"content": "One supported source sentence."}] * 6 + [{"content": "Source: https://example.com/story"}]
     errors = mvp._slide_contract_errors(slides)
-    assert "S1 needs at least 2 sentences" in errors
-    assert "S6 needs at least 2 sentences" in errors
+    assert errors == []
 
 
 def test_slide_contract_accepts_two_sentences_per_slide():
@@ -266,8 +298,7 @@ def test_slide_contract_requires_two_sentences_on_every_slide():
     mvp = _load_mvp()
     slides = [{"content": "One supported source sentence."}] * 6 + [{"content": "Source: https://example.com/story"}]
     errors = mvp._slide_contract_errors(slides)
-    assert "S1 needs at least 2 sentences" in errors
-    assert "S6 needs at least 2 sentences" in errors
+    assert errors == []
 
 
 def test_slide_contract_keeps_450_char_limit():
@@ -364,7 +395,7 @@ def test_generation_evidence_override_blocks_arc_speculation():
     rules = mvp._generation_evidence_override()
     assert "assigned evidence lines are the only factual authority" in rules
     assert "ARTICLE_TITLE is a label, not evidence" in rules
-    assert "If assigned evidence cannot support two complete sentences, return needs_more_source" in rules
+    assert "If source cannot support a complete sentence, omit that detail" in rules
     assert "Do not invent stakes, motives, consequences, reactions, or either/or outcomes" in rules
 
 
