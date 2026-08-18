@@ -44,7 +44,6 @@ Sentences flow naturally: single spaces between sentences, no forced line breaks
 - INSTEAD of "You won't believe" → open with the surprising fact directly
 - INSTEAD of "Let that sink in" → close with binary question
 - INSTEAD of "fans everywhere are talking about" → name the venue or person
-- ZERO emoji. ZERO hashtags. Clean, sharp, no marketing noise.
 - Name the news outlet at least once for credibility.
 
 ## SLIDE STRUCTURE

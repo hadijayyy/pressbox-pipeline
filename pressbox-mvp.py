@@ -2198,6 +2198,55 @@ def _number_hook_rule(article_text):
     return "NUMBER is optional unless explicitly supported by the article."
 
 
+_TRANSFER_DEAL_SIGNALS = (
+    "agree", "agreed", "agreement", "deal", "done deal", "here we go",
+    "signed", "signs", "complete", "completed", "sealed", "finalised",
+    "finalized", "official", "medical", "contract until", "contract with",
+    "reached agreement",
+)
+
+
+def _transfer_deal_voice(article_text, title=""):
+    """Fabrizio-Romano-style confirmed-deal voice, grounded and constraint-safe.
+
+    Active ONLY when the article confirms a completed transfer agreement
+    (not interest, bid, or talks). Captures the winning structure of the
+    @fabriziorom corpus: deal-first S1 with club/player/fee, term detail,
+    player context, club context, process detail, and a rating-style S6.
+    Uses the bold, breaking-news voice of @fabriziorom: opening call like
+    "HERE WE GO" only when the source confirms the deal, explicit transfer
+    terms, and an interactive rating-style closer. Invented figures remain
+    banned; numbers must come from the article.
+    """
+    text = f"{title} {article_text[:2000]}".lower()
+    if classify_topic_type(text) != "transfer_rumor":
+        return ""
+    if not any(sig in text for sig in _TRANSFER_DEAL_SIGNALS):
+        return ""
+    return (
+        "## CONFIRMED TRANSFER DEAL VOICE\n"
+        "This article confirms a completed transfer agreement. Structure the story "
+        "like a breaking transfer insider, but keep every figure and claim source-backed:\n"
+        "- S1 leads with the confirmed deal: player, club, and the exact fee or contract "
+        "length when the source gives one. Lead with the number if the source states it.\n"
+        "- S2 confirms the deal terms: duration, fee, sell-on, or release clause — only "
+        "what the source states.\n"
+        "- S3 introduces the player: position, age, or background only when the source "
+        "supplies it.\n"
+        "- S4 gives club context: why the club moved, who leaves, or squad impact only "
+        "when supported.\n"
+        "- S5 adds process detail: medical, travel, documents, or timing — only when in "
+        "the source.\n"
+        "- S6 closes with a fan verdict or a specific rating-style question only when "
+        "the source supports both options.\n"
+        "Keep it short, concrete, and confident only about what the source confirms. "
+        "Use the Fabrizio-style breaking voice when the deal is confirmed: "
+        "HERE WE GO / BREAKING openers, explicit terms, and an interactive "
+        "rating-style question. Emoji allowed for emphasis. Numbers must come "
+        "from the article."
+    )
+
+
 def _requires_evaluator(pattern, score):
     """Every generated draft needs independent factual review."""
     return True
@@ -2585,7 +2634,7 @@ Before drafting: identify central development and strongest supported hook; extr
 Return needs_more_source if body is missing, inaccessible, or headline-only; central development is unclear; material contradictions remain; main claim lacks reliable attribution; S2-S5 lack distinct insights; six slides require speculation or outside knowledge; or unrelated stories cannot be separated safely.
 
 ## VOICE
-Use natural global English. Say football, never soccer. Sound like a passionate fan analyst speaking directly after watching the match: casual, personal, concrete, and confident without pretending certainty. Open with a blunt reaction or verdict when the source supports it. Use direct address sparingly, such as "bro" or "look at this", only when natural. Explain football actions in plain language: a defender watches the ball, leaves space, fails to cover, or a passing move cuts through the back four. Name the exact player, moment, movement, or comparison from the source. Let one clear opinion drive each slide; do not stack generic adjectives. Use first-person editorial markers sparingly, such as "For me" or "In my eyes", only to frame an interpretation already supported by the source. Never use first person to claim eyewitness knowledge, private emotion, source confirmation, or unseen motive; do not add a marker to every slide. Prefer precise match detail over dramatic language. Tactical terms are allowed when the source explains them or they are immediately made concrete. No emoji, hashtags, em dash, all-caps emphasis, rage bait, fake suspense, generic engagement bait, tabloid certainty, or unsupported moral judgement.
+Use natural global English. Say football, never soccer. Sound like a passionate fan analyst speaking directly after watching the match: casual, personal, concrete, and confident without pretending certainty. Open with a blunt reaction or verdict when the source supports it. Use direct address sparingly, such as "bro" or "look at this", only when natural. Explain football actions in plain language: a defender watches the ball, leaves space, fails to cover, or a passing move cuts through the back four. Name the exact player, moment, movement, or comparison from the source. Let one clear opinion drive each slide; do not stack generic adjectives. Use first-person editorial markers sparingly, such as "For me" or "In my eyes", only to frame an interpretation already supported by the source. Never use first person to claim eyewitness knowledge, private emotion, source confirmation, or unseen motive; do not add a marker to every slide. Prefer precise match detail over dramatic language. Tactical terms are allowed when the source explains them or they are immediately made concrete. Emoji and all-caps emphasis are allowed for energy. Never invent figures or fabricate certainty; when a deal or fact is confirmed by the source you may use bold breaking-news language such as "HERE WE GO". No rage bait, fake suspense, generic engagement bait, or unsupported moral judgement.
 Never use: Did you know?; Let's dive in!; You won't believe; This changes everything; Only time will tell; Agree or disagree?
 
 ## SIX-SLIDE ARC
@@ -2603,7 +2652,7 @@ Each slide needs one or two complete sentences. One strong sentence beats two fi
 - Exactly one sentence.
 - Maximum 25 words.
 - Summarise central development without new facts.
-- No question, hashtag, emoji, source URL, or generic CTA.
+- No source URL or generic CTA.
 - Do not repeat S1 word for word.
 
 ## COVER IMAGE KEYWORDS
@@ -2652,7 +2701,11 @@ The article body and assigned evidence lines are the complete factual universe. 
         f"<EVIDENCE_PACK>\n{_evidence_pack(article_text)}\n</EVIDENCE_PACK>\n\n"
         f"<SLIDE_EVIDENCE>\n{assignments}\n</SLIDE_EVIDENCE>\n\n"
         "Build one story, not six reports. Each slide needs one or two complete sentences; one strong sentence beats filler. S1 opens with source-backed tension or scene. S2-S5 move through proof, context, and confirmed impact. S6 returns to S1 with a grounded takeaway or specific question only when source supports both options. Use assigned evidence for order, then verify wording against full article. Every sentence must be faithful, non-escalating paraphrase.\n\n"
-        f"{ref_data}\n\n{_number_hook_rule(article_text)}\n\n{_editorial_constraints()}\n\n{_generation_evidence_override()}")
+        f"{ref_data}\n\n{_number_hook_rule(article_text)}\n\n{_editorial_constraints()}\n\n{_generation_evidence_override()}"
+    )
+    transfer_voice = _transfer_deal_voice(article_text, title)
+    if transfer_voice:
+        user += f"\n\n{transfer_voice}"
     if evaluator_feedback:
         user += f"\n\n## SAFE REPAIR MODE\nThe previous draft was rejected for source drift. For flagged claims, copy the exact source wording or use a shorter sentence copied from assigned evidence. Do not paraphrase flagged names, quantities, scope words such as every/all/first/finally, attribution, timing, motive, emotion, consequence, or quote. Do not add a fan verdict or CTA premise unless its factual premise is explicit in assigned evidence. If a slide cannot be written safely from assigned evidence, return needs_more_source.\n\n## EVALUATOR REJECTION\n{evaluator_feedback}\nRegenerate ALL 6 editorial slides. Remove every flagged claim; do not defend or reinterpret it."
 
