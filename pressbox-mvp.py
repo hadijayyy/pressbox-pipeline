@@ -2259,7 +2259,13 @@ def _fabrizio_voice(article_text, title=""):
         f"{structure}\n"
         "Keep it short, concrete, and confident only about what the source confirms. "
         f"Use the Fabrizio-style breaking voice graded by certainty: {opener}. "
-        "Emoji allowed for emphasis. Numbers must come from the article."
+        "Emoji allowed for emphasis. Numbers must come from the article.\n"
+        "FACT-ONLY S1-S5: slides 1 through 5 state only facts, quotes, or numbers that "
+        "appear in the assigned evidence. No editorial judgement, reaction, motive, "
+        "emotion, or consequence in S1-S5. Every judgement verb such as needed, fears, "
+        "lacks, or threat must appear in the source; if it does not, delete it. "
+        "Confine fan verdicts, judgement, and rating-style questions to S6, and only "
+        "when the source supports both options."
     )
 
 
