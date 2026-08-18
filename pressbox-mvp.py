@@ -2206,44 +2206,60 @@ _TRANSFER_DEAL_SIGNALS = (
 )
 
 
-def _transfer_deal_voice(article_text, title=""):
-    """Fabrizio-Romano-style confirmed-deal voice, grounded and constraint-safe.
+def _fabrizio_voice(article_text, title=""):
+    """Fabrizio-Romano-style voice for ALL Pressbox content, grounded and safe.
 
-    Active ONLY when the article confirms a completed transfer agreement
-    (not interest, bid, or talks). Captures the winning structure of the
-    @fabriziorom corpus: deal-first S1 with club/player/fee, term detail,
-    player context, club context, process detail, and a rating-style S6.
-    Uses the bold, breaking-news voice of @fabriziorom: opening call like
-    "HERE WE GO" only when the source confirms the deal, explicit transfer
-    terms, and an interactive rating-style closer. Invented figures remain
-    banned; numbers must come from the article.
+    Applies the winning structure of the @fabriziorom corpus to every topic:
+    number-first S1, concrete names, short sharp sentences, urgency, and a
+    rating-style S6. Opener is graded by source certainty, never invented:
+    confirmed transfer deal -> HERE WE GO / BREAKING; rumor -> understand /
+    expected; match -> result-first; injury -> timeline-first; managerial ->
+    official / set to take over. Invented figures remain banned; numbers must
+    come from the article.
     """
     text = f"{title} {article_text[:2000]}".lower()
-    if classify_topic_type(text) != "transfer_rumor":
-        return ""
-    if not any(sig in text for sig in _TRANSFER_DEAL_SIGNALS):
-        return ""
+    deal_confirmed = (
+        classify_topic_type(text) == "transfer_rumor"
+        and any(sig in text for sig in _TRANSFER_DEAL_SIGNALS)
+    )
+    if deal_confirmed:
+        opener = "HERE WE GO / BREAKING openers, explicit terms, and an interactive rating-style question"
+        structure = (
+            "- S1 leads with the confirmed deal: player, club, and the exact fee or contract "
+            "length when the source gives one. Lead with the number if the source states it.\n"
+            "- S2 confirms the deal terms: duration, fee, sell-on, or release clause — only "
+            "what the source states.\n"
+            "- S3 introduces the player: position, age, or background only when the source "
+            "supplies it.\n"
+            "- S4 gives club context: why the club moved, who leaves, or squad impact only "
+            "when supported.\n"
+            "- S5 adds process detail: medical, travel, documents, or timing — only when in "
+            "the source.\n"
+            "- S6 closes with a fan verdict or a specific rating-style question only when "
+            "the source supports both options."
+        )
+    else:
+        opener = "result/timeline/status-first openers, concrete names, and an interactive rating-style question"
+        structure = (
+            "- S1 opens with the most concrete fact first: the score, the fee, the timeline, "
+            "or the named decision — lead with the number when the source states one.\n"
+            "- S2 confirms the key terms: scoreline, contract, timeframe, or decision — only "
+            "what the source states.\n"
+            "- S3 introduces the people: player, club, coach, or context only when the source "
+            "supplies it.\n"
+            "- S4 gives background: why it happened, what changed, or impact only when supported.\n"
+            "- S5 adds detail: quotes, process, or next step — only when in the source.\n"
+            "- S6 closes with a fan verdict or a specific rating-style question only when "
+            "the source supports both options."
+        )
     return (
-        "## CONFIRMED TRANSFER DEAL VOICE\n"
-        "This article confirms a completed transfer agreement. Structure the story "
-        "like a breaking transfer insider, but keep every figure and claim source-backed:\n"
-        "- S1 leads with the confirmed deal: player, club, and the exact fee or contract "
-        "length when the source gives one. Lead with the number if the source states it.\n"
-        "- S2 confirms the deal terms: duration, fee, sell-on, or release clause — only "
-        "what the source states.\n"
-        "- S3 introduces the player: position, age, or background only when the source "
-        "supplies it.\n"
-        "- S4 gives club context: why the club moved, who leaves, or squad impact only "
-        "when supported.\n"
-        "- S5 adds process detail: medical, travel, documents, or timing — only when in "
-        "the source.\n"
-        "- S6 closes with a fan verdict or a specific rating-style question only when "
-        "the source supports both options.\n"
+        "## FABRIZIO-STYLE VOICE\n"
+        "Write with the sharp, number-first, insider energy of @fabriziorom for EVERY "
+        "topic, but keep every figure and claim source-backed:\n"
+        f"{structure}\n"
         "Keep it short, concrete, and confident only about what the source confirms. "
-        "Use the Fabrizio-style breaking voice when the deal is confirmed: "
-        "HERE WE GO / BREAKING openers, explicit terms, and an interactive "
-        "rating-style question. Emoji allowed for emphasis. Numbers must come "
-        "from the article."
+        f"Use the Fabrizio-style breaking voice graded by certainty: {opener}. "
+        "Emoji allowed for emphasis. Numbers must come from the article."
     )
 
 
@@ -2703,9 +2719,9 @@ The article body and assigned evidence lines are the complete factual universe. 
         "Build one story, not six reports. Each slide needs one or two complete sentences; one strong sentence beats filler. S1 opens with source-backed tension or scene. S2-S5 move through proof, context, and confirmed impact. S6 returns to S1 with a grounded takeaway or specific question only when source supports both options. Use assigned evidence for order, then verify wording against full article. Every sentence must be faithful, non-escalating paraphrase.\n\n"
         f"{ref_data}\n\n{_number_hook_rule(article_text)}\n\n{_editorial_constraints()}\n\n{_generation_evidence_override()}"
     )
-    transfer_voice = _transfer_deal_voice(article_text, title)
-    if transfer_voice:
-        user += f"\n\n{transfer_voice}"
+    fabrizio_voice = _fabrizio_voice(article_text, title)
+    if fabrizio_voice:
+        user += f"\n\n{fabrizio_voice}"
     if evaluator_feedback:
         user += f"\n\n## SAFE REPAIR MODE\nThe previous draft was rejected for source drift. For flagged claims, copy the exact source wording or use a shorter sentence copied from assigned evidence. Do not paraphrase flagged names, quantities, scope words such as every/all/first/finally, attribution, timing, motive, emotion, consequence, or quote. Do not add a fan verdict or CTA premise unless its factual premise is explicit in assigned evidence. If a slide cannot be written safely from assigned evidence, return needs_more_source.\n\n## EVALUATOR REJECTION\n{evaluator_feedback}\nRegenerate ALL 6 editorial slides. Remove every flagged claim; do not defend or reinterpret it."
 

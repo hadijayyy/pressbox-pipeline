@@ -29,28 +29,50 @@ def test_number_hook_rule_does_not_force_unsourced_numbers():
     assert "NUMBER is optional unless explicitly supported by the article" in mvp._number_hook_rule("Rodri could join Madrid.")
 
 
-def test_transfer_deal_voice_active_only_for_confirmed_deal():
+def test_fabrizio_voice_breaking_for_confirmed_deal():
     mvp = _load_mvp()
     text = ("Barcelona have agreed a deal with Manchester City for the midfielder. "
             "Rodri will sign a contract until June 2031 and complete a medical this week. "
             "The fee is 80 million euros.")
-    voice = mvp._transfer_deal_voice(text, "Rodri set to join Barcelona")
-    assert "CONFIRMED TRANSFER DEAL VOICE" in voice
+    voice = mvp._fabrizio_voice(text, "Rodri set to join Barcelona")
+    assert "FABRIZIO-STYLE VOICE" in voice
     assert "S1 leads with the confirmed deal" in voice
-    assert "HERE WE GO" in voice
+    assert "HERE WE GO / BREAKING openers" in voice
     assert "Emoji allowed" in voice
 
 
-def test_transfer_deal_voice_inactive_for_rumor_or_interest():
-    mvp = _load_mvp()
-    text = "Barcelona are interested in signing the midfielder. The club is considering a bid next summer."
-    assert mvp._transfer_deal_voice(text, "Barcelona interested in Rodri") == ""
-
-
-def test_transfer_deal_voice_inactive_for_non_transfer():
+def test_fabrizio_voice_active_for_match_result():
     mvp = _load_mvp()
     text = "Arsenal won the match 3-1 with a late goal. The striker scored twice."
-    assert mvp._transfer_deal_voice(text, "Arsenal beat Chelsea 3-1") == ""
+    voice = mvp._fabrizio_voice(text, "Arsenal beat Chelsea 3-1")
+    assert "FABRIZIO-STYLE VOICE" in voice
+    assert "S1 opens with the most concrete fact first" in voice
+    assert "result/timeline/status-first openers" in voice
+
+
+def test_fabrizio_voice_active_for_injury_update():
+    mvp = _load_mvp()
+    text = "The forward is out for six weeks with a hamstring injury. He will miss the next five matches."
+    voice = mvp._fabrizio_voice(text, "Striker sidelined with hamstring injury")
+    assert "FABRIZIO-STYLE VOICE" in voice
+    assert "S1 opens with the most concrete fact first" in voice
+
+
+def test_fabrizio_voice_active_for_managerial_change():
+    mvp = _load_mvp()
+    text = "The club have appointed the new coach on a two-year contract. He will take charge next week."
+    voice = mvp._fabrizio_voice(text, "New coach appointed")
+    assert "FABRIZIO-STYLE VOICE" in voice
+    assert "S1 opens with the most concrete fact first" in voice
+
+
+def test_fabrizio_voice_keeps_uncertainty_for_rumor():
+    mvp = _load_mvp()
+    text = "Barcelona are interested in signing the midfielder. The club is considering a bid next summer."
+    voice = mvp._fabrizio_voice(text, "Barcelona interested in Rodri")
+    assert "FABRIZIO-STYLE VOICE" in voice
+    assert "HERE WE GO / BREAKING openers" not in voice
+    assert "result/timeline/status-first openers" in voice
 
 
 def test_slide_contract_rejects_leading_continuation_fragment():
