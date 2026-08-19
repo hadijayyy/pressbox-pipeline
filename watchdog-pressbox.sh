@@ -18,9 +18,8 @@ NOW=$(date +%s)
 THEN=$(date -d "$TS" +%s 2>/dev/null || echo 0)
 AGE=$(( NOW - THEN ))
 
-# SKIP labels: watchdog should NOT retry
+# SKIP labels: watchdog should NOT retry. Silent — normal skip is not an alert.
 if [[ "$LABEL" == "SKIP"* ]]; then
-    echo "✅ Watchdog: status=$LABEL (normal skip) — not retrying"
     exit 0
 fi
 
