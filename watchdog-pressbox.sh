@@ -29,5 +29,11 @@ if [[ "$LABEL" == "ok"* ]] && [ "$AGE" -lt "$MAX_AGE" ]; then
     exit 0
 fi
 
+# RUNNING labels within MAX_AGE: watchdog should NOT retry (anti-overlap).
+# Silent exit — same as OK branch — so no Telegram noise on normal runs.
+if [[ "$LABEL" == "RUNNING"* ]] && [ "$AGE" -lt "$MAX_AGE" ]; then
+    exit 0
+fi
+
 echo "⚠️ Watchdog: status=$LABEL age=${AGE}s — retrying pipeline"
 bash "$HOME/.hermes/scripts/run-mvp.sh" --watchdog
