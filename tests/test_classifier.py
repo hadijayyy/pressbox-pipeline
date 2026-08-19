@@ -80,7 +80,7 @@ def test_slide_contract_rejects_leading_continuation_fragment():
     slides = [
         {"title": f"S{i}", "content": "A complete sentence with source-backed detail."}
         for i in range(1, 7)
-    ] + [{"title": "S7", "content": "Source: https://example.com/story"}]
+    ]
     slides[0]["content"] = "and have money to spend to get it despite dropping out of Europe."
     errors = mvp._slide_contract_errors(slides)
     assert any("S1" in error and "fragment" in error for error in errors)
@@ -91,7 +91,7 @@ def test_slide_contract_rejects_lowercase_continuation_on_any_editorial_slide():
     slides = [
         {"title": f"S{i}", "content": "A complete sentence with source-backed detail."}
         for i in range(1, 7)
-    ] + [{"title": "S7", "content": "Source: https://example.com/story"}]
+    ]
     slides[2]["content"] = "he said before Sunday's match."
     errors = mvp._slide_contract_errors(slides)
     assert any("S3" in error and "fragment" in error for error in errors)
@@ -102,7 +102,7 @@ def test_slide_contract_allows_complete_quote_starting_lowercase():
     slides = [
         {"title": f"S{i}", "content": "A complete sentence with source-backed detail."}
         for i in range(1, 7)
-    ] + [{"title": "S7", "content": "Source: https://example.com/story"}]
+    ]
     slides[0]["content"] = "‘we need to improve,’ the manager said."
     assert not any("S1 leading continuation fragment" == error
                    for error in mvp._slide_contract_errors(slides))
@@ -329,36 +329,28 @@ def test_grounding_matches_accents_and_ignores_question_prefix():
 
 def test_slide_contract_requires_two_source_grounded_sentences_per_slide():
     mvp = _load_mvp()
-    slides = [{"content": "One supported source sentence."}] * 6 + [{"content": "Source: https://example.com/story"}]
+    slides = [{"content": "One supported source sentence."}] * 6
     errors = mvp._slide_contract_errors(slides)
     assert errors == []
 
 
 def test_slide_contract_accepts_two_sentences_per_slide():
     mvp = _load_mvp()
-    slides = [{"content": "One supported source sentence. A second supported source sentence."}] * 6 + [{"content": "Source: https://example.com/story"}]
+    slides = [{"content": "One supported source sentence. A second supported source sentence."}] * 6
     assert not mvp._slide_contract_errors(slides)
 
 
 def test_slide_contract_requires_two_sentences_on_every_slide():
     mvp = _load_mvp()
-    slides = [{"content": "One supported source sentence."}] * 6 + [{"content": "Source: https://example.com/story"}]
+    slides = [{"content": "One supported source sentence."}] * 6
     errors = mvp._slide_contract_errors(slides)
     assert errors == []
 
 
 def test_slide_contract_keeps_450_char_limit():
     mvp = _load_mvp()
-    overlength = [{"content": "One. Two."}] * 5 + [{"content": "x" * 451}] + [{"content": "Source: https://example.com/story"}]
+    overlength = [{"content": "One. Two."}] * 5 + [{"content": "x" * 451}]
     assert "S6 invalid length (451)" in mvp._slide_contract_errors(overlength)
-
-
-def test_slide_7_is_english_source_url_only():
-    mvp = _load_mvp()
-    slides = [{"content": "One supported source sentence. A second supported source sentence."}] * 6
-    slides.append({"content": "Source: https://example.com/story"})
-    assert not mvp._slide_contract_errors(slides)
-    assert mvp._slide_contract_errors(slides[:-1] + [{"content": "Sumber: https://example.com/story"}]) == ["S7 invalid source URL"]
 
 
 def test_main_uses_one_candidate_and_one_final_evaluator():
