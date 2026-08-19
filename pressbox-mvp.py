@@ -1736,10 +1736,10 @@ def fetch_article(url):
             log(f"   🖼️ Cached og:image: {cached_img[:60]}")
         return cached_text, cached_img
     try:
-        r = requests.get(url, headers={"User-Agent": UA}, timeout=10, allow_redirects=True)
-        if r.status_code != 200: return "", ""
-        text = extract_article(r.text).strip()
-        image = extract_image(r.text)
+        code, html = _http(url, timeout=10)
+        if code != 200: return "", ""
+        text = extract_article(html).strip()
+        image = extract_image(html)
         # Store in cache for future retries
         if text and len(text) > 100:
             _save_article_text_to_cache(url, text, image)
