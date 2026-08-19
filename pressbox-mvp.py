@@ -139,23 +139,6 @@ def _est_tokens(text: str) -> int:
     """Estimate token count from text."""
     return len(text) // 4
 
-# Evaluator cache — persist URL→result so retried articles skip re-eval
-_EVAL_CACHE = {}
-_EVAL_CACHE_PATH = os.path.expanduser("~/.hermes/pressbox/eval_cache.json")
-def _load_eval_cache():
-    global _EVAL_CACHE
-    try:
-        with open(_EVAL_CACHE_PATH) as f:
-            _EVAL_CACHE = json.load(f)
-    except: _EVAL_CACHE = {}
-def _save_eval_cache():
-    try:
-        os.makedirs(os.path.dirname(_EVAL_CACHE_PATH), exist_ok=True)
-        with open(_EVAL_CACHE_PATH, 'w') as f:
-            json.dump(_EVAL_CACHE, f)
-    except: pass
-_load_eval_cache()
-
 # Engagement ring buffer — realtime per-(source, hook) performance tracking
 _ENGAGEMENT_RING = {"posts": []}
 _LAST_GENERATION_FAILURE = ""
@@ -2269,11 +2252,6 @@ def _fabrizio_voice(article_text, title=""):
     )
 
 
-def _requires_evaluator(pattern, score):
-    """Every generated draft needs independent factual review."""
-    return True
-
-
 def _evaluator_accepts(decision):
     return decision == "APPROVE"
 
@@ -2392,33 +2370,6 @@ def _assigned_evidence(article_text, evidence_plan):
     return resolved if len(resolved) == 6 else None
 
 
-def _build_fact_packet(title, body, url, source, published_at="") -> str:
-    """Build compact fact packet for LLM: ≤4000 tokens (≈16,000 chars).
-    Stripped of HTML, no prompt file content, no conversation history.
-    """
-    # Truncate body — keep first 8,000 chars (≈2k tokens) for context
-    body_snippet = body[:8000].strip()
-    facts = []
-    sentences = re.split(r'(?<=[.!?])\s+', body_snippet)
-    for s in sentences:
-        s = s.strip()
-        if len(s) >= 20 and len(facts) < 15:
-            facts.append(s)
-    facts_str = "\n".join(f"[F{i+1}] {f}" for i, f in enumerate(facts))
-
-    parts = [
-        f"TITLE: {title}",
-        f"URL: {url}",
-        f"SOURCE: {source}",
-        f"PUBLISHED: {published_at or 'unknown'}",
-        "",
-        "VERIFIED FACTS (use only these):",
-        facts_str,
-    ]
-    # Sources list only — no article body
-    return "\n".join(parts)
-
-
 def _story_text(article_text, title):
     """Drop roundup tangents that do not mention the title's main entities."""
     ignored = {"news", "transfer", "transfers", "latest", "update", "updates", "major", "hint"}
@@ -2498,13 +2449,6 @@ def _hard_news_adjustment(title, body):
                 "debut", "final", "result", "returns", "transfer")
     negative = ("why ", "wrong track", "reminiscent", "analysis", "opinion", "column", "profile")
     return 5 * sum(word in text for word in positive) - 8 * sum(word in text for word in negative)
-
-
-def _narrative_fallback_evidence(article_text):
-    """Use compact factual units in source order so fallback retains story flow."""
-    units = _source_units(article_text)
-    compact = set(_fallback_evidence(units)[:12])
-    return [unit for unit in units if unit in compact][:12]
 
 
 def _extractive_slides(article_text, url, title=""):
@@ -3077,72 +3021,71 @@ def _body_first_shortlist(ranked, limit=15):
 
 # ── MAIN ────────────────────────────────────────────────────────────
 
-def main():
-    START = time.time()
-    log("=== PRESSBOX MVP ===")
+def _volume_gate_ok():
+    """True when last post is ≥30m old (or unknown). Dead-hours skipped too."""
+    if DRY_RUN:
+        return True
+    try:
+        with open(POSTED) as f:
+            _pdata = json.load(f)
+        _plist = _pdata.get("topics", []) if isinstance(_pdata, dict) else _pdata
+        _last_ts = None
+        for _p in _plist:
+            for _k in ("posted_at", "published_ts"):
+                _v = _p.get(_k)
+                if not _v:
+                    continue
+                try:
+                    _t = datetime.fromisoformat(str(_v).replace("Z", "+00:00"))
+                    if _t.tzinfo:
+                        _t = _t.astimezone(timezone(timedelta(hours=7)))
+                    if _last_ts is None or _t > _last_ts:
+                        _last_ts = _t
+                except Exception:
+                    continue
+        if _last_ts is not None:
+            _age_h = (datetime.now(timezone(timedelta(hours=7))) - _last_ts).total_seconds() / 3600
+            if _age_h < 0.5:
+                log(f"⏸️ Volume gate: last post {_age_h:.1f}h ago (<30m) — skipping")
+                print(f"⏸️ Skip — volume gate (posted {_age_h:.1f}h ago)", flush=True)
+                return False
+    except Exception:
+        pass
+    return True
 
-    # Volume gate: min 30m gap between posts → ≤48/day.
-    # Dead-hours skipped by this too — no need for hour-specific gating (hour data too noisy).
-    if not DRY_RUN:
-        try:
-            with open(POSTED) as f:
-                _pdata = json.load(f)
-            _plist = _pdata.get("topics", []) if isinstance(_pdata, dict) else _pdata
-            _last_ts = None
-            for _p in _plist:
-                for _k in ("posted_at", "published_ts"):
-                    _v = _p.get(_k)
-                    if not _v: continue
-                    try:
-                        _t = datetime.fromisoformat(str(_v).replace("Z", "+00:00"))
-                        if _t.tzinfo:
-                            _t = _t.astimezone(timezone(timedelta(hours=7)))
-                        if _last_ts is None or _t > _last_ts:
-                            _last_ts = _t
-                    except Exception:
-                        continue
-            if _last_ts is not None:
-                _age_h = (datetime.now(timezone(timedelta(hours=7))) - _last_ts).total_seconds() / 3600
-                if _age_h < 0.5:
-                    log(f"⏸️ Volume gate: last post {_age_h:.1f}h ago (<30m) — skipping")
-                    print(f"⏸️ Skip — volume gate (posted {_age_h:.1f}h ago)", flush=True)
-                    sys.exit(0)
-        except Exception:
-            pass
 
-    # 0. Init Threads poster (for metrics)
+def _init_metrics():
+    """Init Threads poster (for metrics) and pull engagement + analytics summary."""
     token, user_id = load_threads_token()
     poster = None
     if token and user_id:
         try:
             from threads_poster import ThreadsPoster
             poster = ThreadsPoster(access_token=token, user_id=user_id)
-        except:
+        except Exception:
             log("⚠️ Failed to init ThreadsPoster for reply")
-
-    # 0.5. Pull engagement metrics for old posts (>12h)
     pull_engagement(poster)
-
-    # 0.6. Get analytics summary for scoring boost
     analytics_summary = get_analytics_summary()
     if analytics_summary:
         log(f"📊 Analytics: {analytics_summary['total_posts_with_metrics']} posts, "
             f"avg {analytics_summary['avg_views']:.0f} views, "
             f"best hook: {analytics_summary['best_hooks'][0][0] if analytics_summary['best_hooks'] else 'N/A'}")
+    return analytics_summary
 
-    # 1. Scrape
+
+def _scrape_or_exit():
+    """Scrape topics; exit pipeline if nothing found."""
     topics = scrape_all()
     if not topics:
         log("❌ No topics scraped")
         _record_failure("NO_TOPICS_SCRAPED")
         print("❌ Pipeline: no topics scraped", flush=True)
         sys.exit(1)
+    return topics
 
-    # 2. Filter + Score
-    posted_urls, posted_ws = load_posted()
-    boosts, skips, hooks, cta_pattern, tone = load_analytics()
-    hotness = detect_hot_topics(topics, window_hours=2)
-    # Cold-source rotation: track last 2 sources posted → give +15 to unseen sources
+
+def _recent_posted_sources():
+    """Last 2 distinct sources posted, for cold-source rotation boost."""
     _last_sources = []
     try:
         if os.path.exists(POSTED):
@@ -3153,9 +3096,21 @@ def main():
                 src = (p.get("source") or "").strip().lower()
                 if src and src not in _last_sources:
                     _last_sources.append(src)
-                    if len(_last_sources) >= 2: break
-    except: pass
-    ranked = filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_summary, hotness, _last_sources)
+                    if len(_last_sources) >= 2:
+                        break
+    except Exception:
+        pass
+    return _last_sources
+
+
+def _rank_candidates(topics, analytics_summary):
+    """Filter, score, pattern-adjust, and gate candidates.
+    Returns (ranked, hotness, hooks_str, cta_pattern, tone). Exits on empty."""
+    posted_urls, posted_ws = load_posted()
+    boosts, skips, hooks, cta_pattern, tone = load_analytics()
+    hotness = detect_hot_topics(topics, window_hours=2)
+    ranked = filter_and_score(topics, posted_urls, posted_ws, boosts, skips,
+                              analytics_summary, hotness, _recent_posted_sources())
     if not ranked:
         log("❌ No topics after filter")
         _record_failure("ALL_TOPICS_FILTERED")
@@ -3189,7 +3144,6 @@ def main():
 
     # Score gate — dynamic threshold from body-validated batch median (adaptive)
     best = ranked[0]
-    # Compute median of top scores in this batch
     batch_scores = sorted([t["_score"] for t in ranked[:10]])
     batch_median = batch_scores[len(batch_scores) // 2] if batch_scores else 0
     threshold = max(8, min(25, batch_median))
@@ -3200,12 +3154,15 @@ def main():
         _record_failure("SCORE_BELOW_THRESHOLD", best.get("source", ""), best.get("title", ""))
         sys.exit(1)
     log(f"   🏆 Best: {best['title']} (score={best['_score']}, type={best.get('_topic_type','')})")
-
-    # 4. Generate — try validated candidates in ranked order until one succeeds.
-    # Each candidate: validate article, then up to 2 LLM attempts with feedback.
-    # Falls back to next candidate on any failure.
-    t0 = time.time()
     hooks_str = ", ".join(hooks) if isinstance(hooks, list) else hooks
+    return ranked, hotness, hooks_str, cta_pattern, tone
+
+
+def _generate_best(ranked, analytics_summary, hooks_str, cta_pattern, tone):
+    """Try validated candidates in ranked order until one passes all gates.
+    Returns dict with slides/best/url/image_url/pattern/hook_variant/
+    element_selection/llm_time/passed. passed=False → no post this cycle."""
+    t0 = time.time()
     slides = None
     llm_time = 0.0
     passed = False
@@ -3214,6 +3171,7 @@ def main():
     image_url = ""
     url = ""
     pattern = "a"  # default, always overwritten in loop when candidate valid
+    best = None
     hook_variant = _select_hook_variant(analytics_summary, len(_ENGAGEMENT_RING.get("posts", [])))
     element_guidance, element_selection = _element_guidance(analytics_summary, len(_ENGAGEMENT_RING.get("posts", [])))
 
@@ -3377,8 +3335,31 @@ def main():
             _record_failure("GENERATION_FAILED_ALL_CANDIDATES")
             log("⏸️ No source-grounded draft passed; skipping this cycle")
             print("⏸️ Skip — no source-grounded draft passed", flush=True)
-            return
 
+    return {
+        "passed": passed,
+        "slides": slides,
+        "best": best,
+        "url": url,
+        "image_url": image_url,
+        "pattern": pattern,
+        "hook_variant": hook_variant,
+        "element_selection": element_selection,
+        "llm_time": llm_time,
+    }
+
+
+def _finish(res, hotness, START):
+    """Final contract check, then dry-run print or publish+track+notify."""
+    slides = res["slides"]
+    best = res["best"]
+    url = res["url"]
+    image_url = res["image_url"]
+    pattern = res["pattern"]
+    hook_variant = res["hook_variant"]
+    element_selection = res["element_selection"]
+    llm_time = res["llm_time"]
+    total = time.time() - START
 
     final_contract_errors = _slide_contract_errors(slides)
     if final_contract_errors:
@@ -3387,8 +3368,6 @@ def main():
         sys.exit(1)
 
     # 6. DRY RUN or POST
-    total = time.time() - START
-
     if DRY_RUN:
         log(f"🔍 DRY RUN — {best['title']} ({len(slides)} slides)")
         for i, s in enumerate(slides):
@@ -3454,6 +3433,36 @@ Score: {score} | {slide_count} slides | {total:.1f}s
     with open(POST_MARKER, "w") as f:
         f.write(f"{root_id}\n")
     print(report, flush=True)
+
+
+def main():
+    START = time.time()
+    log("=== PRESSBOX MVP ===")
+
+    # Volume gate: min 30m gap between posts → ≤48/day.
+    # Dead-hours skipped by this too — no need for hour-specific gating (hour data too noisy).
+    if not _volume_gate_ok():
+        sys.exit(0)
+
+    # 0. Metrics + engagement + analytics summary
+    analytics_summary = _init_metrics()
+
+    # 1. Scrape
+    topics = _scrape_or_exit()
+
+    # 2-3. Filter + score + pattern adjust + risk/score gates
+    ranked, hotness, hooks_str, cta_pattern, tone = _rank_candidates(topics, analytics_summary)
+
+    # 4. Generate — try validated candidates in ranked order until one succeeds,
+    #    then literal source-verbatim fallback. Fail closed: never publish if
+    #    no source-grounded draft passed.
+    res = _generate_best(ranked, analytics_summary, hooks_str, cta_pattern, tone)
+    if not res["passed"]:
+        return
+
+    # 5-6. Final contract check + dry-run or post/track/notify
+    _finish(res, hotness, START)
+
 
 if __name__ == "__main__":
     _acquire_pipeline_lock()

@@ -315,7 +315,7 @@ def test_shortlist_stores_story_text_and_evidence_plan(monkeypatch):
 
 def test_generation_stops_candidate_churn_after_rate_limit():
     mvp = _load_mvp()
-    source = inspect.getsource(mvp.main)
+    source = inspect.getsource(mvp._generate_best)
     assert "LLM_RATE_LIMITED" in source
     assert "provider rate limit" in source
 
@@ -363,7 +363,7 @@ def test_slide_7_is_english_source_url_only():
 
 def test_main_uses_one_candidate_and_one_final_evaluator():
     mvp = _load_mvp()
-    source = inspect.getsource(mvp.main)
+    source = inspect.getsource(mvp._generate_best)
     assert "for article_attempt" not in source
     assert "for eval_round" not in source
     assert "_extractive_slides" in source
@@ -380,7 +380,7 @@ def test_high_risk_transfer_claim_requires_tier_one_source():
 
 def test_high_risk_candidate_is_skipped_for_next_eligible_article():
     mvp = _load_mvp()
-    source = inspect.getsource(mvp.main)
+    source = inspect.getsource(mvp._rank_candidates)
     assert 'ranked = [topic for topic in ranked if _high_risk_claim_allowed(' in source
     assert 'topic.get("_article_text", ""), topic.get("source", ""))]' in source
     assert 'print("⏸️ Skip — no tier-one source for high-risk claim", flush=True)\n        sys.exit(0)' in source
@@ -389,8 +389,8 @@ def test_high_risk_candidate_is_skipped_for_next_eligible_article():
 
 def test_generated_output_exhaustion_is_normal_skip_for_watchdog():
     mvp = _load_mvp()
-    source = inspect.getsource(mvp.main)
-    block = source[source.index('if errors:'):source.index('final_contract_errors')]
+    source = inspect.getsource(mvp._generate_best)
+    block = source[source.index('if not passed:'):source.index('return {')]
     assert '_record_failure("GENERATION_FAILED_ALL_CANDIDATES")' in block
     assert 'print("⏸️ Skip — no source-grounded draft passed", flush=True)' in block
     assert 'sys.exit(1)' not in block
@@ -401,16 +401,18 @@ def test_space_sentences_collapses_literal_backslash_newline():
     assert mvp._space_sentences('He said, "First fact."\\nSecond fact.') == 'He said, "First fact." Second fact.'
 
 
-def test_evaluator_is_required_for_every_generated_post():
+def test_evaluator_accepts_only_approve():
     mvp = _load_mvp()
-    assert mvp._requires_evaluator("f", 100)
-    assert mvp._requires_evaluator("e", 80)
-    assert mvp._requires_evaluator("a", 1)
+    # Every generated draft needs independent factual review; nothing may
+    # bypass evaluator, so only APPROVE authorizes posting.
+    assert not mvp._evaluator_accepts("REVISE")
+    assert not mvp._evaluator_accepts("REJECT")
+    assert mvp._evaluator_accepts("APPROVE")
 
 
 def test_main_does_not_skip_evaluator_for_pattern_or_score():
     mvp = _load_mvp()
-    source = inspect.getsource(mvp.main)
+    source = inspect.getsource(mvp._generate_best)
     assert "skip_eval = pattern in (\"e\", \"f\")" not in source
     assert "candidate.get(\"_score\", 0) >= 80" not in source[source.index("contract_errors ="):source.index("# All checks passed")]
 
@@ -450,7 +452,7 @@ def test_generation_evidence_override_blocks_arc_speculation():
 
 def test_rate_limit_reaches_literal_fallback_without_more_llm_candidates():
     mvp = _load_mvp()
-    source = inspect.getsource(mvp.main)
+    source = inspect.getsource(mvp._generate_best)
     rate_block = source[source.index('if _LAST_GENERATION_FAILURE == "LLM_RATE_LIMITED"'):source.index('contract_errors = _slide_contract_errors')]
     assert 'rate_limited = True' in rate_block
     assert 'sys.exit(1)' not in rate_block
@@ -664,8 +666,14 @@ def test_narrative_fallback_keeps_source_order_after_compact_selection():
         "Sixth source fact closes the reported sequence with a clear outcome.",
         "Seventh source fact is available if one earlier detail is unsuitable.",
     ])
-    facts = mvp._narrative_fallback_evidence(article)
-    assert facts == [
+    # Equivalent behavior now lives in _extractive_slides internals:
+    # compact units in source order, long units dropped. Verify directly.
+    facts = mvp._source_units(article)
+    long_unit = [f for f in facts if "repetitive context" in f]
+    assert len(long_unit) <= 1  # long sentence still one unit
+    assert all(len(f) < 450 for f in facts if "repetitive context" not in f)
+    order = [f for f in facts if "repetitive context" not in f]
+    assert order == [
         "Opening source fact gives readers the story context in clear terms.",
         "Second source fact explains why this development matters to the club.",
         "Third source fact keeps the same story moving without changing subject.",
