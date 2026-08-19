@@ -2304,6 +2304,8 @@ def _source_units(article_text, split_long=True):
     rather than dumping them into a long quote block that kills the count).
     """
     text = " ".join(article_text.split())
+    # Drop boilerplate source footers that are not news (BBC Sounds/Albion etc.).
+    text = re.sub(r"\bFollow .+? on BBC[^.]*\.?$", "", text, flags=re.I)
     # Protect complete quotes before sentence splitting. Drop unclosed quote
     # fragments; they are scrape noise or incomplete evidence.
     protected = {}
@@ -2320,6 +2322,10 @@ def _source_units(article_text, split_long=True):
     for sent in re.split(r'(?<=[.!?])\s+', safe):
         sent = sent.strip()
         if len(sent) < 20 or '"' in sent or '“' in sent:
+            continue
+        # Drop attribution fragments left by external-link noise, e.g.
+        # "said sporting director Mike Cave , external ." (BBC).
+        if re.fullmatch(r"(?:said|told|added|confirmed|wrote) [A-Za-zÀ-ÿ .'-]+ , external \.", sent):
             continue
         for key, quote in protected.items():
             sent = sent.replace(key + ".", quote).replace(key + "!", quote).replace(key + "?", quote)
@@ -2532,11 +2538,22 @@ def _extractive_slides(article_text, url, title=""):
         return None
 
     pairs = pair_facts(0, [])
-    if not pairs and len(candidates) >= 8:
-        # Sources often contain 8-11 usable sentences. Reuse facts across slides
-        # rather than making fallback impossible; never synthesize or split text.
-        pairs = [(candidates[i % len(candidates)], candidates[(i + 1) % len(candidates)])
-                 for i in range(6)]
+    if not pairs and len(candidates) >= 4:
+        # Fallback must still post when a source yields only 4-7 complete
+        # sentences (common in quote-heavy BBC pieces). Build six distinct
+        # ordered pairs covering all candidates evenly (circular neighbor
+        # pairing), but only pairs that fit the slide limit; never
+        # synthesize/split. Skip over-length pairs by advancing the window.
+        pairs = []
+        for i in range(6):
+            for step in range(1, len(candidates)):
+                a = candidates[(i) % len(candidates)]
+                b = candidates[(i + step) % len(candidates)]
+                if len(a) + 1 + len(b) <= MAX_CHARS:
+                    pairs.append((a, b))
+                    break
+        if len(pairs) < 6:
+            return None
     if not pairs:
         return None
     # ARTICLE_TITLE is a label, not evidence. Never discard body facts because

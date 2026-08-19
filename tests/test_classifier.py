@@ -493,8 +493,20 @@ def test_evidence_pack_is_numbered_and_preserves_source_sentences():
 
 def test_extractive_slides_reject_one_sentence_per_slide():
     mvp = _load_mvp()
-    article = " ".join(f"Source sentence number {i} has enough words to become a slide." for i in range(1, 7))
+    # Fewer than 4 complete sentences: fallback must still reject (no posts
+    # from 1-3 sentence fragments).
+    article = " ".join(f"Source sentence number {i} has enough words to become a slide." for i in range(1, 4))
     assert mvp._extractive_slides(article, "https://example.com") is None
+
+
+def test_extractive_slides_reuse_facts_when_few_sentences():
+    mvp = _load_mvp()
+    # 4-7 complete sentences: fallback reuses facts across slides instead of
+    # skipping entirely (fix 2026-08-19: quote-heavy BBC pieces were yielding
+    # <8 units and the pipeline posted nothing all hour).
+    article = " ".join(f"Source sentence number {i} has enough words to become a slide." for i in range(1, 7))
+    slides = mvp._extractive_slides(article, "https://example.com")
+    assert slides and not mvp._extractive_audit_errors(slides, article)
 
 
 def test_extractive_slides_skip_long_sentences_and_preserve_source_text():
