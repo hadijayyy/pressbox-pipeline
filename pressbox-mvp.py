@@ -2583,6 +2583,9 @@ def _extractive_slides(article_text, url, title=""):
 _LEADING_FRAGMENT_RE = re.compile(
     r"^(?:and|but|or|so|because|while|as|in|to|before|after)\b|"
     r"^(?:he|she|they|it)\s+(?:said|added|noted|told)\b",
+)
+_LEADING_FRAGMENT_RE_CONJ = re.compile(
+    r"^(?:and|but|or|so|because|while|as|in|to|before|after)\b",
     re.I,
 )
 
@@ -2596,7 +2599,7 @@ def _leading_fragment_reason(text):
     if raw[0] in "\"“‘'":
         return ""
     start = raw.lstrip()
-    if start[0].islower() or _LEADING_FRAGMENT_RE.match(start):
+    if start[0].islower() or _LEADING_FRAGMENT_RE_CONJ.match(start) or _LEADING_FRAGMENT_RE.match(start):
         return "leading continuation fragment"
     return ""
 
@@ -2614,7 +2617,7 @@ def _slide_contract_errors(slides, editorial=True):
             errors.append(f"S{i} dangling attribution fragment")
         elif _leading_fragment_reason(text):
             errors.append(f"S{i} leading continuation fragment")
-        elif len(_source_units(text.split("\n\nhttp", 1)[0])) < 1:
+        elif not re.search(r"[A-Za-z0-9][\"'”’]?[.!?][\"'”’]?(?:\s|$)", text):
             errors.append(f"S{i} has no complete sentence")
     return errors
 
@@ -2750,7 +2753,7 @@ The article body and assigned evidence lines are the complete factual universe. 
         f"  <source_url>{url}</source_url>\n</primary_article>\n\n"
         f"<EVIDENCE_PACK>\n{_evidence_pack(article_text)}\n</EVIDENCE_PACK>\n\n"
         f"<SLIDE_EVIDENCE>\n{assignments}\n</SLIDE_EVIDENCE>\n\n"
-        "Build one story, not six reports. Each slide needs one or two complete sentences; one strong sentence beats filler. S1 opens with source-backed tension, conflict, or a specific scene. A plain statement of fact is acceptable and preferred when the source offers no explicit tension; never invert a statistic, escalate scope words (every/all/entire), or upgrade certainty. Only frame S1 as a question, reversal, or two facts in tension when the source itself supports both sides. S2-S5 move through proof, context, and confirmed impact. S6 returns to S1 with a debatable question (Will X...? Or is this just...?) grounded in the story's two sides; fall back to a grounded takeaway only if the source offers no two sides. Use assigned evidence for order, then verify wording against full article. Every sentence must be faithful, non-escalating paraphrase.\n\n"
+        "Build one story, not six reports. Each slide needs one or two complete sentences; one strong sentence beats filler. S1 opens with source-backed tension, conflict, or a specific scene. A plain statement of fact is acceptable and preferred when the source offers no explicit tension; never invert a statistic, escalate scope words (every/all/entire), or upgrade certainty. Only frame S1 as a question, reversal, or two facts in tension when the source itself supports both sides. S2-S5 move through proof, context, and confirmed impact. S6 returns to S1 with a debatable question (Will X...? Or is this just...?) grounded in the story's two sides; fall back to a grounded takeaway only if the source offers no two sides. Use assigned evidence for order, then verify wording against full article. Every sentence must be faithful, non-escalating paraphrase. When the source lists a set (pairings, fixtures, stats, names), either state the full list or explicitly mark it as an example; never present a partial list as the complete set. Do not write contrastive claims (no clash, without, lacked) unless the source itself states the absence.\n\n"
         f"{ref_data}\n\n{_number_hook_rule(article_text)}\n\n{_editorial_constraints()}\n\n{_generation_evidence_override()}"
     )
     fabrizio_voice = _fabrizio_voice(article_text, title)
