@@ -906,3 +906,45 @@ class TestRegressionJune2026:
         """managerial_change category didn't exist before — verify it's now detected."""
         result = classify_topic_type("Tuchel sacked as England head coach")
         assert result == "managerial_change", f"managerial_change not detected: got {result}"
+
+
+# ── S6 binary question hard gate (20 Aug 2026) ────────────────────
+class TestS6BinaryGate:
+    """_s6_strip_ungrounded_binary strips ungrounded binary branches."""
+
+    def _load(self):
+        import importlib.util
+        from pathlib import Path
+        spec = importlib.util.spec_from_file_location("pressbox_mvp", Path("pressbox-mvp.py"))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def test_strips_ungrounded_binary(self):
+        mod = self._load()
+        slides = [{"content": f"s{i}"} for i in range(1, 6)]
+        slides.append({"content": "Will Madrid attack more? Or is this a gamble?"})
+        ev = {"slide_6": ["Mourinho is expected to start both playmakers."]}
+        changed = mod._s6_strip_ungrounded_binary(slides, ev)
+        assert changed is True
+        assert "?" not in slides[5]["content"]
+        assert "gamble" not in slides[5]["content"]
+        assert "Will Madrid attack more" in slides[5]["content"]
+
+    def test_keeps_grounded_binary(self):
+        mod = self._load()
+        slides = [{"content": f"s{i}"} for i in range(1, 6)]
+        slides.append({"content": "Will Silva start? Or is Guler preferred?"})
+        ev = {"slide_6": ["Silva trained with the first team.", "Guler remains an option."]}
+        changed = mod._s6_strip_ungrounded_binary(slides, ev)
+        assert changed is False
+        assert "?" in slides[5]["content"]
+
+    def test_no_binary_marker_untouched(self):
+        mod = self._load()
+        slides = [{"content": f"s{i}"} for i in range(1, 6)]
+        slides.append({"content": "A question is allowed in S6."})
+        ev = {"slide_6": ["Some evidence."]}
+        changed = mod._s6_strip_ungrounded_binary(slides, ev)
+        assert changed is False
+        assert slides[5]["content"] == "A question is allowed in S6."

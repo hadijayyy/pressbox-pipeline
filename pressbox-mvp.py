@@ -1890,7 +1890,8 @@ def evaluator_check(slides, article_text, url, verbatim=False, assigned_evidence
         "6. TONE ISSUES: clickbait that damages credibility, insensitive content\n"
         "7. QUALITY: grammar errors, incoherent flow, too many slides\n"
         "8. MISLEADING: headline says X but article says Y\n"
-        "9. TONE: flag analysis only when it adds an unsupported claim. A slide may report verified facts without a stance.\n\n"
+        "9. TONE: flag analysis only when it adds an unsupported claim. A slide may report verified facts without a stance.\n"
+        "10. S6 QUESTION: a binary/debate question in the final slide is ALLOWED when both sides are grounded in the article (e.g. article mentions a tactical change AND the risk it carries). Do not reject a question merely because it is a question. Reject it only if it invents a side, motive, or consequence the article never mentions.\n\n"
         "RULE: Check every claim against the full source article. Flag added facts, changed numbers, stronger certainty, invented motive, or unsupported consequence. Do not flag a natural idiom or faithful paraphrase when meaning is unchanged.\n\n"
         "Respond in EXACTLY this JSON format:\n"
         '{"decision": "APPROVE|REVISE|REJECT", "reasons": ["reason1", "reason2"]}\n'
@@ -2403,6 +2404,43 @@ def _assigned_evidence(article_text, evidence_plan):
             return None
         resolved[slide] = [facts[int(match.group(1)) - 1] for match in matches]
     return resolved if len(resolved) == 6 else None
+
+
+_BINARY_S6_RE = re.compile(r"(?i)\b(?:or is this just|or is|or will|or does|or are|or should|or would)\b")
+_BINARY_STOP = {"this", "just", "that", "there", "what", "which", "they", "them", "their", "with", "from", "about", "would", "should", "could", "really", "actually", "still", "even", "more", "most", "than"}
+
+
+def _s6_strip_ungrounded_binary(slides, assigned_evidence):
+    """Strip an ungrounded second branch from an S6 binary question.
+
+    A binary question in the final slide is only valid when both sides appear
+    in the assigned evidence for slide 6. If the "Or ..." branch's entities are
+    absent from that evidence, rewrite the slide to keep only the grounded
+    question (or fall back to a statement) so the evaluator does not reject a
+    fan verdict the source never supported.
+    """
+    if len(slides) < 6:
+        return False
+    s6 = slides[5]
+    text = s6.get("content", "")
+    m = _BINARY_S6_RE.search(text)
+    if not m:
+        return False
+    evidence_units = " ".join(assigned_evidence.get("slide_6", []))
+    branch = text[m.end():]
+    # Second branch is only grounded if it names an entity that also appears
+    # in the assigned evidence for S6.
+    entities = {w.lower() for w in re.findall(r"[A-Za-zÀ-ÿ]{4,}", branch) if w.lower() not in _BINARY_STOP}
+    grounded = any(w in evidence_units.lower() for w in entities) if entities else False
+    if grounded:
+        return False
+    kept = text[:m.start()].rstrip(" ?")
+    if kept:
+        s6["content"] = kept + "."
+        return True
+    # No grounded lead-in left: drop the question, keep the rest as takeaway.
+    s6["content"] = branch.strip().rstrip("?") + "."
+    return True
 
 
 def _story_text(article_text, title):
@@ -3280,6 +3318,10 @@ def _generate_best(ranked, analytics_summary, hooks_str, cta_pattern, tone):
 
             contract_errors = _slide_contract_errors(slides)
             editorial_slides = slides[:6]
+            # Hard gate: S6 binary question only allowed when both sides are
+            # grounded in assigned evidence. Strip ungrounded "Or ..." branch.
+            if assigned_evidence and _s6_strip_ungrounded_binary(editorial_slides, assigned_evidence):
+                log("   🛡️ S6 binary question had no second-side evidence — stripped to grounded takeaway")
             slides_text = " ".join(s["content"] for s in editorial_slides)
             grounding_errors = grounding_check(slides_text, art_text, _extract_proper_nouns(art_text), _extract_stages(art_text))
             number_errors = number_grounding_check(slides_text, art_text, _build_reference_data())
