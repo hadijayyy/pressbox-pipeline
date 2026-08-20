@@ -35,6 +35,7 @@ Usage:
 """
 
 import logging
+import os
 import re
 import time
 from dataclasses import dataclass
@@ -85,6 +86,7 @@ class ThreadsPoster:
         text: str,
         reply_to_id: Optional[str] = None,
         image_url: Optional[str] = None,
+        image_file: Optional[str] = None,
     ) -> str:
         """Step 1: create a media container. Returns creation_id."""
         # Normalize whitespace: collapse 3+ newlines to 2
@@ -98,17 +100,34 @@ class ThreadsPoster:
             "access_token": self.access_token,
         }
 
-        if image_url:
+        if image_file:
+            if not os.path.isfile(image_file):
+                raise ThreadsAPIError(f"Local image file not found: {image_file}")
+            with open(image_file, 'rb') as f:
+                files = {'file': f}
+                data = {
+                    "text": text,
+                    "access_token": self.access_token,
+                    "media_type": "IMAGE",
+                }
+                if reply_to_id:
+                    data["reply_to_id"] = reply_to_id
+                resp = self.session.post(url, files=files, data=data, timeout=DEFAULT_TIMEOUT)
+                data = self._parse_response(resp)
+        elif image_url:
             params["media_type"] = "IMAGE"
             params["image_url"] = image_url
+            if reply_to_id:
+                params["reply_to_id"] = reply_to_id
+            resp = self.session.post(url, data=params, timeout=DEFAULT_TIMEOUT)
+            data = self._parse_response(resp)
         else:
             params["media_type"] = "TEXT"
+            if reply_to_id:
+                params["reply_to_id"] = reply_to_id
+            resp = self.session.post(url, data=params, timeout=DEFAULT_TIMEOUT)
+            data = self._parse_response(resp)
 
-        if reply_to_id:
-            params["reply_to_id"] = reply_to_id
-
-        resp = self.session.post(url, data=params, timeout=DEFAULT_TIMEOUT)
-        data = self._parse_response(resp)
         creation_id = data.get("id")
         if not creation_id:
             raise ThreadsAPIError(f"No creation_id returned: {data}", resp.status_code, data)
@@ -222,11 +241,13 @@ class ThreadsPoster:
         text: str,
         reply_to_id: Optional[str] = None,
         image_url: Optional[str] = None,
+        image_file: Optional[str] = None,
     ) -> str:
         """Create + publish a single post (optionally as a reply to chain a thread).
-        Returns the published post_id."""
-        creation_id = self._create_container(text, reply_to_id=reply_to_id, image_url=image_url)
-        self._wait_for_container_ready(creation_id, has_media=bool(image_url))
+        Use image_url for remote image URLs, image_file for local preprocessed images."""
+        has_media = bool(image_url or image_file)
+        creation_id = self._create_container(text, reply_to_id=reply_to_id, image_url=image_url, image_file=image_file)
+        self._wait_for_container_ready(creation_id, has_media=has_media)
         return self._publish_container(creation_id)
 
     def post_thread(
