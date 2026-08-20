@@ -124,7 +124,12 @@ def test_engagement_loop_uses_measured_hook_winner_and_rotation():
     posts += [{"views": 10, "likes": 1, "replies": 0, "hook_variant": "implication"}] * 3
     perf = mvp._cohort_performance(posts, "hook_variant")
     assert perf["detail"] > perf["implication"]
+    # Ring with >=2 measured variants locks the winner
+    mvp._ENGAGEMENT_RING = {"posts": posts}
     assert mvp._select_hook_variant({"best_hook_variant": "detail"}) == "detail"
+    # Single-variant ring cannot prove a winner -> rotate instead of lock-in
+    mvp._ENGAGEMENT_RING = {"posts": [{"views": 1, "likes": 0, "replies": 0, "hook_variant": "contradiction"}] * 5}
+    assert mvp._select_hook_variant({"best_hook_variant": "contradiction"}, 1) == "contradiction"
     assert mvp._select_hook_variant({}, 1) == "contradiction"
 
 
@@ -428,7 +433,8 @@ def test_editorial_constraints_preserve_source_wording():
     assert "Do not replace source terms" in rules
     assert "A stance is optional" in rules
     assert "Do not turn conditional claims into current facts" in rules
-    assert "Do not invent a question, conflict, urgency, motive, winner, loser, or consequence" in rules
+    assert "Do not invent a conflict, urgency, motive, winner, loser, or consequence" in rules
+    assert "A question is allowed in S6" in rules
     assert 'First-person markers such as "For me" or "In my eyes"' in rules
     assert "must not claim eyewitness knowledge" in rules
 

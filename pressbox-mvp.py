@@ -288,9 +288,14 @@ def _content_attributes(slides):
 
 
 def _select_hook_variant(analytics_summary=None, post_count=0):
-    """A/B rotate hooks; lock measured winner only with sufficient evidence."""
-    winner = (analytics_summary or {}).get("best_hook_variant")
-    if winner in HOOK_VARIANTS:
+    """A/B rotate hooks; lock measured winner only with sufficient evidence.
+    Anti-lock-in: only lock a winner when at least 2 variants have >=3 samples;
+    a single-variant ring (e.g. all contradiction) cannot prove best, so rotate."""
+    summary = analytics_summary or {}
+    winner = summary.get("best_hook_variant")
+    ring = _ENGAGEMENT_RING.get("posts", [])
+    measured = _cohort_performance(ring, "hook_variant", min_sample=3)
+    if winner in HOOK_VARIANTS and len(measured) >= 2:
         return winner
     return HOOK_VARIANTS[post_count % len(HOOK_VARIANTS)]
 
@@ -319,6 +324,36 @@ def _hook_variant_instruction(variant):
 
 from pressbox_common import WIB, HOME, POSTED, load_env, log, clean_words, is_similar, classify_topic_type
 from pressbox_scoring import score_topic as base_score_topic
+import json
+
+# ── ANTI-SATURATION: skip saga/topic posted too often in last 7 days ──
+_SATURATION_MAX = 3  # max posts sharing a topic cluster per 7 days
+_SATURATION_DAYS = 7
+
+
+def _recent_topic_frequency(candidate_title, days=_SATURATION_DAYS, max_count=_SATURATION_MAX):
+    """Return True if candidate shares a topic cluster with too many recent posts.
+    Uses is_similar on titles within the lookback window (fail-closed: skip)."""
+    try:
+        with open(POSTED) as f:
+            data = json.load(f)
+        topics = data.get("topics", []) if isinstance(data, dict) else data
+        if not topics:
+            return False
+        cutoff = (datetime.now() - timedelta(days=days)).isoformat()
+        recent = [t for t in topics if (t.get("posted_at") or "") >= cutoff]
+        hits = 0
+        for t in recent:
+            pw = clean_words(t.get("title", ""))
+            if pw and is_similar(candidate_title, [pw], 0.25):
+                hits += 1
+        if hits >= max_count:
+            log(f"   🔁 Saturation: '{candidate_title[:60]}' posted {hits}x in {days}d — skipping")
+            return True
+        return False
+    except Exception as e:
+        log(f"   ⚠️ Saturation guard error ({e}) — fail-open, not blocking")
+        return False
 
 # ── FEEDBACK LOOP: AUTO-GENERATED PROMPT LEARNINGS ──
 RECENT_LEARNINGS_PATH = f"{HOME}/.hermes/pressbox/recent_learnings.txt"
@@ -1427,6 +1462,8 @@ def filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_su
         if _match_sensitive(tl) or _match_sensitive(desc): continue
         # Dedup
         if url in posted_urls: continue
+        # Anti-saturation: skip saga/topic repeated too often in last 7 days
+        if _recent_topic_frequency(title): continue
         threshold = 0.50 if relaxed else 0.35
         if is_similar(title, posted_ws, threshold): continue
         # Skip low-performing topic types from analytics
@@ -2218,8 +2255,7 @@ def _fabrizio_voice(article_text, title=""):
             "when supported.\n"
             "- S5 adds process detail: medical, travel, documents, or timing — only when in "
             "the source.\n"
-            "- S6 closes with a fan verdict or a specific rating-style question only when "
-            "the source supports both options."
+            "- S6 closes with a fan verdict or a specific rating-style question when the source supports it. Prefer a debatable question (Will X...? Or is this just...?) grounded in the story; fall back to a takeaway only if the source offers no two sides."
         )
     else:
         opener = "result/timeline/status-first openers, concrete names, and an interactive rating-style question"
@@ -2232,8 +2268,7 @@ def _fabrizio_voice(article_text, title=""):
             "supplies it.\n"
             "- S4 gives background: why it happened, what changed, or impact only when supported.\n"
             "- S5 adds detail: quotes, process, or next step — only when in the source.\n"
-            "- S6 closes with a fan verdict or a specific rating-style question only when "
-            "the source supports both options."
+            "- S6 closes with a fan verdict or a specific rating-style question when the source supports it. Prefer a debatable question (Will X...? Or is this just...?) grounded in the story; fall back to a takeaway only if the source offers no two sides."
         )
     return (
         "## FABRIZIO-STYLE VOICE\n"
@@ -2259,7 +2294,7 @@ def _evaluator_accepts(decision):
 def _editorial_constraints():
     return """Do not replace source terms with stronger or different terms. Keep
 'reportedly' and other uncertainty words. Do not turn conditional claims into current facts.
-Do not invent a question, conflict, urgency, motive, winner, loser, or consequence.
+Do not invent a conflict, urgency, motive, winner, loser, or consequence. A question is allowed in S6 when it is a faithful, non-escalating reading of the story's two sides (e.g. "Will X...? Or is this just...?"); never ask a question whose premise is not supported.
 A stance is optional; add one only when clearly marked as interpretation and supported by the source. First-person markers such as "For me" or "In my eyes" may frame that supported interpretation, but must not claim eyewitness knowledge, private emotion, source confirmation, or unseen motive."""
 
 
@@ -2270,7 +2305,7 @@ The arc template is structure only; it never authorizes facts, context, stakes, 
 If source cannot support a complete sentence, omit that detail; do not pad with generic filler.
 Do not invent stakes, motives, consequences, reactions, or either/or outcomes.
 Do not turn a question, implication, possibility, or interpretation into a fact.
-Never output dangling quote fragments or unattributed 'it says'/'reads one reaction' clauses. Use a grounded takeaway for S6 unless both sides of a question are explicit in assigned evidence."""
+Never output dangling quote fragments or unattributed 'it says'/'reads one reaction' clauses. Prefer a debatable S6 question grounded in the story's two sides when both are present in assigned evidence; fall back to a grounded takeaway if the source offers no two sides."""
 
 
 def _source_units(article_text, split_long=True):
@@ -2677,7 +2712,7 @@ The article body and assigned evidence lines are the complete factual universe. 
         f"  <source_url>{url}</source_url>\n</primary_article>\n\n"
         f"<EVIDENCE_PACK>\n{_evidence_pack(article_text)}\n</EVIDENCE_PACK>\n\n"
         f"<SLIDE_EVIDENCE>\n{assignments}\n</SLIDE_EVIDENCE>\n\n"
-        "Build one story, not six reports. Each slide needs one or two complete sentences; one strong sentence beats filler. S1 opens with source-backed tension or scene. S2-S5 move through proof, context, and confirmed impact. S6 returns to S1 with a grounded takeaway or specific question only when source supports both options. Use assigned evidence for order, then verify wording against full article. Every sentence must be faithful, non-escalating paraphrase.\n\n"
+        "Build one story, not six reports. Each slide needs one or two complete sentences; one strong sentence beats filler. S1 opens with source-backed tension, conflict, or a specific scene — a plain statement of fact is the weakest hook, so frame it as a question the story answers, a reversal, or two facts in tension when the source supports it. S2-S5 move through proof, context, and confirmed impact. S6 returns to S1 with a debatable question (Will X...? Or is this just...?) grounded in the story's two sides; fall back to a grounded takeaway only if the source offers no two sides. Use assigned evidence for order, then verify wording against full article. Every sentence must be faithful, non-escalating paraphrase.\n\n"
         f"{ref_data}\n\n{_number_hook_rule(article_text)}\n\n{_editorial_constraints()}\n\n{_generation_evidence_override()}"
     )
     fabrizio_voice = _fabrizio_voice(article_text, title)
