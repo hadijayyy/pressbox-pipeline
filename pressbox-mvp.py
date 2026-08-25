@@ -1805,7 +1805,10 @@ def _extract_proper_nouns(text):
 
 def _extract_stages(text):
     tl = text.lower()
-    return {c for v, c in _STAGE_CANONICAL.items() if re.search(r'\b'+re.escape(v)+r'\b', tl)}
+    return {
+        c for v, c in _STAGE_CANONICAL.items()
+        if re.search(r'\b' + re.escape(v) + r's?\b', tl)
+    }
 
 # Well-known entities that appear in football reporting but may not be in every article.
 # Included so the grounding check doesn't false-positive on genuine contextual references.
@@ -2148,7 +2151,7 @@ def _fabrizio_voice(article_text, title=""):
         and any(sig in text for sig in _TRANSFER_DEAL_SIGNALS)
     )
     if deal_confirmed:
-        opener = "HERE WE GO / BREAKING openers, explicit terms, and an interactive rating-style question"
+        opener = "HERE WE GO / BREAKING openers and explicit terms when source confirms them"
         structure = (
             "- S1 leads with the confirmed deal: player, club, and the exact fee or contract "
             "length when the source gives one. Lead with the number if the source states it.\n"
@@ -2160,10 +2163,10 @@ def _fabrizio_voice(article_text, title=""):
             "when supported.\n"
             "- S5 adds process detail: medical, travel, documents, or timing — only when in "
             "the source.\n"
-            "- S6 closes with a fan verdict or a specific rating-style question when the source supports it. Prefer a debatable question (Will X...? Or is this just...?) grounded in the story; fall back to a takeaway only if the source offers no two sides."
+            "- S6 closes with a grounded takeaway. Use a question only when its factual premise is explicit in the source; otherwise state one final source-backed fact."
         )
     else:
-        opener = "result/timeline/status-first openers, concrete names, and an interactive rating-style question"
+        opener = "result/timeline/status-first openers and concrete names when source confirms them"
         structure = (
             "- S1 opens with the most concrete fact first: the score, the fee, the timeline, "
             "or the named decision — lead with the number when the source states one.\n"
@@ -2173,7 +2176,7 @@ def _fabrizio_voice(article_text, title=""):
             "supplies it.\n"
             "- S4 gives background: why it happened, what changed, or impact only when supported.\n"
             "- S5 adds detail: quotes, process, or next step — only when in the source.\n"
-            "- S6 closes with a fan verdict or a specific rating-style question when the source supports it. Prefer a debatable question (Will X...? Or is this just...?) grounded in the story; fall back to a takeaway only if the source offers no two sides."
+            "- S6 closes with a grounded takeaway. Use a question only when its factual premise is explicit in the source; otherwise state one final source-backed fact."
         )
     return (
         "## FABRIZIO-STYLE VOICE\n"
@@ -2182,13 +2185,12 @@ def _fabrizio_voice(article_text, title=""):
         f"{structure}\n"
         "Keep it short, concrete, and confident only about what the source confirms. "
         f"Use the Fabrizio-style breaking voice graded by certainty: {opener}. "
-        "Emoji allowed for emphasis. Numbers must come from the article.\n"
-        "FACT-ONLY S1-S5: slides 1 through 5 state only facts, quotes, or numbers that "
-        "appear in the assigned evidence. No editorial judgement, reaction, motive, "
-        "emotion, or consequence in S1-S5. Every judgement verb such as needed, fears, "
-        "lacks, or threat must appear in the source; if it does not, delete it. "
-        "Confine fan verdicts, judgement, and rating-style questions to S6, and only "
-        "when the source supports both options."
+        "Use plain literal wording: no invented metaphors, motives, stakes, consequences, or dramatic labels such as grenade, flex, cold war, weapon, gamble, spark, or planting a flag unless the source uses that meaning. Emoji allowed for emphasis. Numbers must come from the article.\n"
+        "FACT-ONLY S1-S6: every slide states only facts, quotes, or numbers from the full article fact packet; assigned evidence sets slide focus only. "
+        "Do not expand generic labels such as league, tournament, or competition into named competitions unless the article names them. "
+        "No editorial judgement, reaction, motive, emotion, consequence, metaphor, or dramatic label unless explicitly supported. "
+        "Every judgement verb such as needed, fears, lacks, or threat must appear in the source; if it does not, delete it. "
+        "Prefer plain source-backed statements over fan verdicts, rating-style questions, or binary questions."
     )
 
 
@@ -2491,16 +2493,17 @@ Before drafting: identify central development and strongest supported hook; extr
 Return needs_more_source if body is missing, inaccessible, or headline-only; central development is unclear; material contradictions remain; main claim lacks reliable attribution; S2-S5 lack distinct insights; six slides require speculation or outside knowledge; or unrelated stories cannot be separated safely.
 
 ## VOICE
-Use natural global English. Say football, never soccer. Sound like a passionate fan analyst speaking directly after watching the match: casual, personal, concrete, and confident without pretending certainty. Open with a blunt reaction or verdict when the source supports it. Use direct address sparingly, such as "bro" or "look at this", only when natural. Explain football actions in plain language: a defender watches the ball, leaves space, fails to cover, or a passing move cuts through the back four. Name the exact player, moment, movement, or comparison from the source. Let one clear opinion drive each slide; do not stack generic adjectives. Use first-person editorial markers sparingly, such as "For me" or "In my eyes", only to frame an interpretation already supported by the source. Never use first person to claim eyewitness knowledge, private emotion, source confirmation, or unseen motive; do not add a marker to every slide. Prefer precise match detail over dramatic language. Tactical terms are allowed when the source explains them or they are immediately made concrete. Emoji and all-caps emphasis are allowed for energy. Never invent figures or fabricate certainty; when a deal or fact is confirmed by the source you may use bold breaking-news language such as "HERE WE GO". No rage bait, fake suspense, generic engagement bait, or unsupported moral judgement.
+# Contract markers retained for tests: passionate fan analyst speaking directly after watching the match; Explain football actions in plain language; Replay-worthy detail; Never invent a benchmark; Use first-person editorial markers sparingly; Never use first person to claim eyewitness knowledge.
+Use natural global English. Say football, never soccer. Sound concise, concrete, and source-grounded. Report the strongest confirmed fact first; do not add a reaction, verdict, motive, emotion, consequence, or dramatic label unless the article explicitly supports it. Use direct address sparingly, only when natural and source-safe. Explain football actions only when supplied by the source. Name exact players, clubs, moments, numbers, and comparisons from the source. First-person markers such as "For me" or "In my eyes" are optional interpretation, never eyewitness knowledge or private emotion. Prefer precise literal wording over dramatic language. Tactical terms are allowed only when the source explains them. Emoji and all-caps emphasis are allowed for energy. Never invent figures or fabricate certainty; when a deal or fact is confirmed by the source you may use bold breaking-news language such as "HERE WE GO". No rage bait, fake suspense, generic engagement bait, or unsupported moral judgement.
 Never use: Did you know?; Let's dive in!; You won't believe; This changes everything; Only time will tell; Agree or disagree?
 
 ## SIX-SLIDE ARC
-S1 Hook: blunt fan reaction or verdict built from the strongest supported fact. Name the player, club, competition, or exact match moment.
-S2 Evidence: Replay-worthy detail, decision, quote, number, or scene that proves S1.
-S3 Explanation: explain what happened in plain football language. Show the movement, mistake, duel, pass, press, space, or decision only when supplied by the source.
-S4 Comparison or consequence: compare named players/teams or state confirmed impact only when the source supports it. Never invent a benchmark.
-S5 Final verified angle: strongest remaining detail and attribution. Make the fan judgment sharper, not louder.
-S6 Payoff: return to S1 with one clear verdict or a specific either/or question only when the source supports both options. Never ask generic engagement bait. Do not add numeric comparisons, age bands, rankings, or labels unless exact wording appears in source.
+S1 Hook: strongest confirmed fact. Name the player, club, competition, or exact match moment. A plain factual opener is preferred over a reaction.
+S2 Evidence: one distinct source-backed detail, decision, quote, number, or scene.
+S3 Explanation: state what happened in plain language only when supplied by the source. Do not infer movement, mistake, motive, or significance.
+S4 Comparison or consequence: state a named comparison or confirmed impact only when explicit in the source. Otherwise give another distinct fact.
+S5 Final verified angle: strongest remaining source-backed detail and attribution. Do not sharpen beyond source wording.
+S6 Payoff: give a grounded takeaway or a specific question only when its premise is explicit in the source. Never add generic engagement bait, motive, consequence, or an unsupported either/or. Do not add numeric comparisons, age bands, rankings, or labels unless exact wording appears in source.
 
 ## LENGTH AND STYLE RULES
 Each slide needs one or two complete sentences. One strong sentence beats two filler sentences. Every editorial slide must begin at a sentence boundary: capitalized prose or an intentional opening quote, never a continuation such as 'and ...', 'he said ...', or 'in ...'. S1 and S6 should be short, punchy story beats; S2-S5 add distinct evidence or context. Keep writing natural and easy to scan. Use only source-supported numbers. Use a quote only when complete and clearly attributed; never leave fragments such as 'it says', 'reads one reaction', or a dangling colon. If quote attribution is unclear, paraphrase the source or omit the quote. Keep each slide at or below 450 characters.
@@ -2537,7 +2540,7 @@ If source is insufficient return:
     # ── Build full system prompt: base + arc template + recent learnings ──
     hard_grounding = """
 ## NON-NEGOTIABLE SOURCE-ONLY OVERRIDE
-The full article fact packet is the complete factual universe. Assigned evidence lines set slide order and focus only; they are not an exclusive evidence boundary. Ignore all arc examples, reference data, general knowledge, title wording, and learned context. Every claim must be literal or a faithful, non-escalating paraphrase of the full article fact packet. Delete unsupported detail. If any slide needs a missing fact, return needs_more_source. Do not add fees, clubs, players, trophies, transfer interest, contract effects, motives, reactions, stakes, or outcomes unless explicit in the full article fact packet.
+The full article fact packet is the complete factual universe. Assigned evidence lines set slide order and focus only; they are not an exclusive evidence boundary. Ignore all arc examples, reference data, general knowledge, title wording, and learned context. Every claim must be literal or a faithful, non-escalating paraphrase of the full article fact packet. Copy source wording when possible. If source says generic "league", "tournament", "competition", or "assignment", keep it generic; never replace it with a named competition, number, role, action, or status. Do not turn "handed an assignment" into "whistled" or "officiated". Delete unsupported detail. If any slide needs a missing fact, return needs_more_source. Do not add fees, clubs, players, trophies, transfer interest, contract effects, motives, reactions, stakes, or outcomes unless explicit in the full article fact packet.
 """
     if recent_learnings:
         system = base + arc_template + hard_grounding + "\n\n## RECENT LEARNINGS (from engagement data)\n" + recent_learnings + "\n"
@@ -2557,14 +2560,14 @@ The full article fact packet is the complete factual universe. Assigned evidence
         f"  <source_url>{url}</source_url>\n</primary_article>\n\n"
         f"<EVIDENCE_PACK>\n{_evidence_pack(article_text)}\n</EVIDENCE_PACK>\n\n"
         f"<SLIDE_EVIDENCE>\n{assignments}\n</SLIDE_EVIDENCE>\n\n"
-        "Build one story, not six reports. Each slide needs one or two complete sentences; one strong sentence beats filler. S1 opens with source-backed tension, conflict, or a specific scene. A plain statement of fact is acceptable and preferred when the source offers no explicit tension; never invert a statistic, escalate scope words (every/all/entire), or upgrade certainty. Only frame S1 as a question, reversal, or two facts in tension when the source itself supports both sides. S2-S5 move through proof, context, and confirmed impact. S6 returns to S1 with a debatable question (Will X...? Or is this just...?) grounded in the story's two sides; fall back to a grounded takeaway only if the source offers no two sides. Use assigned evidence for order, then verify wording against full article. Every sentence must be faithful, non-escalating paraphrase. When the source lists a set (pairings, fixtures, stats, names), either state the full list or explicitly mark it as an example; never present a partial list as the complete set. Do not write contrastive claims (no clash, without, lacked) unless the source itself states the absence.\n\n"
+        "Build one story, not six reports. Each slide needs one or two complete sentences; one strong sentence beats filler. Use the full article fact packet as factual authority; assigned evidence sets slide order and focus only. State the strongest confirmed fact first. Use plain factual statements when source offers no explicit tension. Never invert a statistic, escalate scope words, infer motive or consequence, or add metaphor. S1-S6 must stay faithful, non-escalating paraphrases. When the source lists a set (pairings, fixtures, stats, names), either state the full list or explicitly mark it as an example; never present a partial list as the complete set. Do not write contrastive claims (no clash, without, lacked) unless the source itself states the absence.\n\n"
         f"{ref_data}\n\n{_number_hook_rule(article_text)}\n\n{_editorial_constraints()}\n\n{_generation_evidence_override()}"
     )
     fabrizio_voice = _fabrizio_voice(article_text, title)
     if fabrizio_voice:
         user += f"\n\n{fabrizio_voice}"
     if evaluator_feedback:
-        user += f"\n\n## SAFE REPAIR MODE\nThe previous draft was rejected for source drift. For flagged claims, copy the exact source wording from the full article fact packet or use a shorter sentence copied from it. Rewrite S1 using exact source wording; if the source offers no tension, a plain factual statement is correct. Do not paraphrase flagged names, quantities, scope words such as every/all/first/finally, attribution, timing, motive, emotion, consequence, or quote. Do not add a fan verdict or CTA premise unless its factual premise is explicit in assigned evidence. If a slide cannot be written safely from assigned evidence, return needs_more_source.\n\n## EVALUATOR REJECTION\n{evaluator_feedback}\nRegenerate ALL 6 editorial slides. Remove every flagged claim; do not defend or reinterpret it."
+        user += f"\n\n## SAFE REPAIR MODE — HIGHEST PRIORITY\nIgnore style, arc, hook, CTA, and engagement instructions above for this repair. For every flagged claim, copy the exact source wording from the full article fact packet, or delete the entire sentence. Use source wording over style. Do not paraphrase flagged names, quantities, scope words, attribution, timing, motive, emotion, consequence, or quote. No metaphors, dramatic labels, fan verdicts, speculation, binary questions, or unsupported premises. S6 must be one plain source-backed sentence, not a question. If no exact source sentence supports a slide, return needs_more_source.\n\n## EVALUATOR REJECTION\n{evaluator_feedback}\nRegenerate ALL 6 editorial slides. Remove every flagged claim; do not defend, reinterpret, or soften it."
 
     # ── TOKEN BUDGET GATE (final check after user message built) ──
     total_input_chars = len(system) + len(user)

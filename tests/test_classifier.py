@@ -113,6 +113,11 @@ def test_number_grounding_accepts_mojibake_currency_from_article():
     assert not mvp.number_grounding_check("Arsenal paid £75m.", "Arsenal paid Â£75m.", "")
 
 
+def test_stage_grounding_accepts_plural_source_stage():
+    mvp = _load_mvp()
+    assert "semi_final" in mvp._extract_stages("France bowed out in the semi-finals.")
+
+
 def test_module_import_does_not_hold_runtime_pipeline_lock():
     mvp = _load_mvp()
     assert hasattr(mvp, "_acquire_pipeline_lock")
