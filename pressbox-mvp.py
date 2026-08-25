@@ -580,7 +580,7 @@ env = load_env()
 LLM_KEY = (env.get("HERMES_CUSTOM_43_157_200_187_20128_API_KEY")
            or env.get("MISTRAL_API_KEY", ""))
 LLM_BASE_URL = env.get("PRESSBOX_LLM_BASE_URL", "http://127.0.0.1:20128/v1").rstrip("/")
-LLM_MODEL = env.get("PRESSBOX_LLM_MODEL", "Terra")
+LLM_MODEL = env.get("PRESSBOX_LLM_MODEL", "cx/gpt-5.6-luna")
 MISTRAL_KEY = LLM_KEY  # compatibility for existing tests and fail-closed checks
 UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
