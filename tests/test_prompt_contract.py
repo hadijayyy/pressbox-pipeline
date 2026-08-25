@@ -47,4 +47,4 @@ def test_evaluator_infrastructure_error_skips_llm_retry():
     source = inspect.getsource(mvp._generate_best)
     block = source[source.index('eval_decision, eval_reasons = evaluator_check('):source.index('if not _evaluator_accepts(eval_decision):')]
     assert 'if eval_decision == "ERROR":' in block
-    assert "use source-verbatim fallback" in block
+    assert "fail closed" in block

@@ -22,7 +22,7 @@ Current (pressbox-mvp.py) vs v3 Production
 
 | Our Feature | v3 Status | Keep? |
 |-------------|-----------|-------|
-| **5 Pattern Arc Templates** (A/C/D/E/F) | ❌ No patterns — single flexible arc | Yes — patterns proven to drive variety |
+| **Active Pattern Arc Templates** (D/E/F) | ❌ No patterns — single flexible arc | Yes — active patterns only |
 | **VIRAL CRITERIA** (≥2 per slide) | ❌ No viral forcing | Yes — drives engagement |
 | **NUMBER TRUTH + Hallucination History** | ❌ No explicit hallucination examples | Yes — prevents repeated errors |
 | **GR15 Sentence Length Cap** | Soft max 18 words | Ours: 15 (tighter = better) |

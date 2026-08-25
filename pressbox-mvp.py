@@ -502,18 +502,13 @@ def _update_recent_learnings():
 
 def _pillar_from_pattern(pattern):
     """Map pipeline pattern to user-defined engagement pillar.
-    Pillar A: Hot Takes & Unpopular Opinions (Patterns A+E: Rule-Break, Pressure Cooker)
-    Pillar B: Stat-Bomb / Tactical Reality Check (Pattern C: Detail+Emotion)
-    Pillar C: Nostalgia & Forgotten Football Lore (Pattern F: Behind-the-Scenes)
-    Pillar D: Transfer Market / Live Matchday Banter (Pattern D: Commentary)
+    Active patterns: E (Hot Take), F (Nostalgia), D (Transfer/Matchday).
     """
     return {
-        'a': 'Hot Take', 'e': 'Hot Take',
-        'c': 'Stat-Bomb',
+        'e': 'Hot Take',
         'f': 'Nostalgia',
         'd': 'Transfer/Matchday',
-        'b': 'Hot Take',
-    }.get(pattern, 'Hot Take')
+    }.get(pattern, 'Transfer/Matchday')
 
 
 def _predict_engagement_trigger(topic, pattern, article_text=""):
@@ -532,8 +527,9 @@ def _predict_engagement_trigger(topic, pattern, article_text=""):
     if name_hits:
         triggers.append(f"{name_hits[0].title()} appeal")
 
-    # Binary Q trigger: forced-choice = replies
-    if pattern in ('a', 'c', 'd', 'e', 'f'):
+    # Binary Q trigger only when generated S6 actually contains a question.
+    # Pattern label alone is not evidence of a CTA.
+    if pattern in ('d', 'e', 'f') and "?" in article_text:
         triggers.append("binary Q = replies")
 
     # Controversy trigger
@@ -1178,7 +1174,10 @@ def get_analytics_summary():
     }
 
     variant_perf = _cohort_performance(with_metrics, "hook_variant")
-    pattern_perf = _cohort_performance(with_metrics, "pattern")
+    pattern_perf = {
+        k: v for k, v in _cohort_performance(with_metrics, "pattern").items()
+        if k in {"d", "e", "f"}
+    }
     if variant_perf:
         ordered = sorted(variant_perf.items(), key=lambda item: item[1], reverse=True)
         cohort_median = sorted(variant_perf.values())[len(variant_perf) // 2]
@@ -1863,7 +1862,7 @@ def _evaluator_request_payload(system, user):
     }
 
 
-def evaluator_check(slides, article_text, url, verbatim=False, assigned_evidence=None):
+def evaluator_check(slides, article_text, url, assigned_evidence=None):
     """Independent evaluator — skeptical review before post.
     Generator says 'looks done'; evaluator says 'actually right'.
     Returns (decision, reasons): decision is APPROVE/REVISE/REJECT.
@@ -1875,9 +1874,8 @@ def evaluator_check(slides, article_text, url, verbatim=False, assigned_evidence
         f"[Slide {i+1}: {s.get('title','')}]\n{s['content']}"
         for i, s in enumerate(slides)
     )
-    art_short = article_text[:8000]
-    if verbatim:
-        return "APPROVE", ["verbatim source sentences"]
+    # Full article is factual universe; assigned evidence supplies slide order only.
+    art_short = article_text
 
     system = (
         "You are a skeptical editor reviewing social media slides BEFORE publication. "
@@ -1943,52 +1941,21 @@ def _count_sentences(text):
     return len([s for s in re.split(r'(?<=[.!?])\s+', text.strip()) if len(s.strip()) > 5])
 
 def _select_viral_pattern(topic, article_text):
-    """Select pattern: A (rule-break), C (detail/emotion), D (commentary),
-    E (pressure cooker), F (behind-the-scenes).
-    Patterns E+F cover content that ranked highest in real performance data."""
+    """Select from active patterns only: D, E, F.
+
+    A/C were low-performing; B/Q had no usable production cohort.
+    """
     title = (topic.get("title") or "").lower()
     text = article_text.lower()[:2000]
     combined = title + " " + text
-    import re as _re
-
-    # Question + Reasons arc: use only when source exposes multiple distinct reasons.
-    reason_markers = len(_re.findall(r"\b(?:first|second|third|another reason|key reason|reasons why)\b", combined))
-    if ("reason" in title or "why" in title) and reason_markers >= 2:
-        return "q"
-    
-    # Pattern A signals (Rule-Break): authority violates own rules, scandal, double standard
-    rule_break_words = ["rule", "regulation", "tradition", "golden rule", "broke its own",
-                       "violated", "waived", "ignored its own", "bent the rules",
-                       "loophole", "exception", "exemption", "contradicts", "fast-tracked",
-                       "changed its own", "greenlit", "special treatment", "double standard",
-                       "hypocrisy", "favouritism", "inconsistency", "unfair", "unjust"]
-    scandal_words = ["scandal", "controversy", "conspiracy", "conspiracy theory", "rigged",
-                    "fixing", "corruption", "behind the scenes", "secret", "real reason",
-                    "nobody talks", "ugly truth", "shocking", "betray", "refuse", "clash",
-                    "furious", "rage", "slam", "blast", "row", "rift", "feud"]
-    scandal_score = sum(2 for w in rule_break_words if w in combined) + \
-                    sum(1 for w in scandal_words if w in combined)
-    
-    # Pattern D signals: commentary/opinion — someone famous said something
+    # D: commentary/opinion.
     commentary_words = ["slam", "criticise", "criticize", "attack", "comment", "opinion",
                         "says", "claims", "blasts", "hits out", "tells", "reveals",
                         "defends", "backtracks", "apologises", "apologizes", "admits",
                         "reacts", "hits back", "fires back", "calls out"]
     commentary_score = sum(1 for w in commentary_words if w in combined)
-    
-    # Pattern C signals: specific numbers, financial amounts, human interest
-    detail_words = ["£", "$", "fee", "cost", "price", "pay", "million", "thousand",
-                    "visa", "banned", "denied", "blocked", "refused", "mother", "father",
-                    "family", "cry", "tears", "heart", "sacrifice", "hero", "legend"]
-    detail_score = sum(1 for w in detail_words if w in combined)
-    
-    has_specific_number = bool(_re.search(r'\d+[\d,.]*\s*(?:£|$|million|thousand|k\b)', combined))
-    if has_specific_number:
-        detail_score += 3  # Strong signal for Pattern C
-    
-    # Pattern E signals (Pressure Cooker): player/manager under pressure, reactions, mind games
-    # Based on top performers: "Tuchel NOT happy", "Haaland fumes", "Kane speaks out"
-    # Lowered trigger threshold 4→1 (10 Aug): too few E posts; top performers 600K+.
+
+    # E: pressure cooker.
     pressure_words = ["not happy", "fumes", "fuming", "under fire", "under pressure", "pressure",
                       "speaks out", "breaks silence", "addresses", "responds to", "reacts",
                       "defiant", "fires back", "warning", "warns", "warned", "not impressed",
@@ -2001,13 +1968,11 @@ def _select_viral_pattern(topic, article_text):
                       "shock", "shocked", "stunned", "threatens", "threatened", "threaten",
                       "vows", "fired", "dismissed", "explodes", "erupts", "crisis",
                       "quits", "war of words", "bust-up", "revolt", "rebellion"]
-    # Tension context — headlines with "NOT happy/under fire/fumes" = strong E signal
     tension_words = ["fume", "furious", "not happy", "under fire", "speaks out", "breaks silence"]
     tension_match = sum(2 for w in tension_words if w in title)
     pressure_score = sum(1 for w in pressure_words if w in combined) + tension_match
-    
-    # Pattern F signals (Behind-the-Scenes): logistics, admin, referees, off-field drama
-    # Based on top performers: "hotel change", "VAR decision", "air miles", "ref questions"
+
+    # F: behind the scenes.
     bts_words = ["hotel", "travel", "stadium", "weather", "referee", "ref", "var",
                  "injury", "squad", "lineup", "starting xi", "selection", "tactics",
                  "formation", "change", "changed", "decision", "decided", "logistics",
@@ -2016,78 +1981,17 @@ def _select_viral_pattern(topic, article_text):
                  "fine", "fined", "agent", "contract", "release clause", "option",
                  "medical", "fitness", "condition", "training"]
     bts_score = sum(1 for w in bts_words if w in combined)
-    # Strong F signal: logistics/admin focus in headline
     logistics_title = ["why", "how", "what next", "reasons", "behind", "inside",
                        "secret", "revealed", "explained"]
     had_bts_title = sum(1 for w in logistics_title if w in title) >= 2
     if had_bts_title:
         bts_score += 2
-    
-    # Grounding check: Pattern A needs a positive rule/action claim in body.
-    positive_rule_break = _re.search(
-        r"\b(?:broke|violated|waived|ignored its own|bent the rules|"
-        r"fast-tracked|changed its own|granted (?:an )?exemption|"
-        r"special treatment|double standard)\b",
-        text,
-    )
-    body_rule_score = sum(2 for w in rule_break_words if w in text)
-    actual_rule_break = bool(positive_rule_break) and not _re.search(
-        r"\b(?:no|not|without|never)\s+(?:a\s+)?(?:rule|regulation|violation|exemption|exception)\b",
-        text,
-    )
-    
-    # Pattern A pre-filter: if title has authority + rule/ban/charge/violation,
-    # force Pattern A regardless of score. Parkthebus Rule-Break formula = 12M views.
-    title_auths = ["fifa", "uefa", "ifab", "fa ", "premier league", "la liga", "serie a",
-                   "bundesliga", "federation", "governing body"]
-    title_violations = ["broke", "break", "violated", "violation", "ban", "banned",
-                        "suspend", "suspended", "charge", "charged", "investigate",
-                        "investigation", "probe", "fine", "fined", "waive", "waived",
-                        "overturn", "overturned", "rule", "rules", "regulation", "loophole",
-                        "exemption", "cleared", "allowed", "stripped", "controversy",
-                        "conspiracy", "rigged", "corruption", "scandal"]
-    if (any(a in title for a in title_auths)
-            and any(v in title for v in title_violations)
-            and actual_rule_break):
-        return "a"
 
-    # Priority: E/F first when they score high (they outperform A in real data)
-    # Pattern E: Pressure Cooker (634K, 601K, 403K, 319K views in real data)
-    if pressure_score >= 1 and pressure_score > max(scandal_score, detail_score, commentary_score, bts_score):
+    if pressure_score >= 1 and pressure_score >= max(commentary_score, bts_score):
         return "e"
-    
-    # Pattern F: Behind-the-Scenes (536K, 487K, 226K views in real data)
-    if bts_score >= 5:
-        # Logistics/admin story that's not a scandal
-        if scandal_score < 3:
-            return "f"
-    
-    # Pattern D: commentary article with no actual rule violation in body
-    if commentary_score >= 2 and not actual_rule_break and scandal_score < 3:
-        if detail_score >= commentary_score and detail_score >= scandal_score:
-            return "c"
-        return "d"
-    
-    # Pattern E lower threshold: strong tension even if mixed
-    if pressure_score >= 3 and pressure_score >= max(scandal_score, detail_score, commentary_score, bts_score):
-        return "e"
-    
-    # Pattern F lower threshold: strong logistics signal
-    if bts_score >= 4 and bts_score >= max(scandal_score, pressure_score):
+    if bts_score >= 4 and bts_score >= commentary_score:
         return "f"
-    
-    # Decision: rule-break wins unless detail/emotion story clearly stronger
-    if actual_rule_break and (scandal_score >= max(detail_score, commentary_score, pressure_score, bts_score) or (scandal_score >= 2 and scandal_score > detail_score - 2)):
-        return "a"
-    
-    # Urgency check: if deadline/urgent words present, force Rule-Break (a)
-    if any(word in combined for word in ["deadline", "immediate", "now", "today", "countdown", "urgent", "last chance", "final hours", "HARI INI", "SEKARANG"]):
-        return "a"
-    
-    # Safe default: do not force Rule-Break framing onto ordinary reporting.
-    if commentary_score >= 1 and not actual_rule_break:
-        return "d"
-    return "c"
+    return "d"
 
 def _build_reference_data():
     """No external facts; article text is sole factual authority."""
@@ -2300,13 +2204,14 @@ A stance is optional; add one only when clearly marked as interpretation and sup
 
 
 def _generation_evidence_override():
-    return """GENERATION OVERRIDE: The assigned evidence lines are the only factual authority for each slide.
-ARTICLE_TITLE is a label, not evidence. If title and body/evidence differ, follow body/evidence and never repeat unsupported title wording.
-The arc template is structure only; it never authorizes facts, context, stakes, motives, reactions, or consequences outside assigned evidence lines.
+    return """GENERATION OVERRIDE: The full article fact packet is the factual authority.
+assigned evidence lines are the only factual authority for slide focus; full article remains factual authority for all claims and is not excluded.
+ARTICLE_TITLE is a label, not evidence. If title and body differ, follow body and never repeat unsupported title wording.
+The arc template is structure only; it never authorizes facts, context, stakes, motives, reactions, or consequences outside the full article.
 If source cannot support a complete sentence, omit that detail; do not pad with generic filler.
 Do not invent stakes, motives, consequences, reactions, or either/or outcomes.
 Do not turn a question, implication, possibility, or interpretation into a fact.
-Never output dangling quote fragments or unattributed 'it says'/'reads one reaction' clauses. Prefer a debatable S6 question grounded in the story's two sides when both are present in assigned evidence; fall back to a grounded takeaway if the source offers no two sides."""
+Never output dangling quote fragments or unattributed 'it says'/'reads one reaction' clauses. Prefer a debatable S6 question grounded in the story's two sides when both are present in the full article; fall back to a grounded takeaway if the source offers no two sides."""
 
 
 def _source_units(article_text, split_long=True):
@@ -2366,8 +2271,12 @@ def _ranked_evidence(article_text):
     return [unit for _, _, unit in sorted(ranked)]
 
 
-def _evidence_pack(article_text, limit=18):
-    return "\n".join(f"[E{i}] {unit}" for i, unit in enumerate(_ranked_evidence(article_text)[:limit], 1))
+def _evidence_pack(article_text, limit=None):
+    """Return full fact packet; limit is optional transport budget only."""
+    facts = _ranked_evidence(article_text)
+    if limit is not None:
+        facts = facts[:limit]
+    return "\n".join(f"[E{i}] {unit}" for i, unit in enumerate(facts, 1))
 
 
 def _evidence_plan(article_text):
@@ -2466,55 +2375,6 @@ def _high_risk_claim_allowed(text, source):
     return not _HIGH_RISK_CLAIM_RE.search(text) or any(name in source.lower() for name in _TIER_ONE_SOURCES)
 
 
-def _extractive_audit_errors(slides, article_text):
-    """Fail closed unless every fallback sentence is verbatim source text."""
-    errors = _slide_contract_errors(slides)
-    source_units = {" ".join(unit.lower().split()) for unit in _source_units(article_text)}
-    for i, slide in enumerate(slides[:6], 1):
-        text = slide.get("content", "").split("\n\nhttp", 1)[0]
-        for sentence in _source_units(text):
-            sentence = " ".join(sentence.lower().split())
-            if sentence and sentence not in source_units:
-                errors.append(f"S{i} extractive sentence not verbatim source")
-    return errors
-
-
-def _fallback_evidence(facts):
-    """Choose complete, compact source units for readable literal fallback."""
-    selected = []
-    for fact in facts:
-        words = re.findall(r"[A-Za-zÀ-ÿ0-9']+", fact)
-        attribution_only = bool(re.fullmatch(
-            r"[A-Z][A-Za-z .'-]+ (?:said|told|wrote|added|confirmed) [^.]+\.", fact))
-        quote_without_speaker = fact.lstrip().startswith(('"', '“'))
-        if (len(words) >= 8 and not attribution_only and not quote_without_speaker
-                and not _leading_fragment_reason(fact)):
-            selected.append(fact)
-    # ponytail: extractive only; add validated paraphrase when semantic verifier exists.
-    return sorted(selected, key=lambda fact: (abs(len(fact) - 180), len(fact)))
-
-
-def _fallback_role_evidence(facts, title=""):
-    """Pick literal fallback units with hard-news detail before commentary."""
-    candidates = _fallback_evidence(facts)
-    title_words = set(re.findall(r"[A-Za-zÀ-ÿ]{4,}", title.lower()))
-    positive = ("confirmed", "signed", "appointed", "won", "lost", "rejected",
-                "returned", "will", "decision", "deadline", "final", "match")
-    negative = ("why", "wrong track", "reminiscent", "analysis", "opinion", "column",
-                "likely", "could", "might", "suggests")
-    ranked = []
-    for position, fact in enumerate(candidates):
-        lower = fact.lower()
-        score = (sum(word in lower for word in positive) * 4 +
-                 sum(word in lower for word in title_words) * 2 -
-                 sum(word in lower for word in negative) * 4 +
-                 2 * bool(re.search(r"\b\d+(?:[.,]\d+)?\b|[£$€]", fact)))
-        ranked.append((-score, position, fact))
-    chosen = {fact for _, _, fact in sorted(ranked)[:12]}
-    # Keep article order after scoring; score only decides membership.
-    return [fact for fact in facts if fact in chosen]
-
-
 def _hard_news_adjustment(title, body):
     """Prefer reportable developments over opinion/profile framing."""
     text = f"{title} {body}".lower()
@@ -2522,62 +2382,6 @@ def _hard_news_adjustment(title, body):
                 "debut", "final", "result", "returns", "transfer")
     negative = ("why ", "wrong track", "reminiscent", "analysis", "opinion", "column", "profile")
     return 5 * sum(word in text for word in positive) - 8 * sum(word in text for word in negative)
-
-
-def _extractive_slides(article_text, url, title=""):
-    """Last-resort grounded draft. Must meet and be auditable against source contract."""
-    article_text = _story_text(article_text, title)
-    # Use complete source sentences only. Splitting long sentences at commas
-    # creates fragments that can exceed slide limits when paired and fail audit.
-    source_units = [unit for unit in _source_units(article_text, split_long=False)
-                    if len(unit) <= MAX_CHARS]
-    ranked_facts = _fallback_role_evidence(source_units, title)
-    fallback_facts = _fallback_evidence(source_units)
-    candidates = []
-    for fact in source_units:
-        if fact in ranked_facts or fact in fallback_facts:
-            candidates.append(fact)
-
-    # Choose six ordered pairs that fit slide limit. Fixed adjacent pairing
-    # rejected valid source pools when one long sentence sat beside another.
-    def pair_facts(start, pairs):
-        if len(pairs) == 6:
-            return pairs
-        if len(candidates) - start < (6 - len(pairs)) * 2:
-            return None
-        for first in range(start, len(candidates)):
-            for second in range(first + 1, len(candidates)):
-                if len(candidates[first]) + 1 + len(candidates[second]) > MAX_CHARS:
-                    continue
-                result = pair_facts(second + 1, pairs + [(candidates[first], candidates[second])])
-                if result:
-                    return result
-        return None
-
-    pairs = pair_facts(0, [])
-    if not pairs and len(candidates) >= 4:
-        # Fallback must still post when a source yields only 4-7 complete
-        # sentences (common in quote-heavy BBC pieces). Build six distinct
-        # ordered pairs covering all candidates evenly (circular neighbor
-        # pairing), but only pairs that fit the slide limit; never
-        # synthesize/split. Skip over-length pairs by advancing the window.
-        pairs = []
-        for i in range(6):
-            for step in range(1, len(candidates)):
-                a = candidates[(i) % len(candidates)]
-                b = candidates[(i + step) % len(candidates)]
-                if len(a) + 1 + len(b) <= MAX_CHARS:
-                    pairs.append((a, b))
-                    break
-        if len(pairs) < 6:
-            return None
-    if not pairs:
-        return None
-    # ARTICLE_TITLE is a label, not evidence. Never discard body facts because
-    # title/entity wording differs from source body.
-    slides = [{"title": f"S{i + 1}", "content": " ".join(pair), "_extractive": True}
-              for i, pair in enumerate(pairs)]
-    return slides if not _extractive_audit_errors(slides, article_text) else None
 
 
 _LEADING_FRAGMENT_RE = re.compile(
@@ -2622,7 +2426,7 @@ def _slide_contract_errors(slides, editorial=True):
     return errors
 
 
-def generate_slides(article_text, url, title="", source="", hooks="", cta_pattern="", tone="", pattern="a", evaluator_feedback="", evidence_plan=None, hook_variant="implication", element_guidance=""):
+def generate_slides(article_text, url, title="", source="", hooks="", cta_pattern="", tone="", pattern="d", evaluator_feedback="", evidence_plan=None, hook_variant="implication", element_guidance=""):
     """Call LLM to generate 6 editorial slides.
     If evaluator_feedback is provided, appends correction instructions to the prompt.
     Token budget: hard reject >80k chars input, warn >48k chars.
@@ -2725,7 +2529,7 @@ If source is insufficient return:
     arc_template = ""
     ref_data = _build_reference_data()
     source_name = source or url.split("/")[2] if url else ""
-    pattern_label = {'q':'Question+Reasons', 'a':'Rule-Break', 'b':'Contradiction', 'c':'Detail+Emotion', 'd':'Commentary', 'e':'Pressure-Cooker', 'f':'Behind-the-Scenes'}.get(pattern, 'Detail+Emotion')
+    pattern_label = {'d':'Commentary', 'e':'Pressure-Cooker', 'f':'Behind-the-Scenes'}[pattern]
 
     # ── RECENT LEARNINGS (auto-injected from engagement feedback loop) ──
     recent_learnings = _load_recent_learnings()
@@ -2733,7 +2537,7 @@ If source is insufficient return:
     # ── Build full system prompt: base + arc template + recent learnings ──
     hard_grounding = """
 ## NON-NEGOTIABLE SOURCE-ONLY OVERRIDE
-The article body and assigned evidence lines are the complete factual universe. Ignore all arc examples, reference data, general knowledge, title wording, and learned context. Every claim must be literal or a faithful, non-escalating paraphrase of its assigned evidence. Delete unsupported detail. If any slide needs a missing fact, return needs_more_source. Do not add fees, clubs, players, trophies, transfer interest, contract effects, motives, reactions, stakes, or outcomes unless explicit in assigned evidence.
+The full article fact packet is the complete factual universe. Assigned evidence lines set slide order and focus only; they are not an exclusive evidence boundary. Ignore all arc examples, reference data, general knowledge, title wording, and learned context. Every claim must be literal or a faithful, non-escalating paraphrase of the full article fact packet. Delete unsupported detail. If any slide needs a missing fact, return needs_more_source. Do not add fees, clubs, players, trophies, transfer interest, contract effects, motives, reactions, stakes, or outcomes unless explicit in the full article fact packet.
 """
     if recent_learnings:
         system = base + arc_template + hard_grounding + "\n\n## RECENT LEARNINGS (from engagement data)\n" + recent_learnings + "\n"
@@ -2760,7 +2564,7 @@ The article body and assigned evidence lines are the complete factual universe. 
     if fabrizio_voice:
         user += f"\n\n{fabrizio_voice}"
     if evaluator_feedback:
-        user += f"\n\n## SAFE REPAIR MODE\nThe previous draft was rejected for source drift. For flagged claims, copy the exact source wording or use a shorter sentence copied from assigned evidence. Rewrite S1 using exact source wording; if the source offers no tension, a plain factual statement is correct. Do not paraphrase flagged names, quantities, scope words such as every/all/first/finally, attribution, timing, motive, emotion, consequence, or quote. Do not add a fan verdict or CTA premise unless its factual premise is explicit in assigned evidence. If a slide cannot be written safely from assigned evidence, return needs_more_source.\n\n## EVALUATOR REJECTION\n{evaluator_feedback}\nRegenerate ALL 6 editorial slides. Remove every flagged claim; do not defend or reinterpret it."
+        user += f"\n\n## SAFE REPAIR MODE\nThe previous draft was rejected for source drift. For flagged claims, copy the exact source wording from the full article fact packet or use a shorter sentence copied from it. Rewrite S1 using exact source wording; if the source offers no tension, a plain factual statement is correct. Do not paraphrase flagged names, quantities, scope words such as every/all/first/finally, attribution, timing, motive, emotion, consequence, or quote. Do not add a fan verdict or CTA premise unless its factual premise is explicit in assigned evidence. If a slide cannot be written safely from assigned evidence, return needs_more_source.\n\n## EVALUATOR REJECTION\n{evaluator_feedback}\nRegenerate ALL 6 editorial slides. Remove every flagged claim; do not defend or reinterpret it."
 
     # ── TOKEN BUDGET GATE (final check after user message built) ──
     total_input_chars = len(system) + len(user)
@@ -2978,7 +2782,7 @@ def notify_telegram(text):
 
 # ── 6. TRACK ───────────────────────────────────────────────────────
 
-def track_post(title, url, source, root_id, permalink, hotness_score=0, article_published_ts=None, slides=None, engagement_trigger=None, pattern="a"):
+def track_post(title, url, source, root_id, permalink, hotness_score=0, article_published_ts=None, slides=None, engagement_trigger=None, pattern="d"):
     """Append post metadata, engagement trigger prediction, and exact published text."""
     try:
         with open(POSTED) as f:
@@ -3238,7 +3042,7 @@ def _generate_best(ranked, analytics_summary, hooks_str, cta_pattern, tone):
     article_text = ""
     image_url = ""
     url = ""
-    pattern = "a"  # default, always overwritten in loop when candidate valid
+    pattern = "d"  # active pattern fallback; overwritten when candidate valid
     best = None
     hook_variant = _select_hook_variant(analytics_summary, len(_ENGAGEMENT_RING.get("posts", [])))
     element_guidance, element_selection = _element_guidance(analytics_summary, len(_ENGAGEMENT_RING.get("posts", [])))
@@ -3278,7 +3082,7 @@ def _generate_best(ranked, analytics_summary, hooks_str, cta_pattern, tone):
         pattern = _select_viral_pattern(candidate, art_text)
         hook_variant = _select_hook_variant(analytics_summary, len(_ENGAGEMENT_RING.get("posts", [])) + candidate_idx)
         element_guidance, element_selection = _element_guidance(analytics_summary, len(_ENGAGEMENT_RING.get("posts", [])) + candidate_idx)
-        pattern_name = {'q': 'Q (Question+Reasons)', 'a': 'A (Rule-Break)', 'b': 'B (deprecated)', 'c': 'C (Detail+Emotion)', 'd': 'D (Commentary)', 'e': 'E (Pressure-Cooker)', 'f': 'F (Behind-the-Scenes)'}[pattern]
+        pattern_name = {'d': 'D (Commentary)', 'e': 'E (Pressure-Cooker)', 'f': 'F (Behind-the-Scenes)'}[pattern]
         log(f"   🎯 Viral pattern: {pattern_name}")
         evidence_plan = candidate.get("_evidence_plan") or _evidence_plan(art_text)
         assigned_evidence = _assigned_evidence(art_text, evidence_plan) if evidence_plan else None
@@ -3310,7 +3114,7 @@ def _generate_best(ranked, analytics_summary, hooks_str, cta_pattern, tone):
                 if _LAST_GENERATION_FAILURE == "LLM_RATE_LIMITED":
                     _record_failure("LLM_RATE_LIMITED", candidate.get("source", ""), art_title)
                     rate_limited = True
-                    log("❌ Stop candidate churn after provider rate limit — trying literal fallback")
+                    log("❌ Stop candidate churn after provider rate limit — fail closed")
                     break
                 if gen_attempt == 1:
                     log(f"   ⚠️ LLM empty (attempt 1), retrying...")
@@ -3323,7 +3127,8 @@ def _generate_best(ranked, analytics_summary, hooks_str, cta_pattern, tone):
             editorial_slides = slides[:6]
             # Hard gate: S6 binary question only allowed when both sides are
             # grounded in assigned evidence. Strip ungrounded "Or ..." branch.
-            if assigned_evidence and _s6_strip_ungrounded_binary(editorial_slides, assigned_evidence):
+            # Check S6's second branch against full source, not slide-order hints.
+            if assigned_evidence and _s6_strip_ungrounded_binary(editorial_slides, {"slide_6": [art_text]}):
                 log("   🛡️ S6 binary question had no second-side evidence — stripped to grounded takeaway")
             slides_text = " ".join(s["content"] for s in editorial_slides)
             grounding_errors = grounding_check(slides_text, art_text, _extract_proper_nouns(art_text), _extract_stages(art_text))
@@ -3348,7 +3153,7 @@ def _generate_best(ranked, analytics_summary, hooks_str, cta_pattern, tone):
             if eval_decision == "ERROR":
                 _record_failure("EVALUATOR_UNAVAILABLE", candidate.get("source", ""), art_title)
                 rate_limited = any("429" in reason or "rate" in reason.lower() for reason in eval_reasons)
-                log("   ⏭️ Evaluator unavailable — skip LLM retry, use source-verbatim fallback")
+                log("   ⏭️ Evaluator unavailable — skip LLM retry, fail closed")
                 break
             if not _evaluator_accepts(eval_decision):
                 all_errors = "EVALUATOR: " + "; ".join(eval_reasons[:3])
@@ -3374,39 +3179,18 @@ def _generate_best(ranked, analytics_summary, hooks_str, cta_pattern, tone):
         if passed:
             break  # success, exit candidate loop
         if rate_limited:
-            break  # preserve provider cooldown; use only literal fallback
+            break  # preserve provider cooldown; fail closed
         # Reset for next candidate — backoff to avoid rate limit spiral
         slides = None
         all_errors = ""
         time.sleep(3 + random.random() * 2)  # 3-5s jitter between candidates
 
     if not passed:
-        # Last-resort source-verbatim fallback. It never adds facts and reuses
-        # the same two-sentence slide contract plus exact-source audit.
-        for candidate in ranked[:15]:
-            fallback = _extractive_slides(
-                candidate.get("_article_text", ""), candidate.get("url", ""), candidate.get("title", "")
-            )
-            if not fallback:
-                continue
-            slides = fallback
-            best = candidate
-            url = candidate.get("url", "")
-            image_url = candidate.get("_image_url", "") or candidate.get("image_url", "")
-            pattern = _select_viral_pattern(candidate, article_text)
-            passed = True
-            log(f"   ✅ Extractive fallback accepted: {candidate.get('title', '')[:80]}")
-            break
-        if passed:
-            _record_failure("LLM_GENERATION_FALLBACK", best.get("source", ""), best.get("title", ""))
-            log("   ✅ Source-verbatim fallback passed all checks")
-            llm_time = time.time() - t0
-        else:
-            # Editorial exhaustion is a normal no-post outcome, not a cron error.
-            # Next scheduled run gets a fresh candidate; fail closed, never publish.
-            _record_failure("GENERATION_FAILED_ALL_CANDIDATES")
-            log("⏸️ No source-grounded draft passed; skipping this cycle")
-            print("⏸️ Skip — no source-grounded draft passed", flush=True)
+        # Editorial exhaustion is a normal no-post outcome, not a cron error.
+        # Next scheduled run gets a fresh candidate; fail closed, never publish.
+        _record_failure("GENERATION_FAILED_ALL_CANDIDATES")
+        log("⏸️ No source-grounded draft passed; skipping this cycle")
+        print("⏸️ Skip — no source-grounded draft passed", flush=True)
 
     return {
         "passed": passed,
@@ -3525,9 +3309,8 @@ def main():
     # 2-3. Filter + score + pattern adjust + risk/score gates
     ranked, hotness, hooks_str, cta_pattern, tone = _rank_candidates(topics, analytics_summary)
 
-    # 4. Generate — try validated candidates in ranked order until one succeeds,
-    #    then literal source-verbatim fallback. Fail closed: never publish if
-    #    no source-grounded draft passed.
+    # 4. Generate — try validated candidates in ranked order. Fail closed:
+    #    never publish if no source-grounded draft passed.
     res = _generate_best(ranked, analytics_summary, hooks_str, cta_pattern, tone)
     if not res["passed"]:
         return

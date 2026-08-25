@@ -174,10 +174,10 @@ def test_track_post_persists_score_pattern_and_hook_variant(tmp_path, monkeypatc
     monkeypatch.setattr(mvp, "POSTED", str(path))
     slides = [{"content": "S1", "hook_variant": "detail", "_score": 77}]
     mvp.track_post("Test title", "https://example.com", "bbc", "id",
-                   "https://threads.com/p/id", slides=slides, pattern="c")
+                   "https://threads.com/p/id", slides=slides, pattern="d")
     row = __import__("json").loads(path.read_text())["topics"][0]
     assert row["score"] == 77
-    assert row["pattern"] == "c"
+    assert row["pattern"] == "d"
     assert row["hook_variant"] == "detail"
 
 
@@ -284,17 +284,6 @@ def test_commentary_article_does_not_use_rule_break_arc():
     assert mvp._select_viral_pattern(topic, body) == "d"
 
 
-def test_rule_violation_article_uses_rule_break_arc():
-    mvp = _load_mvp()
-    topic = {"title": "UEFA breaks its own regulation for final"}
-    body = (
-        "UEFA broke its own regulation by granting an exemption for the final. "
-        "The regulation normally prevents clubs from changing the designated venue. "
-        "Officials approved the exception after reviewing the request."
-    )
-    assert mvp._select_viral_pattern(topic, body) == "a"
-
-
 def test_shortlist_stores_story_text_and_evidence_plan(monkeypatch):
     mvp = _load_mvp()
     monkeypatch.setattr(mvp, "fetch_article", lambda url: (
@@ -363,7 +352,7 @@ def test_main_uses_one_candidate_and_one_final_evaluator():
     source = inspect.getsource(mvp._generate_best)
     assert "for article_attempt" not in source
     assert "for eval_round" not in source
-    assert "_extractive_slides" in source
+    assert "_extractive_slides" not in source
     assert source.count("evaluator_check(") == 1
 
 
@@ -448,11 +437,12 @@ def test_generation_evidence_override_blocks_arc_speculation():
     assert "Do not invent stakes, motives, consequences, reactions, or either/or outcomes" in rules
 
 
-def test_rate_limit_reaches_literal_fallback_without_more_llm_candidates():
+def test_rate_limit_fails_closed_without_more_llm_candidates():
     mvp = _load_mvp()
     source = inspect.getsource(mvp._generate_best)
     rate_block = source[source.index('if _LAST_GENERATION_FAILURE == "LLM_RATE_LIMITED"'):source.index('contract_errors = _slide_contract_errors')]
     assert 'rate_limited = True' in rate_block
+    assert 'fail closed' in rate_block
     assert 'sys.exit(1)' not in rate_block
     assert 'if rate_limited:' in source
 
@@ -475,68 +465,11 @@ def test_space_sentences_flows_naturally_and_keeps_url():
     assert mvp._space_sentences("Naik 1,2 persen.") == "Naik 1,2 persen."
 
 
-def test_verbatim_evaluator_approves_without_api():
-    mvp = _load_mvp()
-    decision, reasons = mvp.evaluator_check(
-        [{"content": "Exact source sentence.", "title": "S1"}],
-        "Exact source sentence.", "https://example.com", verbatim=True)
-    assert decision == "APPROVE"
-    assert reasons == ["verbatim source sentences"]
-
-
 def test_evidence_pack_is_numbered_and_preserves_source_sentences():
     mvp = _load_mvp()
     pack = mvp._evidence_pack("First fact happened. Second fact was reported. Short.")
     assert "[E1] First fact happened." in pack
     assert "[E2] Second fact was reported." in pack
-
-
-def test_extractive_slides_reject_one_sentence_per_slide():
-    mvp = _load_mvp()
-    # Fewer than 4 complete sentences: fallback must still reject (no posts
-    # from 1-3 sentence fragments).
-    article = " ".join(f"Source sentence number {i} has enough words to become a slide." for i in range(1, 4))
-    assert mvp._extractive_slides(article, "https://example.com") is None
-
-
-def test_extractive_slides_reuse_facts_when_few_sentences():
-    mvp = _load_mvp()
-    # 4-7 complete sentences: fallback reuses facts across slides instead of
-    # skipping entirely (fix 2026-08-19: quote-heavy BBC pieces were yielding
-    # <8 units and the pipeline posted nothing all hour).
-    article = " ".join(f"Source sentence number {i} has enough words to become a slide." for i in range(1, 7))
-    slides = mvp._extractive_slides(article, "https://example.com")
-    assert slides and not mvp._extractive_audit_errors(slides, article)
-
-
-def test_extractive_slides_skip_long_sentences_and_preserve_source_text():
-    mvp = _load_mvp()
-    url = "https://example.com/story"
-    long = "This source sentence is deliberately too long " + ("word " * 100) + "to fit a Threads slide."
-    valid = [f"Source sentence number {i} has enough words and remains short for a slide." for i in range(1, 13)]
-    article = " ".join([long, *valid])
-    slides = mvp._extractive_slides(article, url)
-    assert slides and not mvp._extractive_audit_errors(slides, article)
-
-
-def test_extractive_slides_ignore_long_complete_sentence_when_selecting_fallback():
-    mvp = _load_mvp()
-    url = "https://example.com/story"
-    long = "This complete source sentence is too long " + ("word " * 100) + "."
-    valid = [f"Clean source sentence {i} has enough words and remains short for a slide." for i in range(1, 13)]
-    slides = mvp._extractive_slides(" ".join([long, *valid]), url)
-    assert slides and not mvp._extractive_audit_errors(slides, " ".join([long, *valid]))
-
-
-def test_extractive_slides_repack_ordered_facts_when_adjacent_pair_is_too_long():
-    mvp = _load_mvp()
-    url = "https://example.com/story"
-    long_facts = ["Long source fact %s has enough detail to exceed half of the slide budget when paired." % i for i in (1, 2)]
-    short_facts = ["Short source fact %s has enough detail for literal fallback." % i for i in range(1, 13)]
-    article = " ".join(long_facts + short_facts)
-    slides = mvp._extractive_slides(article, url)
-    assert slides and not mvp._extractive_audit_errors(slides, article)
-    assert all(len(slide["content"]) <= mvp.MAX_CHARS for slide in slides[:6])
 
 
 def test_failure_telemetry_records_reason_code(tmp_path, monkeypatch):
@@ -549,47 +482,6 @@ def test_failure_telemetry_records_reason_code(tmp_path, monkeypatch):
     assert data[-1]["source"] == "bbc"
 
 
-def test_extractive_slides_need_twelve_source_sentences():
-    mvp = _load_mvp()
-    article = " ".join([
-        "Arsenal and Bruno Guimaraes appear in this only related source sentence.",
-        *[f"Clean source sentence {i} has enough words and remains literal article evidence." for i in range(1, 12)],
-    ])
-    assert mvp._extractive_slides(article, "https://example.com", "Arsenal Bruno Guimaraes")
-
-
-def test_extractive_fallback_reuses_facts_when_source_has_fewer_than_twelve():
-    mvp = _load_mvp()
-    article = " ".join(
-        f"Verified source sentence {i} contains enough detail for a literal fallback slide."
-        for i in range(1, 9)
-    )
-    slides = mvp._extractive_slides(article, "https://example.com/story")
-    assert slides and not mvp._extractive_audit_errors(slides, article)
-
-
-def test_extractive_fallback_drops_source_units_that_start_as_fragments():
-    mvp = _load_mvp()
-    article = " ".join([
-        "The Community Shield takes place before the Premier League season begins.",
-        "Since 1992 only eight winners have also lifted the league trophy that season.",
-        "The losing teams have won ten league titles in that period.",
-        "The upcoming season will provide another comparison between the finalists.",
-        "The winners have finished above the losers in 18 of 34 seasons.",
-        "The two teams have finished as the top two on ten occasions.",
-        "The previous league champions have won eight of the past twelve Shields.",
-        "The result therefore offers limited evidence about the season ahead.",
-        "And the source records the historical comparison rather than a prediction.",
-        "Raheem Sterling scored for City in the 2019 Shield match.",
-        "Cole Palmer scored for City in the 2023 game against Arsenal.",
-        "The match was decided after Arsenal lost on penalties.",
-        "The article compares the trophy result with the later league outcome.",
-    ])
-    slides = mvp._extractive_slides(article, "https://example.com/community-shield")
-    assert slides and not mvp._slide_contract_errors(slides)
-    assert all(not slide["content"].lstrip().startswith("And ") for slide in slides[:6])
-
-
 def test_source_units_keep_quote_together_and_drop_open_quote_fragment():
     mvp = _load_mvp()
     article = ('Iraola said, "We played a good first half. Right now we have work to do." '
@@ -597,47 +489,6 @@ def test_source_units_keep_quote_together_and_drop_open_quote_fragment():
     units = mvp._source_units(article)
     assert units == ['Iraola said, "We played a good first half. Right now we have work to do."',
                      'Liverpool face Como next weekend.']
-
-
-def test_fallback_evidence_rejects_attribution_only_and_quote_without_speaker():
-    mvp = _load_mvp()
-    facts = [
-        "Iraola said, \"We have plenty of work to do before the next match.\"",
-        "Iraola told LFC TV after the match.",
-        "\"We have work to do.\"",
-        *[f"Verified source fact {i} contains enough context for a clean slide." for i in range(1, 7)],
-    ]
-    selected = mvp._fallback_evidence(facts)
-    assert "Iraola told LFC TV after the match." not in selected
-    assert '"We have work to do."' not in selected
-    assert 'Iraola said, "We have plenty of work to do before the next match."' in selected
-
-
-def test_fallback_evidence_prefers_compact_complete_source_units():
-    mvp = _load_mvp()
-    long = "Player Name gave a very long source explanation " + ("with extra context " * 35) + "after the match."
-    facts = [
-        long,
-        *[f"Verified source fact {i} contains enough context for a clean carousel slide." for i in range(1, 7)],
-    ]
-    selected = mvp._fallback_evidence(facts)
-    assert long not in selected[:6]
-
-
-def test_fallback_role_evidence_prefers_story_details_and_keeps_source_units():
-    mvp = _load_mvp()
-    facts = [
-        "The manager discussed several issues at length during the interview.",
-        "The player signed a new contract on Tuesday after three months of negotiations with the club.",
-        "The decision followed three months of negotiations with the club.",
-        "Supporters will see the player return for the next league match.",
-        "The midfielder said the move was important for his career.",
-    ] + [f"Additional source fact {i} gives enough clear context about the club decision today." for i in range(1, 10)]
-    selected = mvp._fallback_role_evidence(facts, "player club contract")
-    assert len(selected) == 12
-    assert facts[1] in selected
-    assert facts[0] not in selected or selected.index(facts[1]) < selected.index(facts[0])
-    assert all(fact in facts for fact in selected)
 
 
 def test_hard_news_adjustment_penalizes_opinion_titles():

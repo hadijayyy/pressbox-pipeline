@@ -87,10 +87,10 @@ cover_image_keywords: 2-3 search terms (e.g. "Tuchel training kit England" or "t
 5. No number > wrong number.
 ```
 
-## Pattern-Specific Arc Template (Pattern A — used for dry-run)
+## Pattern-Specific Arc Template (legacy; not used in production)
 
 ```
-## ARC: Rule-Break (Pattern A)
+## ARC: Rule-Break (Pattern A, retired)
 S1 = VIRAL HOOK: "[Authority] just [broke/violated] its own [rule] for [Team A] vs [Team B]. [Concrete detail] — [Binary Q with irony/venue twist]"
 EXACTLY 2 sentences. Example: "FIFA just broke its own golden rule for England vs Argentina. The Mercedes-Benz logo stays — engineering nightmare or sponsor snub?"
 
@@ -108,7 +108,7 @@ S6 = BINARY: Question about interpretation or consequences using irony/venue twi
 ```
 Title: Leandro Paredes refuses to apologise for World Cup final 'punches' as FIFA overturn red
 
-Viral Pattern selected: Rule-Break (scandal)
+Viral Pattern selected: Rule-Break (retired; do not select)
 
 ## FACTUAL REFERENCE DATA (ground truth for all math)
 Current date: Tuesday, July 21, 2026
