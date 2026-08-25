@@ -576,8 +576,45 @@ SENTENCE_COUNTS = {1:(1,3), 2:(2,4), 3:(2,4), 4:(1,4), 5:(2,4), 6:(2,4)}
 os.makedirs(f"{HOME}/.hermes/pressbox", exist_ok=True)
 
 env = load_env()
-MISTRAL_KEY = env.get("MISTRAL_API_KEY", "")
+# Use Hermes gateway like Budakorporat; direct Mistral remains legacy fallback.
+LLM_KEY = (env.get("HERMES_CUSTOM_43_157_200_187_20128_API_KEY")
+           or env.get("MISTRAL_API_KEY", ""))
+LLM_BASE_URL = env.get("PRESSBOX_LLM_BASE_URL", "http://127.0.0.1:20128/v1").rstrip("/")
+LLM_MODEL = env.get("PRESSBOX_LLM_MODEL", "Terra")
+MISTRAL_KEY = LLM_KEY  # compatibility for existing tests and fail-closed checks
 UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
+
+def _llm_chat(messages, max_tokens, temperature=0.1):
+    """Hermes-compatible non-stream request; caller owns JSON/quality gates."""
+    return requests.post(
+        f"{LLM_BASE_URL}/chat/completions",
+        headers={"Authorization": f"Bearer {LLM_KEY}", "Content-Type": "application/json"},
+        json={"model": LLM_MODEL, "messages": messages,
+              "max_tokens": max_tokens, "temperature": temperature},
+        timeout=120)
+
+
+def _llm_content(response):
+    """Extract normal JSON or first SSE/NDJSON object from gateway response."""
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = None
+    if isinstance(payload, dict):
+        return payload["choices"][0]["message"]["content"].strip()
+    for line in response.text.splitlines():
+        line = line.strip()
+        if line.startswith("data:"):
+            line = line[5:].strip()
+        if not line or line == "[DONE]":
+            continue
+        try:
+            obj = json.loads(line)
+            return obj["choices"][0]["message"]["content"].strip()
+        except (ValueError, KeyError, IndexError, TypeError):
+            continue
+    raise ValueError("LLM response has no message content")
 
 # ── 1. SCRAPE ───────────────────────────────────────────────────────
 
@@ -1917,15 +1954,13 @@ def evaluator_check(slides, article_text, url, assigned_evidence=None):
         return "ERROR", ["token budget exceeded in evaluator"]
 
     try:
-        r = requests.post(
-            "https://api.mistral.ai/v1/chat/completions",
-            headers={"Authorization": f"Bearer {MISTRAL_KEY}", "Content-Type": "application/json"},
-            json=_evaluator_request_payload(system, user),
-            timeout=30)
+        r = _llm_chat(
+            [{"role": "system", "content": system}, {"role": "user", "content": user}],
+            max_tokens=800, temperature=0.0)
         if r.status_code != 200:
-            _log_llm("pb-ev", "evaluator_check", total_input, 0, False, "mistral-small-latest", f"HTTP_{r.status_code}")
+            _log_llm("pb-ev", "evaluator_check", total_input, 0, False, LLM_MODEL, f"HTTP_{r.status_code}")
             return "ERROR", [f"evaluator HTTP {r.status_code}"]
-        content = r.json()["choices"][0]["message"]["content"].strip()
+        content = _llm_content(r)
         # Parse JSON response
         candidate = re.sub(r"^```(?:json)?\s*", "", content)
         candidate = re.sub(r"\s*```$", "", candidate)
@@ -2274,11 +2309,46 @@ def _ranked_evidence(article_text):
 
 
 def _evidence_pack(article_text, limit=None):
-    """Return full fact packet; limit is optional transport budget only."""
+    """Return numbered fact packet; IDs support deterministic coverage audits."""
     facts = _ranked_evidence(article_text)
     if limit is not None:
         facts = facts[:limit]
     return "\n".join(f"[E{i}] {unit}" for i, unit in enumerate(facts, 1))
+
+
+def _coverage_contract_errors(data, article_text, slides):
+    """Validate Budakorporat-style fact-ID coverage metadata before other gates."""
+    coverage = data.get("coverage") if isinstance(data, dict) and "coverage" in data else data
+    if not isinstance(coverage, dict):
+        return ["COVERAGE_CONTRACT_FAILURE: missing coverage"]
+    facts = _ranked_evidence(article_text)
+    valid_ids = {f"E{i}" for i in range(1, len(facts) + 1)}
+    slide_map = coverage.get("slides")
+    critical = coverage.get("critical_ids", [])
+    if not isinstance(slide_map, dict) or not isinstance(critical, list):
+        return ["COVERAGE_CONTRACT_FAILURE: invalid coverage shape"]
+    errors = []
+    for i, slide in enumerate(slides, 1):
+        ids = slide_map.get(str(i), slide_map.get(f"slide_{i}"))
+        if not isinstance(ids, list) or not ids:
+            errors.append(f"COVERAGE_MISSING_S{i}")
+            continue
+        unknown = [item for item in ids if item not in valid_ids]
+        if unknown:
+            errors.append(f"COVERAGE_UNKNOWN_S{i}: {','.join(map(str, unknown))}")
+        evidence = " ".join(facts[int(item[1:]) - 1] for item in ids
+                            if isinstance(item, str) and re.fullmatch(r"E\d+", item)
+                            and int(item[1:]) <= len(facts))
+        overlap = len(_claim_tokens(slide.get("content", "")) & _claim_tokens(evidence))
+        if overlap < 2:
+            errors.append(f"COVERAGE_UNSUPPORTED_S{i}")
+    unknown_critical = [item for item in critical if item not in valid_ids]
+    if unknown_critical:
+        errors.append("COVERAGE_UNKNOWN_CRITICAL: " + ",".join(map(str, unknown_critical)))
+    if critical and not any(item in set(sum((v for v in slide_map.values() if isinstance(v, list)), []))
+                            for item in critical):
+        errors.append("COVERAGE_MISSING_CRITICAL")
+    return errors
 
 
 def _evidence_plan(article_text):
@@ -2523,9 +2593,11 @@ Silently verify every factual statement is supported; uncertainty and attributio
 
 ## OUTPUT RULES
 Return exactly one valid JSON object. Use standard double-quoted keys and strings. Escape quotes within strings. No trailing commas, markdown, code fences, notes, scores, explanations, or text outside JSON. Use keys in exact order:
-{"slide_1":"","slide_2":"","slide_3":"","slide_4":"","slide_5":"","slide_6":"","caption":"","cover_image_keywords":""}
+{"slide_1":"","slide_2":"","slide_3":"","slide_4":"","slide_5":"","slide_6":"","caption":"","cover_image_keywords":"","coverage":{"slides":{"1":["E1","E2"],"2":["E3","E4"],"3":["E5","E6"],"4":["E7","E8"],"5":["E9","E10"],"6":["E11","E12"]},"critical_ids":["E1"]}}
+`coverage.slides` must map each slide to the numbered evidence IDs actually used. Use only IDs present in EVIDENCE_PACK. `critical_ids` lists material facts that must appear in at least one slide. Metadata does not replace grounded text; validator checks both.
+
 If source is insufficient return:
-{"slide_1":"needs_more_source","slide_2":"","slide_3":"","slide_4":"","slide_5":"","slide_6":"","caption":"","cover_image_keywords":""}
+{"slide_1":"needs_more_source","slide_2":"","slide_3":"","slide_4":"","slide_5":"","slide_6":"","caption":"","cover_image_keywords":"","coverage":{"slides":{},"critical_ids":[]}}
 """
 
     # Pattern templates are intentionally not injected. Source/evidence contract is canonical.
@@ -2557,7 +2629,7 @@ The full article fact packet is the complete factual universe. Assigned evidence
         f"  <selected_pattern>{pattern_label}</selected_pattern>\n"
         f"  <hook_variant>{hook_variant}: {_hook_variant_instruction(hook_variant)}</hook_variant>\n  <element_guidance>{element_guidance}</element_guidance>\n</request>\n\n"
         f"<primary_article>\n  <title>{title}</title>\n  <source_name>{source_name}</source_name>\n"
-        f"  <source_url>{url}</source_url>\n</primary_article>\n\n"
+        f"  <source_url>{url}</source_url>\n  <ARTICLE_BODY>\n{article_text}\n  </ARTICLE_BODY>\n</primary_article>\n\n"
         f"<EVIDENCE_PACK>\n{_evidence_pack(article_text)}\n</EVIDENCE_PACK>\n\n"
         f"<SLIDE_EVIDENCE>\n{assignments}\n</SLIDE_EVIDENCE>\n\n"
         "Build one story, not six reports. Each slide needs one or two complete sentences; one strong sentence beats filler. Use the full article fact packet as factual authority; assigned evidence sets slide order and focus only. State the strongest confirmed fact first. Use plain factual statements when source offers no explicit tension. Never invert a statistic, escalate scope words, infer motive or consequence, or add metaphor. S1-S6 must stay faithful, non-escalating paraphrases. When the source lists a set (pairings, fixtures, stats, names), either state the full list or explicitly mark it as an example; never present a partial list as the complete set. Do not write contrastive claims (no clash, without, lacked) unless the source itself states the absence.\n\n"
@@ -2585,13 +2657,9 @@ The full article fact packet is the complete factual universe. Assigned evidence
     while attempt <= 2:
         log(f"   LLM attempt {attempt}/2...")
         try:
-            r = requests.post(
-                "https://api.mistral.ai/v1/chat/completions",
-                headers={"Authorization": f"Bearer {MISTRAL_KEY}", "Content-Type": "application/json"},
-                json={"model":"mistral-large-latest","messages":[
-                    {"role":"system","content":system},{"role":"user","content":user}],
-                    "max_tokens":4000,"temperature":0.1,"stream":True},
-                timeout=120, stream=True)
+            r = _llm_chat(
+                [{"role": "system", "content": system}, {"role": "user", "content": user}],
+                max_tokens=4000, temperature=0.1)
 
             if r.status_code == 429:
                 wait = 2 ** attempt + random.random()
@@ -2622,17 +2690,7 @@ The full article fact packet is the complete factual universe. Assigned evidence
                 log(f"   ❌ HTTP {r.status_code} — non-transient, no retry")
                 return None
 
-            parts = []
-            for line in r.iter_lines():
-                if not line: continue
-                line = line.decode("utf-8")
-                if not line.startswith("data: ") or line[6:].strip() == "[DONE]": continue
-                try:
-                    chunk = json.loads(line[6:])
-                    delta = chunk.get("choices",[{}])[0].get("delta",{})
-                    if delta.get("content"): parts.append(delta["content"])
-                except: continue
-            content = "".join(parts).strip()
+            content = _llm_content(r)
             if not content:
                 # Empty response — non-transient, no retry
                 _log_llm(RUN_ID, "generate_slides", total_input_chars, 0, False, "mistral-large-latest", "EMPTY_RESPONSE")
@@ -2646,8 +2704,10 @@ The full article fact packet is the complete factual universe. Assigned evidence
             slides = []
             caption = ""
             hashtags = ""
+            coverage = None
             try:
                 data = json.loads(content, strict=False)
+                coverage = data.get("coverage") if isinstance(data, dict) else None
                 # Check for insufficient-article signal
                 s1 = data.get("slide_1", "").strip()
                 if s1.lower().startswith("needs_more_source"):
@@ -2680,7 +2740,13 @@ The full article fact packet is the complete factual universe. Assigned evidence
                 log(f"   ❌ Expected exactly 6 editorial slides, got {len(slides)}")
                 _log_llm(RUN_ID, "generate_slides", total_input_chars, 0, False, "mistral-large-latest", "INVALID_SLIDE_COUNT")
                 return None
+            if not isinstance(coverage, dict):
+                log("   ❌ Missing coverage metadata")
+                _log_llm(RUN_ID, "generate_slides", total_input_chars, 0, False, "mistral-large-latest", "MISSING_COVERAGE")
+                return None
             # Store caption/hashtags on slides for later use
+            # Coverage is mandatory metadata; system metadata stays separate from model-owned text.
+            slides[0]["_coverage"] = coverage
             if caption:
                 slides[0]["caption"] = caption
             if hashtags:
@@ -2933,6 +2999,9 @@ def _init_metrics():
     """Init Threads poster (for metrics) and pull engagement + analytics summary."""
     token, user_id = load_threads_token()
     poster = None
+    if DRY_RUN:
+        log("🔒 DRY RUN — metrics refresh skipped; durable state unchanged")
+        return get_analytics_summary()
     if token and user_id:
         try:
             from threads_poster import ThreadsPoster
@@ -3128,6 +3197,8 @@ def _generate_best(ranked, analytics_summary, hooks_str, cta_pattern, tone):
 
             contract_errors = _slide_contract_errors(slides)
             editorial_slides = slides[:6]
+            coverage_errors = _coverage_contract_errors(
+                editorial_slides[0].get("_coverage"), art_text, editorial_slides)
             # Hard gate: S6 binary question only allowed when both sides are
             # grounded in assigned evidence. Strip ungrounded "Or ..." branch.
             # Check S6's second branch against full source, not slide-order hints.
@@ -3137,7 +3208,7 @@ def _generate_best(ranked, analytics_summary, hooks_str, cta_pattern, tone):
             grounding_errors = grounding_check(slides_text, art_text, _extract_proper_nouns(art_text), _extract_stages(art_text))
             number_errors = number_grounding_check(slides_text, art_text, _build_reference_data())
             prevalidation_errors, claim_rows = _claim_audit(editorial_slides, art_text, art_url, assigned_evidence)
-            errors = contract_errors + grounding_errors + number_errors + prevalidation_errors
+            errors = coverage_errors + contract_errors + grounding_errors + number_errors + prevalidation_errors
             _write_claim_audit(claim_rows, "PREVALIDATION_REJECT" if prevalidation_errors else "PREVALIDATION_PASS", art_url, art_title)
             if errors:
                 all_errors = "; ".join(errors)
@@ -3205,6 +3276,7 @@ def _generate_best(ranked, analytics_summary, hooks_str, cta_pattern, tone):
         "hook_variant": hook_variant,
         "element_selection": element_selection,
         "llm_time": llm_time,
+        "article_text": article_text,
     }
 
 
@@ -3221,8 +3293,12 @@ def _finish(res, hotness, START):
     total = time.time() - START
 
     final_contract_errors = _slide_contract_errors(slides)
-    if final_contract_errors:
-        log(f"❌ Pipeline: final slide contract failed: {'; '.join(final_contract_errors)}")
+    final_coverage_errors = _coverage_contract_errors(
+        slides[0].get("_coverage") if slides else None,
+        res.get("article_text", ""), slides or [])
+    if final_contract_errors or final_coverage_errors:
+        final_errors = final_contract_errors + final_coverage_errors
+        log(f"❌ Pipeline: final slide contract failed: {'; '.join(final_errors)}")
         print("❌ Pipeline: final slide contract failed", flush=True)
         sys.exit(1)
 

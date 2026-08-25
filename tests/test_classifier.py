@@ -505,7 +505,22 @@ def test_hard_news_adjustment_penalizes_opinion_titles():
 def test_generation_temperature_is_low_for_factual_drafts():
     mvp = _load_mvp()
     source = inspect.getsource(mvp.generate_slides)
-    assert '"temperature":0.1' in source
+    assert "temperature=0.1" in source
+
+
+def test_llm_uses_hermes_gateway_contract():
+    mvp = _load_mvp()
+    source = inspect.getsource(mvp._llm_chat)
+    assert "LLM_BASE_URL" in source
+    assert "LLM_MODEL" in source
+    assert '"stream": True' not in source
+
+
+def test_generation_prompt_includes_full_article_body():
+    mvp = _load_mvp()
+    source = inspect.getsource(mvp.generate_slides)
+    assert "<ARTICLE_BODY>" in source
+    assert "full article fact packet" in source
 
 
 def test_narrative_fallback_keeps_source_order_after_compact_selection():
@@ -804,3 +819,28 @@ class TestS6BinaryGate:
         changed = mod._s6_strip_ungrounded_binary(slides, ev)
         assert changed is False
         assert slides[5]["content"] == "A question is allowed in S6."
+
+
+def test_coverage_contract_requires_grounded_ids_for_each_slide():
+    mvp = _load_mvp()
+    article = " ".join(
+        f"Verified source fact {i} names Arsenal and confirms event {i}."
+        for i in range(1, 13)
+    )
+    facts = mvp._ranked_evidence(article)
+    slides = [{"content": facts[i * 2] + " " + facts[i * 2 + 1]} for i in range(6)]
+    coverage = {
+        "slides": {str(i + 1): [f"E{i * 2 + 1}", f"E{i * 2 + 2}"] for i in range(6)},
+        "critical_ids": ["E1"],
+    }
+    assert mvp._coverage_contract_errors(coverage, article, slides) == []
+    del coverage["slides"]["6"]
+    assert "COVERAGE_MISSING_S6" in mvp._coverage_contract_errors(coverage, article, slides)
+
+
+def test_dry_run_skips_metrics_state_mutation(monkeypatch):
+    mvp = _load_mvp()
+    monkeypatch.setattr(mvp, "DRY_RUN", True)
+    monkeypatch.setattr(mvp, "get_analytics_summary", lambda: {"dry": True})
+    monkeypatch.setattr(mvp, "pull_engagement", lambda _: (_ for _ in ()).throw(AssertionError("metrics called")))
+    assert mvp._init_metrics() == {"dry": True}
