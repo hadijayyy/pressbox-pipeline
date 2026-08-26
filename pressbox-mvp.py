@@ -585,14 +585,17 @@ MISTRAL_KEY = LLM_KEY  # compatibility for existing tests and fail-closed checks
 UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
 
-def _llm_chat(messages, max_tokens, temperature=0.1):
+def _llm_chat(messages, max_tokens, temperature=0.1, json_mode=False):
     """Hermes-compatible non-stream request; caller owns JSON/quality gates."""
+    payload = {"model": LLM_MODEL, "messages": messages,
+               "max_tokens": max_tokens, "temperature": temperature}
+    if json_mode:
+        payload["response_format"] = {"type": "json_object"}
     return requests.post(
         f"{LLM_BASE_URL}/chat/completions",
         headers={"Authorization": f"Bearer {LLM_KEY}", "Content-Type": "application/json"},
-        json={"model": LLM_MODEL, "messages": messages,
-              "max_tokens": max_tokens, "temperature": temperature},
-        timeout=120)
+        json=payload,
+        timeout=(10, 60))
 
 
 def _llm_content(response):
@@ -1894,7 +1897,7 @@ def grounding_check(slides_text, article_text, article_names, article_stages):
 
 def _evaluator_request_payload(system, user):
     return {
-        "model": "mistral-small-latest",
+        "model": LLM_MODEL,
         "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
         "max_tokens": 800,
         "temperature": 0.1,
@@ -1956,7 +1959,7 @@ def evaluator_check(slides, article_text, url, assigned_evidence=None):
     try:
         r = _llm_chat(
             [{"role": "system", "content": system}, {"role": "user", "content": user}],
-            max_tokens=800, temperature=0.0)
+            max_tokens=800, temperature=0.0, json_mode=True)
         if r.status_code != 200:
             _log_llm("pb-ev", "evaluator_check", total_input, 0, False, LLM_MODEL, f"HTTP_{r.status_code}")
             return "ERROR", [f"evaluator HTTP {r.status_code}"]
@@ -1969,10 +1972,10 @@ def evaluator_check(slides, article_text, url, assigned_evidence=None):
         reasons = data.get("reasons", [])
         if decision not in ("APPROVE", "REVISE", "REJECT"):
             decision = "ERROR"
-        _log_llm("pb-ev", "evaluator_check", total_input, len(content) // 4, False, "mistral-small-latest", decision)
+        _log_llm("pb-ev", "evaluator_check", total_input, len(content) // 4, False, LLM_MODEL, decision)
         return decision, reasons
     except Exception as e:
-        _log_llm("pb-ev", "evaluator_check", total_input, 0, False, "mistral-small-latest", f"EXCEPTION_{type(e).__name__}")
+        _log_llm("pb-ev", "evaluator_check", total_input, 0, False, LLM_MODEL, f"EXCEPTION_{type(e).__name__}")
         return "ERROR", [f"evaluator error: {e}"]
 
 def _count_sentences(text):
@@ -2457,11 +2460,12 @@ def _hard_news_adjustment(title, body):
 
 
 _LEADING_FRAGMENT_RE = re.compile(
-    r"^(?:and|but|or|so|because|while|as|in|to|before|after)\b|"
+    r"^(?:and|but|or|so)\b|"
     r"^(?:he|she|they|it)\s+(?:said|added|noted|told)\b",
+    re.I,
 )
 _LEADING_FRAGMENT_RE_CONJ = re.compile(
-    r"^(?:and|but|or|so|because|while|as|in|to|before|after)\b",
+    r"^(?:and|but|or|so)\b",
     re.I,
 )
 
@@ -2515,7 +2519,7 @@ def generate_slides(article_text, url, title="", source="", hooks="", cta_patter
     article_text = _story_text(article_text, title)
     # Gate on article text alone (system prompt is ~1500 tokens = 6000 chars, stable)
     if _est_tokens(article_text) > _MAX_INPUT_CHARS // 4:
-        _log_llm(RUN_ID, "generate_slides", len(article_text), 0, False, "mistral-large-latest", "TOKEN_BUDGET_EXCEEDED")
+        _log_llm(RUN_ID, "generate_slides", len(article_text), 0, False, LLM_MODEL, "TOKEN_BUDGET_EXCEEDED")
         log(f"❌ Token budget exceeded: {_est_tokens(article_text)} tokens (max {_MAX_INPUT_CHARS//4})")
         return None
     # ── Build system prompt dynamically ──
@@ -2646,7 +2650,7 @@ The full article fact packet is the complete factual universe. Assigned evidence
     if total_input_chars > _WARN_INPUT_CHARS:
         log(f"⚠️ Input token warning: ~{total_input_chars // 4} tokens (>{_WARN_INPUT_CHARS // 4})")
     if total_input_chars > _MAX_INPUT_CHARS:
-        _log_llm(RUN_ID, "generate_slides", total_input_chars, 0, False, "mistral-large-latest", "TOKEN_BUDGET_EXCEEDED")
+        _log_llm(RUN_ID, "generate_slides", total_input_chars, 0, False, LLM_MODEL, "TOKEN_BUDGET_EXCEEDED")
         log(f"❌ Token budget hard cap exceeded: ~{total_input_chars // 4} tokens (max {_MAX_INPUT_CHARS // 4})")
         return None
 
@@ -2659,7 +2663,7 @@ The full article fact packet is the complete factual universe. Assigned evidence
         try:
             r = _llm_chat(
                 [{"role": "system", "content": system}, {"role": "user", "content": user}],
-                max_tokens=4000, temperature=0.1)
+                max_tokens=1800, temperature=0.1, json_mode=True)
 
             if r.status_code == 429:
                 wait = 2 ** attempt + random.random()
@@ -2669,7 +2673,7 @@ The full article fact packet is the complete factual universe. Assigned evidence
                     attempt += 1
                     continue
                 else:
-                    _log_llm(RUN_ID, "generate_slides", total_input_chars, 0, False, "mistral-large-latest", "RATE_LIMITED")
+                    _log_llm(RUN_ID, "generate_slides", total_input_chars, 0, False, LLM_MODEL, "RATE_LIMITED")
                     _LAST_GENERATION_FAILURE = "LLM_RATE_LIMITED"
                     log("   ❌ Rate-limited after retry, exiting")
                     return None
@@ -2682,18 +2686,18 @@ The full article fact packet is the complete factual universe. Assigned evidence
                     attempt += 1
                     continue
                 else:
-                    _log_llm(RUN_ID, "generate_slides", total_input_chars, 0, False, "mistral-large-latest", f"HTTP_{r.status_code}")
+                    _log_llm(RUN_ID, "generate_slides", total_input_chars, 0, False, LLM_MODEL, f"HTTP_{r.status_code}")
                     return None
             elif r.status_code != 200:
                 # Non-transient client error — do NOT retry
-                _log_llm(RUN_ID, "generate_slides", total_input_chars, 0, False, "mistral-large-latest", f"HTTP_{r.status_code}")
+                _log_llm(RUN_ID, "generate_slides", total_input_chars, 0, False, LLM_MODEL, f"HTTP_{r.status_code}")
                 log(f"   ❌ HTTP {r.status_code} — non-transient, no retry")
                 return None
 
             content = _llm_content(r)
             if not content:
                 # Empty response — non-transient, no retry
-                _log_llm(RUN_ID, "generate_slides", total_input_chars, 0, False, "mistral-large-latest", "EMPTY_RESPONSE")
+                _log_llm(RUN_ID, "generate_slides", total_input_chars, 0, False, LLM_MODEL, "EMPTY_RESPONSE")
                 log("   ❌ Empty LLM response — non-transient, no retry")
                 return None
             # Clean thinking tags
@@ -2738,11 +2742,11 @@ The full article fact packet is the complete factual universe. Assigned evidence
                         slides.append({"title": f"S{num}", "content": text})
             if len(slides) != 6:
                 log(f"   ❌ Expected exactly 6 editorial slides, got {len(slides)}")
-                _log_llm(RUN_ID, "generate_slides", total_input_chars, 0, False, "mistral-large-latest", "INVALID_SLIDE_COUNT")
+                _log_llm(RUN_ID, "generate_slides", total_input_chars, 0, False, LLM_MODEL, "INVALID_SLIDE_COUNT")
                 return None
             if not isinstance(coverage, dict):
                 log("   ❌ Missing coverage metadata")
-                _log_llm(RUN_ID, "generate_slides", total_input_chars, 0, False, "mistral-large-latest", "MISSING_COVERAGE")
+                _log_llm(RUN_ID, "generate_slides", total_input_chars, 0, False, LLM_MODEL, "MISSING_COVERAGE")
                 return None
             # Store caption/hashtags on slides for later use
             # Coverage is mandatory metadata; system metadata stays separate from model-owned text.
@@ -2759,16 +2763,28 @@ The full article fact packet is the complete factual universe. Assigned evidence
                     s["content"] = " ".join(parts[:3])
             # Log success
             output_tokens_est = sum(len(s["content"]) for s in slides) // 4
-            _log_llm(RUN_ID, "generate_slides", total_input_chars, output_tokens_est, False, "mistral-large-latest", "OK")
+            _log_llm(RUN_ID, "generate_slides", total_input_chars, output_tokens_est, False, LLM_MODEL, "OK")
             log(f"   ✅ Generated ({output_tokens_est} output tokens est, {total_input_chars // 4} input tokens est)")
             return slides
+        except requests.exceptions.RequestException as e:
+            # Transient network/timeout error — retry once
+            log(f"   ❌ LLM transport error: {e}")
+            _log_llm(RUN_ID, "generate_slides", total_input_chars, 0, False, LLM_MODEL, f"TRANSPORT_{type(e).__name__}")
+            if attempt < 2:
+                wait = 2 ** attempt + random.random()
+                log(f"   ⏭️ Transport error — backoff {wait:.1f}s")
+                time.sleep(wait)
+                attempt += 1
+                continue
+            return None
         except Exception as e:
+            # Unexpected non-transient error — no retry
             log(f"   ❌ LLM exception: {e}")
-            _log_llm(RUN_ID, "generate_slides", total_input_chars, 0, False, "mistral-large-latest", f"EXCEPTION_{type(e).__name__}")
+            _log_llm(RUN_ID, "generate_slides", total_input_chars, 0, False, LLM_MODEL, f"EXCEPTION_{type(e).__name__}")
             return None
 
     log("❌ Failed after 2 attempts")
-    _log_llm(RUN_ID, "generate_slides", total_input_chars, 0, False, "mistral-large-latest", "ALL_ATTEMPTS_FAILED")
+    _log_llm(RUN_ID, "generate_slides", total_input_chars, 0, False, LLM_MODEL, "ALL_ATTEMPTS_FAILED")
     return None
 
 # ── 5. POST TO THREADS ─────────────────────────────────────────────
