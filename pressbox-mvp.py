@@ -2575,7 +2575,7 @@ Never use: Did you know?; Let's dive in!; You won't believe; This changes everyt
 S1 Hook: lead with the most charged, stakes-carrying fact the source supports — a shock result, a falling-out, a high-stakes moment, a big-name clash, or a controversial number. Name the player, club, competition, or exact match moment. Frame it as a hard, punchy beat that makes a fan feel the stakes; surface the tension the source establishes, never invent or escalate it. If the source carries a twist, reversal, or surprising detail — even one stated later — lead with that tension instead of the flat announcement; never invent it.
 
 ## VIRAL PATTERN (learn from our top posts)
-Lead with the biggest name in the story and the injustice or controversy, not the abstract policy. Use stakes verbs: disrupt, cost, scramble, looming, threaten. Pack concrete, debatable specifics — exact numbers, names, dates, places, direct quotes. Facts people will want to argue in the comments are reach, not rage bait. Close with a real curiosity question about the stakes (never the banned list).
+Lead with the biggest name in the story and the real injustice or controversy the source establishes, not the abstract policy. Use stakes verbs: disrupt, cost, scramble, looming, threaten. Pack concrete, debatable specifics — exact numbers, names, dates, places, direct quotes. Facts people will want to argue in the comments are reach, not rage bait. Close with a real curiosity question about the stakes (never the banned list).
 
 S2 Evidence: one distinct source-backed detail, decision, quote, number, or scene.
 S3 Explanation: state what happened in plain language only when supplied by the source. Do not infer movement, mistake, motive, or significance.
