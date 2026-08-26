@@ -2224,11 +2224,11 @@ def _fabrizio_voice(article_text, title=""):
         "Keep it short, concrete, and confident only about what the source confirms. "
         f"Use the Fabrizio-style breaking voice graded by certainty: {opener}. "
         "Use plain literal wording: no invented metaphors, motives, stakes, consequences, or dramatic labels such as grenade, flex, cold war, weapon, gamble, spark, or planting a flag unless the source uses that meaning. Emoji allowed for emphasis. Numbers must come from the article.\n"
-        "FACT-ONLY S1-S6: every slide states only facts, quotes, or numbers from the full article fact packet; assigned evidence sets slide focus only. "
+        "S1-S6 must be source-backed: every figure and claim comes from the article, but you MAY frame source-supported facts with stakes, tension, and fan-engagement energy — lead with the biggest name, an injustice, a controversy, or a looming decision. "
         "Do not expand generic labels such as league, tournament, or competition into named competitions unless the article names them. "
-        "No editorial judgement, reaction, motive, emotion, consequence, metaphor, or dramatic label unless explicitly supported. "
+        "No invented judgement, motive, or consequence — but surface the emotion, stakes, or reaction the source itself establishes (a snub, a scramble, a sense of injustice); state it as a hard beat. "
         "Every judgement verb such as needed, fears, lacks, or threat must appear in the source; if it does not, delete it. "
-        "Prefer plain source-backed statements over fan verdicts, rating-style questions, or binary questions."
+        "Fan-engagement framing is welcome when source-supported; invite debate with a fact people will want to argue in the comments — that is reach, not rage bait. "
     )
 
 
@@ -2573,6 +2573,10 @@ Never use: Did you know?; Let's dive in!; You won't believe; This changes everyt
 
 ## SIX-SLIDE ARC
 S1 Hook: lead with the most charged, stakes-carrying fact the source supports — a shock result, a falling-out, a high-stakes moment, a big-name clash, or a controversial number. Name the player, club, competition, or exact match moment. Frame it as a hard, punchy beat that makes a fan feel the stakes; surface the tension the source establishes, never invent or escalate it. If the source carries a twist, reversal, or surprising detail — even one stated later — lead with that tension instead of the flat announcement; never invent it.
+
+## VIRAL PATTERN (learn from our top posts)
+Lead with the biggest name in the story and the injustice or controversy, not the abstract policy. Use stakes verbs: disrupt, cost, scramble, looming, threaten. Pack concrete, debatable specifics — exact numbers, names, dates, places, direct quotes. Facts people will want to argue in the comments are reach, not rage bait. Close with a real curiosity question about the stakes (never the banned list).
+
 S2 Evidence: one distinct source-backed detail, decision, quote, number, or scene.
 S3 Explanation: state what happened in plain language only when supplied by the source. Do not infer movement, mistake, motive, or significance.
 S4 Comparison or consequence: state a named comparison or confirmed impact only when explicit in the source. Otherwise give another distinct fact.
