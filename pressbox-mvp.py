@@ -317,9 +317,9 @@ def _element_guidance(summary, post_count=0):
 
 def _hook_variant_instruction(variant):
     return {
-        "implication": "Lead with strongest supported implication, not headline restatement.",
-        "contradiction": "Place two supported facts or claims in tension; do not invent contradiction.",
-        "detail": "Lead with strongest supported concrete detail, number, scene, or decision.",
+        "implication": "Lead with the stakes or implication that makes a fan feel it — drawn strictly from source. Why this moment matters, not just what happened.",
+        "contradiction": "Open with a direct clash of supported facts that makes a fan feel the tension — a snub, a reversal, a feud the source documents. Do not invent the contradiction.",
+        "detail": "Lead with the most striking supported detail, number, scene, or decision — the one that hits hardest. Let the fact carry the punch.",
     }.get(variant, "Lead with strongest supported hook.")
 
 from pressbox_common import WIB, HOME, POSTED, load_env, log, clean_words, is_similar, classify_topic_type
@@ -2568,11 +2568,11 @@ Return needs_more_source if body is missing, inaccessible, or headline-only; cen
 
 ## VOICE
 # Contract markers retained for tests: passionate fan analyst speaking directly after watching the match; Explain football actions in plain language; Replay-worthy detail; Never invent a benchmark; Use first-person editorial markers sparingly; Never use first person to claim eyewitness knowledge.
-Use natural global English. Say football, never soccer. Sound concise, concrete, and source-grounded. Report the strongest confirmed fact first; do not add a reaction, verdict, motive, emotion, consequence, or dramatic label unless the article explicitly supports it. Use direct address sparingly, only when natural and source-safe. Explain football actions only when supplied by the source. Name exact players, clubs, moments, numbers, and comparisons from the source. First-person markers such as "For me" or "In my eyes" are optional interpretation, never eyewitness knowledge or private emotion. Prefer precise literal wording over dramatic language. Tactical terms are allowed only when the source explains them. Emoji and all-caps emphasis are allowed for energy. Never invent figures or fabricate certainty; when a deal or fact is confirmed by the source you may use bold breaking-news language such as "HERE WE GO". No rage bait, fake suspense, generic engagement bait, or unsupported moral judgement.
+Use natural global English. Say football, never soccer. Sound concise, concrete, and source-grounded. Report the most charged confirmed fact first. You MAY surface the emotion, stakes, or consequence the source itself establishes — a furious reaction, a season on the line, a stunning upset — as a hard beat; never invent, infer, or escalate it beyond the source. Use direct address sparingly, only when natural and source-safe. Explain football actions only when supplied by the source. Name exact players, clubs, moments, numbers, and comparisons from the source. First-person markers such as "For me" or "In my eyes" are optional interpretation, never eyewitness knowledge or private emotion. Prefer precise literal wording over dramatic language. Tactical terms are allowed only when the source explains them. Emoji and all-caps emphasis are allowed for energy. Never invent figures or fabricate certainty; when a deal or fact is confirmed by the source you may use bold breaking-news language such as "HERE WE GO". No rage bait, fake suspense, generic engagement bait, or unsupported moral judgement.
 Never use: Did you know?; Let's dive in!; You won't believe; This changes everything; Only time will tell; Agree or disagree?
 
 ## SIX-SLIDE ARC
-S1 Hook: strongest confirmed fact. Name the player, club, competition, or exact match moment. A plain factual opener is preferred over a reaction.
+S1 Hook: lead with the most charged, stakes-carrying fact the source supports — a shock result, a falling-out, a high-stakes moment, a big-name clash, or a controversial number. Name the player, club, competition, or exact match moment. Frame it as a hard, punchy beat that makes a fan feel the stakes; surface the tension the source establishes, never invent or escalate it.
 S2 Evidence: one distinct source-backed detail, decision, quote, number, or scene.
 S3 Explanation: state what happened in plain language only when supplied by the source. Do not infer movement, mistake, motive, or significance.
 S4 Comparison or consequence: state a named comparison or confirmed impact only when explicit in the source. Otherwise give another distinct fact.
