@@ -801,6 +801,8 @@ def scrape_all():
             "goal": ex.submit(scrape_with_fingerprint, "goal", scrape_goal),
             "bbc": ex.submit(scrape_with_fingerprint, "bbc", scrape_rss, "https://feeds.bbci.co.uk/sport/football/rss.xml", "bbc", 20),
             "mirror": ex.submit(scrape_with_fingerprint, "mirror", scrape_rss, "https://www.mirror.co.uk/sport/football/?service=rss", "mirror", 7),
+            "guardian": ex.submit(scrape_with_fingerprint, "guardian", scrape_rss, "https://www.theguardian.com/football/rss", "guardian", 18),
+            "sky sports": ex.submit(scrape_with_fingerprint, "sky sports", scrape_rss, "https://www.skysports.com/rss/12040", "sky sports", 15),
 
         }
         for name, f in futs.items():
@@ -832,6 +834,8 @@ def scrape_all():
                 "goal": ex.submit(scrape_goal),
                 "bbc": ex.submit(scrape_rss, "https://feeds.bbci.co.uk/sport/football/rss.xml", "bbc", 20),
                 "mirror": ex.submit(scrape_rss, "https://www.mirror.co.uk/sport/football/?service=rss", "mirror", 7),
+                "guardian": ex.submit(scrape_rss, "https://www.theguardian.com/football/rss", "guardian", 18),
+                "sky sports": ex.submit(scrape_rss, "https://www.skysports.com/rss/12040", "sky sports", 15),
 
             }
             for name, f in futs.items():
@@ -2441,8 +2445,8 @@ def _story_text(article_text, title):
     return filtered if len(filtered) >= 1800 and len(related) >= 10 else article_text
 
 
-_TIER_ONE_SOURCES = ("bbc", "reuters", "associated press", "ap news", "sky sports", "the athletic", "official", "fifa", "uefa")
-_HIGH_RISK_CLAIM_RE = re.compile(r"(?:[£$€]\s*\d|\b\d[\d.,]*\s*(?:m|million|bn|billion)\b|\b(?:transfer fee|fee|valuation|charged|convicted|sentenced|lawsuit)\b)", re.I)
+_TIER_ONE_SOURCES = ("bbc", "reuters", "associated press", "ap news", "sky sports", "the athletic", "official", "fifa", "uefa", "guardian", "the guardian")
+_HIGH_RISK_CLAIM_RE = re.compile(r"(?:[£$€]\s*\d|\b\d[\d.,]*\s*(?:m|million|bn|billion)\b|\b(?:transfer fee|convicted|sentenced|lawsuit)\b)", re.I)
 
 
 def _high_risk_claim_allowed(text, source):
