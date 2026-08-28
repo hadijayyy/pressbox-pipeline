@@ -35,7 +35,10 @@ def test_system_prompt_enforces_untrusted_source_contract():
     assert '"For me" or "In my eyes"' in text
     assert "Never use first person to claim eyewitness knowledge" in text
     assert "SAFE REPAIR MODE" in text
-    assert "copy the exact source wording" in text
+    assert "copy the exact source wording from the full article fact packet" in text
+    assert "LITERAL REPAIR ANCHORS" in text
+    assert "'looking like' is not 'only'" in text
+    assert "Never swap which entity owns a number." in text
 
 
 def test_malformed_llm_output_stops_generation_attempt():

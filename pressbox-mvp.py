@@ -2773,7 +2773,11 @@ The full article fact packet is the complete factual universe. Assigned evidence
     if fabrizio_voice:
         user += f"\n\n{fabrizio_voice}"
     if evaluator_feedback:
-        user += f"\n\n## SAFE REPAIR MODE — HIGHEST PRIORITY\nIgnore style, arc, hook, CTA, and engagement instructions above for this repair. For every flagged claim, copy the exact source wording from the full article fact packet, or delete the entire sentence. Use source wording over style. Do not paraphrase flagged names, quantities, scope words, attribution, timing, motive, emotion, consequence, or quote. No metaphors, dramatic labels, fan verdicts, speculation, binary questions, or unsupported premises. S6 must be one plain source-backed sentence, not a question. If no exact source sentence supports a slide, return needs_more_source.\n\n## EVALUATOR REJECTION\n{evaluator_feedback}\nRegenerate ALL 6 editorial slides. Remove every flagged claim; do not defend, reinterpret, or soften it."
+        repair_anchors = "\n".join(
+            f"S{i}: " + " || ".join(assigned_evidence[f"slide_{i}"])
+            for i in range(1, 7)
+        )
+        user += f"\n\n## SAFE REPAIR MODE — HIGHEST PRIORITY\nIgnore style, arc, hook, CTA, and engagement instructions above for this repair. Rebuild each slide from its literal repair anchors below. Use one anchor sentence per slide whenever possible; copy the exact source wording from the full article fact packet or delete the detail. Do not combine numbers, entities, quantities, scope words, attribution, timing, motive, emotion, or consequences from separate anchor sentences unless the source sentence itself combines them. Preserve uncertainty word-for-word: 'looking like' is not 'only'; 'could' is not 'will'. Never swap which entity owns a number. No metaphors, dramatic labels, fan verdicts, speculation, binary questions, or unsupported premises. S6 must be one plain source-backed sentence, not a question. If an anchor cannot support a complete slide, repeat no claim and return needs_more_source.\n\n## LITERAL REPAIR ANCHORS\n{repair_anchors}\n\n## EVALUATOR REJECTION\n{evaluator_feedback}\nRegenerate ALL 6 editorial slides. Remove every flagged claim; do not defend, reinterpret, or soften it."
 
     # ── TOKEN BUDGET GATE (final check after user message built) ──
     total_input_chars = len(system) + len(user)
