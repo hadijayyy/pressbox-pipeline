@@ -2,7 +2,7 @@
 
 Automated football content pipeline for [@parkthebus.football](https://www.threads.net/@parkthebus.football) on Threads.
 
-Scrapes football news from 3 sources, detects hot/viral topics via entity clustering + **Google Trends**, scores with a multi-layered engine, selects from **3 active viral content patterns**, generates 6-slide carousels via LLM (Mistral) with priority-guided prompt architecture and anti-hallucination grounding, and posts on schedule — fully automated with engagement feedback loop.
+Scrapes football news from 3 sources, detects hot/viral topics via entity clustering + **Google Trends**, scores with a multi-layered engine, selects from **6 viral content patterns**, generates 6-slide carousels via LLM (Mistral) with priority-guided prompt architecture and anti-hallucination grounding, and posts on schedule — fully automated with engagement feedback loop.
 
 ## How It Works
 
@@ -18,7 +18,10 @@ Scrapes football news from 3 sources, detects hot/viral topics via entity cluste
 │  3. HOT DETECT      2h persistent cache + entity clustering  │
 │                     (Union-Find) + GOOGLE TRENDS match       │
 │       ↓                                                      │
-│  4. PATTERN SELECT  D (Commentary, slams/warns) /            │
+│  4. PATTERN SELECT  A (Rule-Break, FIFA/UEFA/IFAB) /         │
+│                     B (Contradiction) /                      │
+│                     C (Detail+Emotion) /                     │
+│                     D (Commentary, slams/warns) /            │
 │                     E (Pressure Cooker) / F (Behind-Scenes)  │
 │       ↓                                                      │
 │  5. SCORE           16-component data-driven engine +        │
@@ -42,7 +45,8 @@ Scrapes football news from 3 sources, detects hot/viral topics via entity cluste
 │ 10. EVALUATOR       9-rule stance check (E/F + score≥70      │
 │                     skip) + 1 retry cycle                    │
 │       ↓                                                      │
-│ 11. FAIL CLOSED     If generation/evaluator fails, skip post │
+│ 11. FAIL CLOSED     If generation/evaluator fails, skip      │
+│                     cycle; never publish source text        │
 │       ↓                                                      │
 │ 12. POST            Threads API (S1→S6 reply_to_id chain     │
 │                     + image on S1 only)                      │
@@ -60,11 +64,14 @@ Cron: every 60m, watchdog at :15.
 
 | Pattern | Style | Trigger Words | Top Performance |
 |---------|-------|---------------|-----------------|
+| **A — Rule-Break** | Authority violates own rule/ethos | FIFA broke, UEFA waived, IFAB ignores | **12M+** (parkthebus) |
+| **B — Contradiction** | Opposing facts/claims exposed | contradicts, despite, while, yet | — |
+| **C — Detail+Emotion** | Data-driven human interest | contract, sacrifice, journey, fee | ~191K |
 | **D — Commentary** | Celebrity/pundit says something | slams, warns, hits out, reacts | ~403K |
 | **E — Pressure Cooker** 🔥 | Player/manager under fire | NOT happy, fumes, speaks out, defiant | **634K** (Bellingham slap) |
 | **F — Behind-the-Scenes** 🏗️ | Logistics, admin, VAR, ref | hotel, travel, fitness, decisions | **536K** (Norway hotel) |
 
-Pattern selection is automatic: keyword + signal detection, not random. Active set keeps D/E/F only. E and F are prioritised for post-tournament drama/news; D is safe fallback for ordinary commentary.
+Pattern selection is automatic: keyword + signal detection, not random. Pattern A is pre-filtered for authority (FIFA/UEFA/IFAB/FA) + violation keywords (rule/ban/charge/violation). E and F are prioritised for post-tournament drama/news.
 
 ## Google Trends Integration
 
@@ -138,7 +145,7 @@ Every pipeline run fetches **Google Trends UK RSS** and matches trending queries
 | Hot relevance check | Entity must appear in title first half |
 | Niche penalty | -30 for boots/kit/jersey/stadium |
 | Soft cap | Above 100: `100 + (score - 100) × 0.3` |
-| Failure guard | If generation/evaluator fails, skip post |
+| Generation failure | Skip cycle; no source-text fallback and no publish |
 
 **Effective score range:**
 
@@ -248,7 +255,31 @@ Viral ≠ manufactured. Every element below must be supported by the source or a
 
 ## Content Format
 
-6-slide Threads carousel with active pattern-specific arcs:
+6-slide Threads carousel with pattern-specific arcs:
+
+### Pattern A — Rule-Break arc
+- S1 = Hook: "[Authority] just broke its own rule for [Team A] vs [Team B]. [Concrete detail] — [binary Q with irony/venue twist]"
+- S2 = Physical detail (size, numbers, quotes, timeline)
+- S3 = Lore/context (existing rule, sponsors, why first)
+- S4 = Stakes escalation
+- S5 = TWIST + SOURCE
+- S6 = Binary Q (irony/venue twist)
+
+### Pattern B — Contradiction arc
+- S1 = Hook: "[Thing] is [claim] — but [contradicting evidence]. [Implication] — [binary Q]"
+- S2 = The contradiction (make gap explicit)
+- S3 = Evidence proving contradiction
+- S4 = Why it matters
+- S5 = TWIST + SOURCE
+- S6 = Binary Q on interpretation
+
+### Pattern C — Detail+Emotion arc
+- S1 = Hook: "[Concrete number/detail] about [person/team]. [Emotional stake] — [binary Q]"
+- S2 = Emotional entry point
+- S3 = Tangible evidence (data/timeline)
+- S4 = Stakeholder impact
+- S5 = TWIST + SOURCE
+- S6 = Binary Q on future implications
 
 ### Pattern D — Commentary arc
 - S1 = Hook: "[Name] just said [bold/controversial statement]. [Reason they have authority on this] — [binary Q]"
@@ -350,12 +381,12 @@ Feedback delay: ~12–24 hours.
 
 | # | Optimization | File | Impact |
 |---|--------------|------|--------|
-| 1 | Evaluator relax (E/F skip, score≥70 skip, retries 3→1) | pressbox-mvp.py:1493-1510 + 2269-2287 | -50s/post |
+| 1 | Evaluator/provider gates | pressbox-mvp.py | Fail closed on unavailable generation/evaluation |
 | 2 | Pattern E trigger 4→1 keywords, +35 new triggers | pressbox-mvp.py:1276-1289 | E posts surface more often |
-| 3 | Active pattern set D/E/F | pressbox-mvp.py:1944-1997 | Low/unused legacy patterns removed |
+| 3 | Pattern A pre-filter (authority+violation) | pressbox-mvp.py:1310-1322 | A share rises on FIFA/UEFA drama |
 | 4 | goal.com tier 1→2; bbc exact match added | pressbox_scoring.py:166-181 | BBC prioritised, goal demoted |
 | 5 | BBC credibility boost +5 + balance +5 | pressbox-mvp.py:956-960 + 1050-1055 | BBC share 8%→~18% |
-| 6 | Hot topic guard (skip extractive if hotness≥2) | pressbox-mvp.py:2302-2309 | Captures trending topics |
+| 6 | Hot topic guard | pressbox-mvp.py | Captures trending topics without bypassing generation gates |
 | 7 | Controversy 1.5× removed; conflict hook penalty -15 | pressbox-mvp.py:915-940 | Bias to viral hooks, away from formulaic |
 | 8 | (Posting hours: cron 60m, NOT 12-14 UTC) | — | Excluded per user instruction |
 | 9 | Predicted views in Szejay notify | pressbox-mvp.py:2357-2370 | Tracking + forecasting |
@@ -419,7 +450,7 @@ Score distribution: 27% (44/161) score ≥100 (viral candidates), 21% (33/161) s
 - **Token budget gate**: hard reject >80k chars input, warn >48k. Evaluator + writer calls capped; `fact packet` ≤4k tokens (title + URL + source + top 15 sentences — never raw body).
 - **LLM call journal**: every LLM call logged to `~/.hermes/pressbox/llm_calls.json` (run_id, stage, input chars, output tokens, model, status). Usage report: `python3 ~/.hermes/scripts/token-cost-report.py`.
 - **Transient-only retry**: only HTTP 429 / 5xx / timeout retried (max 1). Deterministic rejects (grounding, contract, editorial) never retried. Editorials are fail-closed — thresholds never lowered to fill a slot.
-- **Candidate fallback**: top-N (`[:3]`) candidate loop — if writer/validator rejects top article, next ranked article is tried. One failed writer call no longer kills the run.
+- **Candidate retry**: top-N (`[:3]`) candidate loop — if writer/validator rejects top article, next ranked article is tried. One failed writer call no longer kills the run; all failures skip cycle.
 - **Source fingerprint** (`source-fingerprints.json`): 3-title hash + 3h expiry + force fresh on any source skip. Detects RSS staleness/silent feed breakage; Mirror HTTP 202 CDN gate handled with short-UA retry.
 - **Volume gate**: 30-min minimum between posts (≤48/day).
 
