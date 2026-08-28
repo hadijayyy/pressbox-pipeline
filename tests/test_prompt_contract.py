@@ -1,13 +1,17 @@
 import inspect
+import sys
 from pathlib import Path
 
 import importlib.util
 
 
-SOURCE = Path(__file__).parents[1] / "pressbox-mvp.py"
+SOURCE = Path("/home/ubuntu/.hermes/scripts/pressbox-mvp.py")
+PIPELINE = Path("/home/ubuntu/pressbox-pipeline")
 
 
 def _load_mvp():
+    if str(PIPELINE) not in sys.path:
+        sys.path.insert(0, str(PIPELINE))
     spec = importlib.util.spec_from_file_location("pressbox_mvp", SOURCE)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -48,3 +52,62 @@ def test_evaluator_infrastructure_error_skips_llm_retry():
     block = source[source.index('eval_decision, eval_reasons = evaluator_check('):source.index('if not _evaluator_accepts(eval_decision):')]
     assert 'if eval_decision == "ERROR":' in block
     assert "fail closed" in block
+
+
+def test_winning_pattern_is_wired_into_generation_prompt():
+    mvp = _load_mvp()
+    source = inspect.getsource(mvp.generate_slides)
+    assert "arc_template = _winning_pattern_template(pattern)" in source
+    template = inspect.getsource(mvp._winning_pattern_template)
+    assert "biggest named entity" in template
+    assert "direct crisis" in template
+    assert "one concrete number" in template
+
+
+def test_winning_pattern_gate_checks_s1_minimum():
+    mvp = _load_mvp()
+    article = (
+        "Jamie Carragher faces being declared bankrupt over an unpaid tax bill "
+        "reportedly worth up to £800,000. His spokesperson said the matter remains disputed."
+    )
+    good = [{"content": "Jamie Carragher faces bankruptcy over an unpaid tax bill reportedly worth up to £800,000."}]
+    bad = [{"content": "A tax issue has emerged for a former player."}]
+    assert mvp._winning_pattern_errors(good, article) == []
+    assert len(mvp._winning_pattern_errors(bad, article)) >= 2
+
+
+def test_historical_milestone_selects_detail_emotion_pattern():
+    mvp = _load_mvp()
+    article = (
+        "Bournemouth will play in Europe for the first time in 127 years. "
+        "Sunderland are back in Europe since 1973 after the draw."
+    )
+    assert mvp._select_viral_pattern({"title": "Europa League draw"}, article) == "c"
+    assert "never a flat announcement" in mvp._winning_pattern_template("c")
+
+
+def test_story_opportunity_rewards_stakes_and_rejects_flat_announcement():
+    mvp = _load_mvp()
+    strong = {"title": "Sunderland return to Europe after 52 years", "source": "bbc",
+              "description": "They face elimination in the next round after a historic return."}
+    flat = {"title": "Europa League draw in full as clubs learn fate", "source": "bbc",
+            "description": "The draw results are confirmed and clubs learn fate."}
+    strong_score, strong_signals, strong_reject = mvp._story_opportunity(strong)
+    flat_score, flat_signals, flat_reject = mvp._story_opportunity(flat)
+    assert strong_score > flat_score
+    assert strong_signals["milestone"] >= 1
+    assert strong_signals["consequence"] >= 1
+    assert not strong_reject
+    assert flat_reject
+    assert flat_signals["generic_announcement"] == 1
+
+
+def test_story_opportunity_keeps_grounded_announcement_with_consequence():
+    mvp = _load_mvp()
+    topic = {"title": "UEFA confirms eight-match league format", "source": "bbc",
+             "description": "Clubs finishing 25th to 36th are eliminated from the competition."}
+    score, signals, reject = mvp._story_opportunity(topic)
+    assert score > 0
+    assert signals["numbers"] >= 1
+    assert signals["consequence"] >= 1
+    assert not reject

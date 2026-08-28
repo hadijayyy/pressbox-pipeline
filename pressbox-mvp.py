@@ -576,9 +576,8 @@ SENTENCE_COUNTS = {1:(1,3), 2:(2,4), 3:(2,4), 4:(1,4), 5:(2,4), 6:(2,4)}
 os.makedirs(f"{HOME}/.hermes/pressbox", exist_ok=True)
 
 env = load_env()
-# Use Hermes gateway like Budakorporat; direct Mistral remains legacy fallback.
-LLM_KEY = (env.get("HERMES_CUSTOM_43_157_200_187_20128_API_KEY")
-           or env.get("MISTRAL_API_KEY", ""))
+LLM_KEY = (env.get("MISTRAL_API_KEY")
+           or env.get("HERMES_CUSTOM_43_157_200_187_20128_API_KEY", ""))
 LLM_BASE_URL = env.get("PRESSBOX_LLM_BASE_URL", "http://127.0.0.1:20128/v1").rstrip("/")
 LLM_MODEL = env.get("PRESSBOX_LLM_MODEL", "cx/gpt-5.6-luna")
 MISTRAL_KEY = LLM_KEY  # compatibility for existing tests and fail-closed checks
@@ -1466,6 +1465,51 @@ _STATEMENT = ["linked", "eyeing", "interested", "keen", "plot", "awaits", "react
               "salary", "earns", "how much", "transfer route", "set to agree",
               "predicted xi", "transfer news:"]
 
+_STORY_STAKES = ("risk", "pressure", "stakes", "consequence", "survival", "eliminat",
+                 "qualif", "title", "trophy", "relegat", "promotion", "return",
+                 "first time", "historic", "history", "decade", "years away")
+_STORY_CONFLICT = tuple(_REVERSAL) + ("against", "clash", "battle", "rival", "face", "versus",
+                                      "uncertain", "uncertainty", "injury", "injured", "threat")
+_STORY_MILESTONE = ("first time", "for the first time", "since 19", "since 20", "years away",
+                    "historic", "record", "longest", "back in europe", "return to europe")
+_STORY_CONSEQUENCE = ("eliminat", "qualif", "relegat", "promotion", "survival", "must win",
+                      "could miss", "will face", "next round", "knockout", "out of")
+_GENERIC_ANNOUNCEMENT = ("announces", "announcement", "confirmed", "learn fate", "in full",
+                         "reveals", "lists", "draw results")
+
+
+def _story_signal(text, words, cap):
+    return min(cap, sum(1 for word in words if word in text))
+
+
+def _story_opportunity(t):
+    """Score source-backed story potential; return total, signals, hard_reject."""
+    title_raw = (t.get("title") or "").strip()
+    title = title_raw.lower()
+    body = " ".join(str(t.get(k) or "") for k in ("description", "content", "body")).lower()
+    text = f"{title} {body}"
+    entities = re.findall(r"\b[A-Z][a-z]{2,}(?:\s+[A-Z][a-z]{2,})?\b", title_raw)
+    signals = {
+        "stakes": _story_signal(text, _STORY_STAKES, 5),
+        "conflict": _story_signal(text, _STORY_CONFLICT, 5),
+        "milestone": _story_signal(text, _STORY_MILESTONE, 3),
+        "entities": min(3, len(entities)),
+        "numbers": min(3, len(re.findall(r"(?<![A-Za-z])\d[\d,.]*%?|[£€$]", text))),
+        "consequence": _story_signal(text, _STORY_CONSEQUENCE, 5),
+        "visual": min(3, 1 + int(any(w in text for w in ("match", "stadium", "player", "club", "draw")))),
+        "repetition": min(3, int(t.get("repetition", 0) or 0)),
+        "generic_announcement": int(any(w in title for w in _GENERIC_ANNOUNCEMENT)),
+        "weak_source": int((t.get("source") or "").lower() not in SOURCES),
+    }
+    positive = sum(signals[k] for k in ("stakes", "conflict", "milestone", "entities", "numbers", "consequence", "visual"))
+    penalties = signals["repetition"] + 4 * signals["generic_announcement"] + 3 * signals["weak_source"]
+    score = positive - penalties
+    hard_reject = (
+        (signals["generic_announcement"] and positive < 8) or
+        (positive < 5 and signals["consequence"] == 0)
+    )
+    return score, signals, hard_reject
+
 def filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_summary=None, hotness=None, _last_sources=None):
     """Filter duplicates, sensitive content, score and rank.
     _last_sources: optional list of last 2 posted source names for cold-source rotation boost."""
@@ -1515,6 +1559,14 @@ def filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_su
         # Score: base v17 + pipeline bonuses
         s = base_score_topic(t)
         if s == -1: continue  # excluded by keywords
+        story_score, story_signals, story_reject = _story_opportunity(t)
+        if story_reject:
+            log(f"   🗑️ Story opportunity: skipped flat announcement '{title[:60]}'")
+            continue
+        s += story_score
+        t["_story_opportunity"] = story_score
+        t["_story_signals"] = story_signals
+        log(f"   📚 Story opportunity: +{story_score} {story_signals} for '{title[:50]}'")
         
         # Score auto-tuning: apply learned multipliers
         tuning = analytics_summary.get("score_tuning", {}) if analytics_summary else {}
@@ -1986,10 +2038,7 @@ def _count_sentences(text):
     return len([s for s in re.split(r'(?<=[.!?])\s+', text.strip()) if len(s.strip()) > 5])
 
 def _select_viral_pattern(topic, article_text):
-    """Select from active patterns only: D, E, F.
-
-    A/C were low-performing; B/Q had no usable production cohort.
-    """
+    """Select winning pattern from source-backed editorial signals."""
     title = (topic.get("title") or "").lower()
     text = article_text.lower()[:2000]
     combined = title + " " + text
@@ -2017,6 +2066,12 @@ def _select_viral_pattern(topic, article_text):
     tension_match = sum(2 for w in tension_words if w in title)
     pressure_score = sum(1 for w in pressure_words if w in combined) + tension_match
 
+    # Historical milestones need detail + emotion, not generic commentary.
+    milestone_words = ["first time", "for the first time", "since 19", "since 20",
+                       "return to europe", "back in europe", "historic", "history",
+                       "127 years", "100 years"]
+    milestone_score = sum(1 for w in milestone_words if w in combined)
+
     # F: behind the scenes.
     bts_words = ["hotel", "travel", "stadium", "weather", "referee", "ref", "var",
                  "injury", "squad", "lineup", "starting xi", "selection", "tactics",
@@ -2032,11 +2087,70 @@ def _select_viral_pattern(topic, article_text):
     if had_bts_title:
         bts_score += 2
 
+    if milestone_score >= 1 and milestone_score >= max(commentary_score, pressure_score, bts_score):
+        return "c"
     if pressure_score >= 1 and pressure_score >= max(commentary_score, bts_score):
         return "e"
     if bts_score >= 4 and bts_score >= commentary_score:
         return "f"
     return "d"
+
+
+def _winning_pattern_template(pattern):
+    """Inject active winning structure without overriding source safety."""
+    templates = {
+        "c": """## WINNING PATTERN — DETAIL + EMOTION
+Lead with the source-backed milestone, reversal, or human stake — never a flat announcement. Put the named club or player and the concrete historical detail in S1. Make the reader feel why the fact matters using only explicit source wording. Build one story: milestone hook → draw or decision evidence → named context → confirmed consequence → strongest remaining detail → grounded payoff. If the source has no explicit emotional or consequence language, use the milestone as the tension and omit unsupported emotion.""",
+        "d": """## WINNING PATTERN — COMMENTARY
+Build S1 in this order when the source supports each element: biggest named entity; direct crisis or pressure or controversy; one concrete number; unfinished source-backed consequence. Put the named entity and crisis in the first sentence. Use the number in S1 when the article contains one. Leave consequence unresolved only when the source leaves it unresolved. If an element is absent from the source, omit it rather than inventing one.""",
+        "e": """## WINNING PATTERN — PRESSURE-COOKER
+Build S1 in this order when the source supports each element: biggest named entity; direct crisis or pressure or controversy; one concrete number; unfinished source-backed consequence. Put the named entity and direct pressure in the first sentence. Use the number in S1 when the article contains one. Keep the unresolved consequence tied to the source. If an element is absent from the source, omit it rather than inventing one.""",
+        "f": """## WINNING PATTERN — BEHIND-THE-SCENES
+Build S1 in this order when the source supports each element: biggest named entity; direct crisis or pressure or controversy; one concrete number; unfinished source-backed consequence. Put the named entity and the source-supported pressure in the first sentence. Use the number in S1 when the article contains one. Keep the unresolved consequence factual. If an element is absent from the source, omit it rather than inventing one.""",
+    }
+    return templates.get(pattern, templates["d"])
+
+
+def _winning_pattern_errors(slides, article_text):
+    """Fail closed only on winning elements present in source."""
+    if not slides:
+        return ["WINNING_PATTERN: missing S1"]
+    s1 = (slides[0].get("content", "") if isinstance(slides[0], dict) else "").strip()
+    source = (article_text or "").strip()
+    if not s1 or not source:
+        return ["WINNING_PATTERN: missing S1 or source"]
+    source_lower, s1_lower = source.lower(), s1.lower()
+    first_sentence = re.split(r"(?<=[.!?])\s+", s1, maxsplit=1)[0].lower()
+    errors = []
+
+    entities = list(_extract_proper_nouns(source))
+    if entities and not any(name.lower() in first_sentence for name in entities):
+        errors.append("WINNING_PATTERN: S1 first sentence must lead with a named entity")
+
+    crisis_signals = (
+        "bankrupt", "bankruptcy", "crisis", "under fire", "under pressure", "controvers",
+        "unpaid", "investigation", "investigated", "suspended", "suspension", "banned",
+        "ban", "fired", "threat", "threatened", "risk", "collapse", "dispute", "tax bill",
+    )
+    source_crisis = [word for word in crisis_signals if word in source_lower]
+    if source_crisis and not any(word in first_sentence for word in source_crisis):
+        errors.append("WINNING_PATTERN: S1 must state source-backed crisis or pressure directly")
+
+    number_re = re.compile(r"(?<![A-Za-z])(?:[£$€]\s*)?\d[\d,.]*%?(?![A-Za-z])")
+    source_numbers = {re.sub(r"\D", "", match.group()) for match in number_re.finditer(source) if re.sub(r"\D", "", match.group())}
+    s1_numbers = {re.sub(r"\D", "", match.group()) for match in number_re.finditer(s1) if re.sub(r"\D", "", match.group())}
+    if source_numbers and not source_numbers.intersection(s1_numbers):
+        errors.append("WINNING_PATTERN: S1 must include one concrete source-backed number")
+
+    unresolved_signals = (
+        "could", "may", "might", "faces", "risk", "threat", "threatened", "set to",
+        "remains", "still", "pending", "next", "unless", "if ", "what happens",
+    )
+    source_unresolved = [word for word in unresolved_signals if word in source_lower]
+    if source_unresolved and not any(word in s1_lower for word in source_unresolved):
+        errors.append("WINNING_PATTERN: S1 must preserve source-backed unresolved consequence")
+    return errors
+
 
 def _build_reference_data():
     """No external facts; article text is sole factual authority."""
@@ -2324,7 +2438,6 @@ def _evidence_pack(article_text, limit=None):
 
 
 def _coverage_contract_errors(data, article_text, slides):
-    """Validate Budakorporat-style fact-ID coverage metadata before other gates."""
     coverage = data.get("coverage") if isinstance(data, dict) and "coverage" in data else data
     if not isinstance(coverage, dict):
         return ["COVERAGE_CONTRACT_FAILURE: missing coverage"]
@@ -2630,11 +2743,10 @@ If source is insufficient return:
 {"slide_1":"needs_more_source","slide_2":"","slide_3":"","slide_4":"","slide_5":"","slide_6":"","caption":"","cover_image_keywords":"","coverage":{"slides":{},"critical_ids":[]}}
 """
 
-    # Pattern templates are intentionally not injected. Source/evidence contract is canonical.
-    arc_template = ""
+    arc_template = _winning_pattern_template(pattern)
     ref_data = _build_reference_data()
     source_name = source or url.split("/")[2] if url else ""
-    pattern_label = {'d':'Commentary', 'e':'Pressure-Cooker', 'f':'Behind-the-Scenes'}[pattern]
+    pattern_label = {'c':'Detail + Emotion', 'd':'Commentary', 'e':'Pressure-Cooker', 'f':'Behind-the-Scenes'}[pattern]
 
     # ── RECENT LEARNINGS (auto-injected from engagement feedback loop) ──
     recent_learnings = _load_recent_learnings()
@@ -2769,6 +2881,11 @@ The full article fact packet is the complete factual universe. Assigned evidence
             if len(slides) != 6:
                 log(f"   ❌ Expected exactly 6 editorial slides, got {len(slides)}")
                 _log_llm(RUN_ID, "generate_slides", total_input_chars, 0, False, LLM_MODEL, "INVALID_SLIDE_COUNT")
+                return None
+            winning_errors = _winning_pattern_errors(slides, article_text)
+            if winning_errors:
+                log(f"   ❌ Winning pattern check failed: {'; '.join(winning_errors)}")
+                _log_llm(RUN_ID, "generate_slides", total_input_chars, 0, False, LLM_MODEL, "WINNING_PATTERN_REJECT")
                 return None
             if not isinstance(coverage, dict):
                 log("   ❌ Missing coverage metadata")
@@ -3196,7 +3313,7 @@ def _generate_best(ranked, analytics_summary, hooks_str, cta_pattern, tone):
         pattern = _select_viral_pattern(candidate, art_text)
         hook_variant = _select_hook_variant(analytics_summary, len(_ENGAGEMENT_RING.get("posts", [])) + candidate_idx)
         element_guidance, element_selection = _element_guidance(analytics_summary, len(_ENGAGEMENT_RING.get("posts", [])) + candidate_idx)
-        pattern_name = {'d': 'D (Commentary)', 'e': 'E (Pressure-Cooker)', 'f': 'F (Behind-the-Scenes)'}[pattern]
+        pattern_name = {'c': 'C (Detail + Emotion)', 'd': 'D (Commentary)', 'e': 'E (Pressure-Cooker)', 'f': 'F (Behind-the-Scenes)'}[pattern]
         log(f"   🎯 Viral pattern: {pattern_name}")
         evidence_plan = candidate.get("_evidence_plan") or _evidence_plan(art_text)
         assigned_evidence = _assigned_evidence(art_text, evidence_plan) if evidence_plan else None
@@ -3250,7 +3367,8 @@ def _generate_best(ranked, analytics_summary, hooks_str, cta_pattern, tone):
             grounding_errors = grounding_check(slides_text, art_text, _extract_proper_nouns(art_text), _extract_stages(art_text))
             number_errors = number_grounding_check(slides_text, art_text, _build_reference_data())
             prevalidation_errors, claim_rows = _claim_audit(editorial_slides, art_text, art_url, assigned_evidence)
-            errors = coverage_errors + contract_errors + grounding_errors + number_errors + prevalidation_errors
+            winning_errors = _winning_pattern_errors(editorial_slides, art_text)
+            errors = coverage_errors + contract_errors + grounding_errors + number_errors + prevalidation_errors + winning_errors
             _write_claim_audit(claim_rows, "PREVALIDATION_REJECT" if prevalidation_errors else "PREVALIDATION_PASS", art_url, art_title)
             if errors:
                 all_errors = "; ".join(errors)
@@ -3347,6 +3465,7 @@ def _finish(res, hotness, START):
     # 6. DRY RUN or POST
     if DRY_RUN:
         log(f"🔍 DRY RUN — {best['title']} ({len(slides)} slides)")
+        print(f"\n--- Story opportunity: {best.get('_story_opportunity', 0)} | {best.get('_story_signals', {})} ---")
         for i, s in enumerate(slides):
             print(f"\n--- Slide {i+1} ({s['title']}) ---\n{s['content']}")
         if slides and slides[0].get("caption"):
