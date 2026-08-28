@@ -2738,7 +2738,7 @@ If source is insufficient return:
     arc_template = _winning_pattern_template(pattern)
     ref_data = _build_reference_data()
     source_name = source or url.split("/")[2] if url else ""
-    pattern_label = {'c':'Detail + Emotion', 'd':'Commentary', 'e':'Pressure-Cooker', 'f':'Behind-the-Scenes'}[pattern]
+    pattern_label = {'a':'Rule-Break / Exemption', 'c':'Detail + Emotion', 'd':'Commentary', 'e':'Pressure-Cooker', 'f':'Behind-the-Scenes'}[pattern]
 
     # ── RECENT LEARNINGS (auto-injected from engagement feedback loop) ──
     recent_learnings = _load_recent_learnings()
