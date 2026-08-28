@@ -289,7 +289,7 @@ class ThreadsPoster:
             img = image_urls[i] if image_urls else None
             try:
                 post_id = self.post_single(text, reply_to_id=reply_to_id, image_url=img)
-            except ThreadsAPIError as e:
+            except (ThreadsAPIError, requests.RequestException) as e:
                 recovered = self._find_existing_reply(reply_to_id, text, img)
                 if recovered:
                     logger.warning("Recovered already-published part %d/%d after API error", i + 1, len(parts))
@@ -299,14 +299,14 @@ class ThreadsPoster:
                 try:
                     time.sleep(2)
                     post_id = self.post_single(text, reply_to_id=reply_to_id, image_url=img)
-                except ThreadsAPIError as retry_error:
+                except (ThreadsAPIError, requests.RequestException) as retry_error:
                     recovered = self._find_existing_reply(reply_to_id, text, img)
                     if recovered:
                         logger.warning("Recovered retry-published part %d/%d after API error", i + 1, len(parts))
                         results.append(recovered)
                         reply_to_id = recovered.post_id
                         continue
-                    retry_error.results = results
+                    setattr(retry_error, "results", results)
                     logger.error("Failed posting part %d/%d: %s", i + 1, len(parts), retry_error)
                     if stop_on_error:
                         logger.error(

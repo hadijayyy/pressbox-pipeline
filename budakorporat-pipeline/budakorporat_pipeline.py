@@ -305,7 +305,12 @@ def run(dry=False, use_llm=True):
         print(json.dumps({"target": USER, "dry_run": dry, "status": "NO_POST_LLM_DRAFT_INVALID"}))
         return
     if not image_url: raise RuntimeError("article hero image missing")
-    result = publish(parts, dry, image_url)
+    try:
+        result = publish(parts, dry, image_url)
+    except Exception as exc:
+        log.exception("publish failed; no state committed")
+        print(json.dumps({"target": USER, "dry_run": dry, "status": "NO_POST_PUBLISH_ERROR", "error": str(exc)}, ensure_ascii=False))
+        return
     if not dry:
         state.setdefault("posted", []).append(item["key"]); state["last"] = {"url": item["url"], "result": result, "ts": int(time.time())}; save_json(STATE, state)
     print(json.dumps({"target": USER, "dry_run": dry, "posts": result}, ensure_ascii=False))
