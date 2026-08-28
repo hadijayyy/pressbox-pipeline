@@ -2044,7 +2044,7 @@ def _select_viral_pattern(topic, article_text):
     combined = title + " " + text
     # A: rule-break / exemption reversal.
     rule_break_words = ("broke its own", "breaks its own", "regulation", "regulatory exemption", "rule violation")
-    if any(w in combined for w in rule_break_words):
+    if any(w in combined and not re.search(rf"\b(?:no|not|without)\s+(?:\w+\s+){{0,4}}{re.escape(w)}", combined) for w in rule_break_words):
         return "a"
 
     # D: commentary/opinion.
@@ -3309,7 +3309,7 @@ def _generate_best(ranked, analytics_summary, hooks_str, cta_pattern, tone):
         pattern = _select_viral_pattern(candidate, art_text)
         hook_variant = _select_hook_variant(analytics_summary, len(_ENGAGEMENT_RING.get("posts", [])) + candidate_idx)
         element_guidance, element_selection = _element_guidance(analytics_summary, len(_ENGAGEMENT_RING.get("posts", [])) + candidate_idx)
-        pattern_name = {'c': 'C (Detail + Emotion)', 'd': 'D (Commentary)', 'e': 'E (Pressure-Cooker)', 'f': 'F (Behind-the-Scenes)'}[pattern]
+        pattern_name = {'a': 'A (Rule-Break / Exemption)', 'c': 'C (Detail + Emotion)', 'd': 'D (Commentary)', 'e': 'E (Pressure-Cooker)', 'f': 'F (Behind-the-Scenes)'}[pattern]
         log(f"   🎯 Viral pattern: {pattern_name}")
         evidence_plan = candidate.get("_evidence_plan") or _evidence_plan(art_text)
         assigned_evidence = _assigned_evidence(art_text, evidence_plan) if evidence_plan else None
