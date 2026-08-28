@@ -2042,6 +2042,11 @@ def _select_viral_pattern(topic, article_text):
     title = (topic.get("title") or "").lower()
     text = article_text.lower()[:2000]
     combined = title + " " + text
+    # A: rule-break / exemption reversal.
+    rule_break_words = ("broke its own", "breaks its own", "regulation", "regulatory exemption", "rule violation")
+    if any(w in combined for w in rule_break_words):
+        return "a"
+
     # D: commentary/opinion.
     commentary_words = ["slam", "criticise", "criticize", "attack", "comment", "opinion",
                         "says", "claims", "blasts", "hits out", "tells", "reveals",
@@ -2127,28 +2132,15 @@ def _winning_pattern_errors(slides, article_text):
     if entities and not any(name.lower() in first_sentence for name in entities):
         errors.append("WINNING_PATTERN: S1 first sentence must lead with a named entity")
 
+    # Keep hard gate only for material legal/disciplinary crises. Generic tension
+    # belongs to model/editorial review; requiring it in S1 rejects grounded copy.
     crisis_signals = (
-        "bankrupt", "bankruptcy", "crisis", "under fire", "under pressure", "controvers",
-        "unpaid", "investigation", "investigated", "suspended", "suspension", "banned",
-        "ban", "fired", "threat", "threatened", "risk", "collapse", "dispute", "tax bill",
+        "bankrupt", "bankruptcy", "unpaid", "tax bill", "investigation",
+        "investigated", "suspended", "suspension", "banned", "ban",
     )
     source_crisis = [word for word in crisis_signals if word in source_lower]
     if source_crisis and not any(word in first_sentence for word in source_crisis):
         errors.append("WINNING_PATTERN: S1 must state source-backed crisis or pressure directly")
-
-    number_re = re.compile(r"(?<![A-Za-z])(?:[£$€]\s*)?\d[\d,.]*%?(?![A-Za-z])")
-    source_numbers = {re.sub(r"\D", "", match.group()) for match in number_re.finditer(source) if re.sub(r"\D", "", match.group())}
-    s1_numbers = {re.sub(r"\D", "", match.group()) for match in number_re.finditer(s1) if re.sub(r"\D", "", match.group())}
-    if source_numbers and not source_numbers.intersection(s1_numbers):
-        errors.append("WINNING_PATTERN: S1 must include one concrete source-backed number")
-
-    unresolved_signals = (
-        "could", "may", "might", "faces", "risk", "threat", "threatened", "set to",
-        "remains", "still", "pending", "next", "unless", "if ", "what happens",
-    )
-    source_unresolved = [word for word in unresolved_signals if word in source_lower]
-    if source_unresolved and not any(word in s1_lower for word in source_unresolved):
-        errors.append("WINNING_PATTERN: S1 must preserve source-backed unresolved consequence")
     return errors
 
 
