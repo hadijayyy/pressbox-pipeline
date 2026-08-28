@@ -2588,10 +2588,16 @@ Use natural global English. Say football, never soccer. Sound concise, concrete,
 Never use: Did you know?; Let's dive in!; You won't believe; This changes everything; Only time will tell; Agree or disagree?
 
 ## SIX-SLIDE ARC
-S1 Hook: lead with the most charged, stakes-carrying fact the source supports — a shock result, a falling-out, a high-stakes moment, a big-name clash, or a controversial number. Name the biggest-name actor (player + club + federation + political figure when the source carries them) so more people have a reason to click and reply. Frame it as a hard, punchy beat that makes a fan feel the stakes; surface the tension the source establishes, never invent or escalate it. If the source carries a twist, reversal, or surprising detail — even one stated later — lead with that tension instead of the flat announcement; never invent it.
+S1 Hook: lead with the most charged, stakes-carrying fact the source supports — a shock result, a falling-out, a high-stakes moment, a big-name clash, or a controversial number. Name the biggest-name actor (player + club + federation + political figure when the source carries them) so more people have a reason to click and reply. Frame it as a hard, punchy beat that makes a fan feel the stakes; surface the tension the source establishes, never invent or escalate it. If the source carries a twist, reversal, or surprising detail — even one stated later — lead with that tension instead of the flat announcement; never invent it. When the source carries a turning point or a withheld detail, open on a single curiosity sentence — name the biggest entity, the incident, and the gap in one line (climax before setup).
 
 ## VIRAL PATTERN (learn from our top posts)
 Lead with the biggest name in the story and the real injustice or controversy the source establishes, not the abstract policy. Name the ENEMY when the source does — federation, board, officials, a governing body — because conflict with an institution travels further than a plain result. Use stakes verbs: disrupt, cost, scramble, looming, threaten. Pack concrete, debatable specifics — exact numbers, names, dates, places, direct quotes. Frame stakes so they reach beyond hardcore fans: corruption, governance, money, power, fairness — not just player discipline. Facts people will want to argue in the comments are reach, not rage bait. Close with a real curiosity question about the stakes (never the banned list).
+
+## CURIOSITY GAP — withhold, don't spell out
+When the source genuinely withholds a detail (a fine amount, what happens next, who is next, a verdict pending), end on that gap instead of closing the loop. The withheld detail pulls the reader into the comments; a question they can argue beats a question they answer. Use 👀 or ⚠️ only when the source truly withholds it. Never invent or imply a withheld detail the source does not establish.
+
+## BREAKING-NEWS FORMAT (fresh incident)
+For a fresh incident the source reports as just-happened, open with 🚨 OFFICIAL or BREAKING, put the verdict in BOLD CAPS (FINED, BANNED, SACKED, OVERTURNED, CHARGED), pack the 5 W's in two lines, and close on the withheld detail. No preamble. Emoji and all-caps emphasis are earned by the source, not added for energy.
 
 S2 Evidence: one distinct source-backed detail, decision, quote, number, or scene.
 S3 Explanation: state what happened in plain language only when supplied by the source. Do not infer movement, mistake, motive, or significance.
