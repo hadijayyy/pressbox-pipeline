@@ -2,6 +2,7 @@
 """Standalone grounded Threads pipeline for @budakorporat_id."""
 from __future__ import annotations
 import argparse, hashlib, html, json, logging, os, re, sys, time
+from html.parser import HTMLParser
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
@@ -111,7 +112,58 @@ def collect() -> list[dict]:
     return sorted(out, key=lambda x: (x["score"], x.get("published", "")), reverse=True)
 
 
+class _ArticleTextParser(HTMLParser):
+    _skip = {"script", "style", "nav", "aside", "footer", "header", "form"}
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.active = False
+        self.depth = 0
+        self.skip = 0
+        self.parts = []
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        classes = (attrs.get("class") or "").lower().replace("-", "_")
+        is_body = tag == "article" or any(k in classes for k in ("article_body", "article_content", "story_body", "post_content", "entry_content"))
+        if is_body and not self.active:
+            self.active, self.depth = True, 1
+        elif self.active:
+            self.depth += 1
+        if self.active and tag in self._skip:
+            self.skip += 1
+
+    def handle_endtag(self, tag):
+        if self.active and tag in self._skip and self.skip:
+            self.skip -= 1
+        if self.active:
+            self.depth -= 1
+            if self.depth <= 0:
+                self.active = False
+
+    def handle_data(self, data):
+        if self.active and not self.skip and data.strip():
+            self.parts.append(data.strip())
+
+
+def _extract_article_text(raw: str) -> str:
+    parser = _ArticleTextParser()
+    parser.feed(raw)
+    return text(" ".join(parser.parts))
+
+
 def article_body(item: dict) -> str:
+    try:
+        raw = fetch(resolve_article_url(item)).decode("utf-8", "replace")
+        body = _extract_article_text(raw)
+        if len(body) < 200:
+            raise RuntimeError("full article body is missing or too thin")
+        return body[:12000]
+    except Exception as exc:
+        raise RuntimeError("full article extraction failed") from exc
+
+
+def _legacy_article_body_removed(item: dict) -> str:
     try:
         raw = fetch(item["url"]).decode("utf-8", "replace")
         metas = re.findall(r'<meta\b[^>]*\b(?:name|property)=["\'](?:description|og:description)["\'][^>]*\bcontent=["\']([^"\']+)', raw, re.I)
@@ -159,42 +211,49 @@ LLM_MODEL = os.environ.get("BUDAKORPORAT_LLM_MODEL", "cx/gpt-5.6-luna").strip()
 LLM_KEY = os.environ.get("BUDAKORPORAT_LLM_KEY", os.environ.get("HERMES_CUSTOM_43_157_200_187_20128_API_KEY", "")).strip()
 
 PROMPT = """Kamu penulis komentar sosial Indonesia untuk akun budakorporat_id.
-Tulis 5-8 slide Threads orisinal dari sumber di bawah.
-Buat 5-8 slide dengan isi yang sepenuhnya bersumber dari SOURCE_BODY.
+Tulis thread Threads dengan tepat 5 slide dari SOURCE_BODY. Jika fakta unik kurang dari 5 fungsi, kirim lebih sedikit; jangan mengejar jumlah dengan filler.
+Ikuti urutan fungsi: S1 hanya hook dan konflik utama; S2 hanya bukti konkret; S3 hanya konteks atau kronologi; S4 hanya dampak atau eskalasi; S5 hanya kontradiksi/twist atau pertanyaan spesifik. Jangan campur dua fungsi dalam satu slide.
+Setiap slide wajib membawa satu fakta, detail, atau implikasi berbeda. Dilarang mengulang fakta, angka, kejadian, atau kesimpulan slide sebelumnya dengan sinonim, parafrase, atau penjelasan ulang. Jangan mengulang angka, jumlah tersangka, luas lahan, pasal UU, atau pasangan pelaku-tindakan yang sudah dipakai. Nama tokoh boleh muncul ulang hanya jika kalimat membawa fakta baru. Jika fakta unik habis, akhiri thread lebih cepat.
+Jangan menulis ringkasan ulang pada S5. S5 wajib menambah kontradiksi/twist yang belum disebut atau pertanyaan spesifik berbasis fakta baru.
+Buat hanya slide yang didukung SOURCE_BODY. Jangan menambah nama, angka, kutipan, motif, dampak, atau kejadian. Jangan mengubah angka atau melakukan konversi.
 Dampak ke pekerja/rumah tangga hanya boleh ditulis jika SOURCE_BODY menyebutnya; jangan memaksakan angle.
 Bedakan fakta dan opini. Opini harus ditandai sebagai analisis atau pertanyaan, bukan fakta.
-Jangan menambah nama, angka, kutipan, motif, dampak, atau kejadian. Jangan mengubah angka atau melakukan konversi.
 Jangan memakai kata viral/heboh jika SOURCE_BODY tidak memberi bukti pendukung.
 Jangan meniru identitas, persona, kalimat, slogan, cerita, atau ekspresi @arfzulfikar maupun akun lain.
-Keluarkan JSON saja: {{\"slides\":[\"...\"]}}. Tiap slide 120-500 karakter. Jangan masukkan URL; pipeline menambahkannya.
-Jika sumber terlalu tipis untuk 5 slide, ulangi fakta sumber dengan sudut penjelasan berbeda; jangan mengarang.
+Keluarkan JSON saja: {{\"slides\":[\"...\"]}}. Tiap slide 40-500 karakter. Jangan masukkan URL; pipeline menambahkannya.
 
 SOURCE_TITLE: {title}
 SOURCE_BODY: {body}
+
+EVIDENCE_PACK (gunakan ID untuk merencanakan slide, jangan tampilkan ID):
+{evidence}
 """
 
 
+def _evidence_units(body: str) -> list[tuple[str, set[str]]]:
+    stop = {"yang", "dan", "atau", "dari", "dengan", "untuk", "dalam", "pada", "ini", "itu", "akan", "jika", "karena", "bahwa"}
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", re.sub(r"\s+", " ", body).strip()) if len(s.strip()) >= 40]
+    return [(f"E{i}", {w for w in re.findall(r"[a-zà-ÿ0-9]{4,}", sentence.lower()) if w not in stop}) for i, sentence in enumerate(sentences, 1)]
+
+
+def _evidence_prompt(body: str) -> str:
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", re.sub(r"\s+", " ", body).strip()) if len(s.strip()) >= 40]
+    return "\\n".join(f"E{i}: {sentence}" for i, sentence in enumerate(sentences, 1))
+
+
 def _deterministic_draft(item: dict, body: str) -> list[str]:
-    """Safe slot-preserving fallback: repeat only source-backed evidence."""
-    title = re.sub(r"\\s+", " ", item["title"]).strip()
-    evidence = re.sub(r"\s+", " ", body).strip()[:140]
-    if len(evidence) < 40:
-        raise RuntimeError("fallback source evidence too thin")
-    seeds = [
-        f"Sumber membahas: {title}. Berikut fakta yang tersedia tanpa menambah nama, angka, kutipan, atau kejadian baru: {evidence}",
-        f"Konteks yang bisa dipastikan dari sumber hanya ini: {evidence} Judulnya menyebut {title}. Bagian di luar informasi tersebut tidak dipakai sebagai fakta.",
-        f"Apa yang diketahui? Sumber menyatakan: {evidence} Karena itu, analisis di thread ini dibatasi pada informasi tersebut dan tidak mengisi celah dengan dugaan atau dampak yang tidak disebutkan.",
-        f"Konflik atau kontroversi dalam berita ini harus dibaca dari fakta sumber, bukan asumsi tambahan. Fakta yang tersedia: {evidence} Judul terkait: {title}.",
-        f"Batas bukti penting dijaga. Sumber hanya menjadi dasar untuk pernyataan berikut: {evidence} Jika ada pertanyaan lanjutan tentang {title}, jawabannya belum boleh dianggap fakta sebelum ada sumber tambahan.",
-    ]
-    return [p if len(p) >= 120 else p + " Informasi lain tidak ditambahkan." * 3 for p in seeds]
+    """Extractive fallback; never pads thin evidence with repeated prose."""
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", re.sub(r"\s+", " ", body).strip()) if len(s.strip()) >= 40]
+    if not sentences:
+        raise RuntimeError("fallback source has no usable facts")
+    return sentences[:5]
 
 
 def _claim_grounding_issues(parts: list[str], body: str) -> list[str]:
     """Reject common unsupported motive/impact claims; fallback remains extractive."""
     lower_body = body.lower()
     hedges = ("menurut", "diduga", "kayaknya", "polanya", "kata ", "sebut", "analisis", "mungkin", "bisa jadi")
-    markers = ("butuh uang", "butuh dana", "butuh duit", "gaya hidup", "proyek fiktif", "mark up", "kepercayaan", "layanan publik", "korporatisme", "lembur", "rumah tangga", "keamanan ekonomi", "kelangsungan hidup")
+    markers = ("butuh uang", "butuh dana", "butuh duit", "gaya hidup", "proyek fiktif", "mark up", "kepercayaan", "layanan publik", "korporatisme", "lembur", "rumah tangga", "keamanan ekonomi", "kelangsungan hidup", "duka mendalam", "akar permasalahan", "diungkap secara transparan", "tidak terulang")
     issues = []
     for i, part in enumerate(parts, 1):
         low = part.lower()
@@ -209,7 +268,7 @@ def _llm_draft(item: dict, body: str, correction: str = "") -> list[str]:
         raise RuntimeError("LLM config incomplete; set BUDAKORPORAT_LLM_URL, _MODEL, _KEY")
     payload = json.dumps({"model": LLM_MODEL, "temperature": 0.4,
                           "messages": [{"role": "user", "content": PROMPT.format(
-                              title=item["title"], body=body[:12000]) + correction}],
+                              title=item["title"], body=body[:12000], evidence=_evidence_prompt(body)) + correction}],
                           "response_format": {"type": "json_object"}}).encode()
     req = Request(LLM_URL, data=payload, headers={"Authorization": f"Bearer {LLM_KEY}",
                    "Content-Type": "application/json", "User-Agent": UA})
@@ -224,9 +283,18 @@ def _llm_draft(item: dict, body: str, correction: str = "") -> list[str]:
         parts = result["slides"]
     except (KeyError, IndexError, TypeError, ValueError) as exc:
         raise RuntimeError("LLM response contract invalid") from exc
-    if not isinstance(parts, list) or not all(isinstance(p, str) for p in parts):
+    if not isinstance(parts, list):
         raise RuntimeError("LLM slides contract invalid")
-    return parts
+    normalized = []
+    for part in parts:
+        if isinstance(part, str):
+            normalized.append(part)
+        elif isinstance(part, dict) and part and all(isinstance(v, str) for v in part.values()):
+            # Models sometimes label one slide's fields instead of returning one string.
+            normalized.append(" ".join(part.values()))
+        else:
+            raise RuntimeError("LLM slides contract invalid")
+    return normalized
 
 
 def draft(item: dict, body: str, use_llm=True) -> list[str]:
@@ -244,7 +312,9 @@ def draft(item: dict, body: str, use_llm=True) -> list[str]:
             log.warning("LLM draft rejected attempt %d: %s", attempt + 1, exc)
             correction = ("\n\nPERBAIKI OUTPUT SEBELUMNYA. Alasan penolakan: "
                           f"{type(exc).__name__}. Tulis ulang dari SOURCE_BODY saja. "
-                          "Keluarkan JSON valid dengan 5-8 slide, tiap slide 120-500 karakter.")
+                          "Pakai 1-5 slide sesuai fakta unik; jangan mengulang fakta atau mengejar jumlah slide. "
+                          "Setiap slide harus mengambil evidence berbeda; jika evidence habis, hapus slide. "
+                          "Ikuti fungsi slide berurutan jika didukung sumber. Keluarkan JSON valid, tiap slide 40-500 karakter.")
     raise RuntimeError(f"Mistral gagal menghasilkan draft valid setelah 3 percobaan: {last}")
 
 
@@ -253,9 +323,49 @@ def _safe_draft(item: dict, body: str, use_llm=True) -> list[str]:
     return draft(item, body, use_llm)
 
 
+def _evidence_slide_issues(parts: list[str], body: str) -> list[str]:
+    units = _evidence_units(body)
+    if len(parts) <= 1 or len(units) < len(parts):
+        return []
+    slide_tokens = [set(re.findall(r"[a-zà-ÿ0-9]{4,}", p.lower())) for p in parts]
+    scores = [[(len(tokens & words) / len(tokens | words), i) for i, (_, words) in enumerate(units) if words] for tokens in slide_tokens]
+    best = None
+    for choices in __import__('itertools').permutations(range(len(units)), len(parts)):
+        total = sum(next((score for score, i in scores[row] if i == unit), 0) for row, unit in enumerate(choices))
+        if best is None or total > best[0]:
+            best = (total, choices)
+    if not best or any(next((score for score, i in scores[row] if i == unit), 0) < 0.08 for row, unit in enumerate(best[1])):
+        return ["slide evidence not uniquely grounded"]
+    return []
+
+
+def _repeated_slide_issues(parts: list[str]) -> list[str]:
+    stop = {"yang", "dan", "atau", "dari", "dengan", "untuk", "dalam", "pada", "ini", "itu", "akan", "jika"}
+    tokens = [set(re.findall(r"[a-zà-ÿ0-9]{4,}", p.lower())) for p in parts]
+    bigrams = []
+    for p in parts:
+        words = [w for w in re.findall(r"[a-zà-ÿ0-9]{4,}", p.lower()) if w not in stop]
+        bigrams.append(set(zip(words, words[1:])))
+    issues = []
+    for i in range(len(tokens)):
+        for j in range(i):
+            union = tokens[i] | tokens[j]
+            overlap = len(tokens[i] & tokens[j]) / len(union) if union else 0
+            # Shared names/locations are allowed; reject only near-identical prose.
+            if overlap >= 0.72:
+                issues.append(f"S{i + 1}/S{j + 1}: repeated slide content")
+            elif bigrams[i] & bigrams[j]:
+                log.info("slide similarity alarm S%d/S%d: shared phrase", i + 1, j + 1)
+    return issues
+
+
 def validate(parts: list[str], item: dict, body: str, allow_url=True):
-    if not 5 <= len(parts) <= 8: raise ValueError("invalid thread parts: need 5-8 slides")
-    if any(not p.strip() or len(p) < 120 or len(p) > 500 for p in parts): raise ValueError("part must be 120-500 chars")
+    if not 1 <= len(parts) <= 5: raise ValueError("invalid thread parts: need 1-5 slides")
+    if any(not p.strip() or len(p) < 40 or len(p) > 500 for p in parts): raise ValueError("part must be 40-500 chars")
+    repeated = _repeated_slide_issues(parts)
+    if repeated: raise ValueError("; ".join(repeated))
+    evidence_issues = _evidence_slide_issues(parts, body)
+    if evidence_issues: raise ValueError("; ".join(evidence_issues))
     joined = "\n".join(parts)
     if allow_url and item["url"] not in joined: raise ValueError("source URL missing")
     if not allow_url and re.search(r"https?://", joined, re.I): raise ValueError("LLM URL leak")
@@ -324,6 +434,18 @@ if __name__ == "__main__":
 else:
     pass
 
-# self-check: transport contract stays fail-closed.
+# self-check: transport and editorial contracts stay fail-closed.
 assert USER == "budakorporat_id" and USER_ID.isdigit()
-assert all(len(p) <= 500 for p in draft({"title":"x","url":"https://x.test/a"}, "source body " * 50, use_llm=False))
+_check_parts = [
+    "Kronologi awal mencatat keputusan pertama dan tanggal pemeriksaan berlangsung sesuai dokumen sumber.",
+    "Pertimbangan majelis memuat alasan berbeda, termasuk bukti administrasi serta keterangan saksi.",
+]
+assert all(40 <= len(p) <= 500 for p in _check_parts)
+assert not _repeated_slide_issues(_check_parts)
+assert _repeated_slide_issues([_check_parts[0], _check_parts[0]])
+try:
+    _deterministic_draft({"title": "x", "url": "https://x.test/a"}, "tipis")
+except RuntimeError:
+    pass
+else:
+    raise AssertionError("thin fallback source must fail closed")
