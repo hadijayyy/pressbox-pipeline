@@ -210,29 +210,112 @@ LLM_URL = os.environ.get("BUDAKORPORAT_LLM_URL", "http://43.157.200.187:20128/v1
 LLM_MODEL = os.environ.get("BUDAKORPORAT_LLM_MODEL", "cx/gpt-5.6-luna").strip()
 LLM_KEY = os.environ.get("BUDAKORPORAT_LLM_KEY", os.environ.get("HERMES_CUSTOM_43_157_200_187_20128_API_KEY", "")).strip()
 
+AI_EDITOR_PROMPT = """Kamu reviewer editorial fail-closed.
+Review SLIDES only against SOURCE_BODY. Jangan cari fakta baru. Jangan mengubah angka,
+nama, kutipan, motif, dampak, atau sebab-akibat tanpa dukungan SOURCE_BODY.
+Deteksi klaim tersirat, framing hiperbolik, evidence berulang, dan angka tidak konsisten.
+
+Keluarkan JSON valid saja:
+{{"status": "PASS", "issues": []}}
+atau
+{{"status": "REPAIR", "issues": [{{"slide": 1, "type": "UNSUPPORTED_CLAIM", "reason": "..."}}], "slides": ["..."]}}
+atau
+{{"status": "REJECT", "issues": [{{"slide": 1, "type": "...", "reason": "..."}}]}}
+
+PASS hanya jika semua slide grounded dan tiap slide punya information gain.
+REPAIR hanya jika bisa memperbaiki dari SOURCE_BODY tanpa fakta baru.
+REJECT jika evidence tidak cukup. Setiap slide hasil repair 40–500 karakter.
+
+SOURCE_BODY:
+{body}
+
+SLIDES:
+{slides}
+"""
+
 PROMPT = """Kamu penulis komentar sosial Indonesia untuk akun budakorporat_id.
 
-TUJUAN EDITORIAL — PAKAI MEKANISME VIRAL, BUKAN MENYALIN KALIMAT:
-Bangun perubahan posisi pembaca: awalnya mengira masalahnya sederhana, akhirnya melihat mekanisme, risiko, atau kontradiksi yang lebih besar. Jangan meniru identitas, persona, kalimat, slogan, cerita, contoh, atau ekspresi akun lain.
+TUJUAN:
+Buat thread yang mengubah cara pandang pembaca: dari melihat kasus secara sederhana menjadi memahami mekanisme, kontradiksi, insentif, risiko, atau konsekuensi yang lebih besar.
 
-ARSITEKTUR WAJIB (maksimal 5 slide; kurang bila evidence unik tidak cukup):
-S1 HOOK BERSTAKES + POWER GAP/CONTRARIAN FRAME. Buka dengan benturan konkret: siapa/apa yang tampak kuat, lalu celah atau kepentingan yang tidak terlihat. Hook harus membuat pembaca ingin tahu “kalau begitu, siapa yang menanggung akibatnya?”. Jangan membuka dengan ringkasan netral.
-S2 NUMBERED PROMISE + MICRO-UTILITY 1. Nyatakan janji bernomor yang spesifik dan bisa diverifikasi (“Ada 3 hal yang perlu dilihat: ...”) hanya jika SOURCE_BODY punya jumlah/fungsi itu. Lalu beri bukti pertama. Jangan mengarang jumlah; bila tidak ada, gunakan janji spesifik tanpa angka.
-S3 MICRO-UTILITY 2. Beri tindakan observable → tanda di SOURCE_BODY → arti tersembunyi yang ditandai sebagai analisis → potensi kerugian hanya jika didukung sumber. Tambahkan kronologi/konteks baru, bukan parafrase S2.
-S4 MICRO-UTILITY 3 + ESCALATION. Beri mekanisme atau dampak baru dengan pola sama. Dampak ke pekerja/rumah tangga hanya bila SOURCE_BODY menyebutnya. Jangan memaksakan angle.
-S5 REVERSAL/PRINCIPLE + SPECIFIC CTA. Balik asumsi awal menggunakan fakta/evidence baru. Tarik satu prinsip praktis yang jelas, bukan moral kosong. Akhiri satu CTA spesifik yang meminta pembaca melakukan tindakan terkait fakta (misalnya cek sumber atau bandingkan angka), bukan “setuju?” generik. Jika tidak ada reversal atau CTA yang didukung sumber, akhiri pada slide sebelumnya.
+MEKANISME VIRAL YANG DIADAPTASI:
+- Mulai dari masalah dekat dengan konsekuensi konkret bagi pembaca, bukan klaim heboh.
+- Cari power gap atau sudut contrarian hanya jika evidence mendukung.
+- Pakai janji spesifik bila evidence pack punya jumlah/fungsi yang jelas.
+- Tiap slide memberi micro-utility: tindakan observable → tanda → arti tersembunyi → potensi kerugian, tanpa mengubah analisis menjadi fakta.
+- Bangun progression menuju reversal dan perubahan posisi pembaca, lalu CTA spesifik.
+- Value harus muncul sebelum CTA; CTA bukan monetisasi otomatis.
+- Jangan meniru wording, klaim, angka, contoh, atau jumlah poin dari referensi.
 
-KONTRAK FAKTA:
-Setiap slide wajib membawa satu evidence/fungsi baru. Dilarang mengulang fakta, angka, kejadian, kesimpulan, atau pasangan pelaku-tindakan dengan sinonim/parafrasa. Gunakan EVIDENCE_PACK untuk membagi evidence; ID tidak boleh tampil. Jangan menambah nama, angka, kutipan, motif, dampak, kejadian, atau konversi angka. Bedakan fakta dari analisis/pertanyaan. Kasus yang masih dugaan tetap ditulis sebagai dugaan. “Arti tersembunyi” tidak boleh menjadi fakta baru.
-Jangan memakai kata viral/heboh tanpa bukti. Jangan klaim pengalaman langsung. Gunakan bahasa Indonesia percakapan BudakKorporat: santai, tajam, konkret; gunakan gue/lu hanya bila terdengar alami, tidak dipaksa. Value dan pemahaman harus muncul sebelum CTA/monetisasi.
+Jangan meniru kalimat, persona, slogan, cerita, atau ekspresi akun lain.
+
+STRUKTUR:
+Maksimal 5 slide. Jika evidence unik tidak cukup, gunakan lebih sedikit.
+
+S1 — HOOK
+Buka dengan kontradiksi konkret antara apa yang terlihat di permukaan dan apa yang ditunjukkan evidence. Jangan buka dengan ringkasan netral. Jangan mengarang konflik, motif, atau kepentingan.
+
+S2 — EVIDENCE 1
+Berikan fakta/konteks penting pertama. Boleh pakai janji bernomor hanya jika jumlah evidence memang tersedia di EVIDENCE_PACK.
+
+S3 — EVIDENCE 2
+Berikan evidence baru + konteks baru + analisis seperlunya.
+Jika melakukan inferensi, tandai jelas dengan bahasa seperti:
+“Ini bisa berarti…”
+“Secara struktur…”
+“Yang perlu diperhatikan…”
+
+S4 — EVIDENCE 3 / ESCALATION
+Tambahkan mekanisme, kontradiksi, kronologi, angka, aturan, atau konsekuensi baru yang belum dipakai.
+
+S5 — REVERSAL + CTA
+Balik asumsi awal menggunakan evidence sebelumnya. Tarik satu prinsip praktis dan tutup dengan CTA spesifik seperti cek sumber, bandingkan angka, baca kronologi, atau cek aturan.
+
+Jangan tambahkan fakta baru di S5 jika tidak perlu.
+
+ATURAN FAKTA:
+- Setiap S1–S4 harus membawa fungsi informasi/evidence baru.
+- Satu evidence tidak boleh dipakai ulang sebagai bukti utama.
+- Jangan menambah nama, angka, kutipan, motif, dampak, kejadian, atau sebab-akibat yang tidak ada di sumber.
+- Bedakan fakta, dugaan, dan analisis.
+- Dugaan tetap ditulis sebagai dugaan.
+- Jangan mengasumsikan motif.
+- Semakin jauh kesimpulan dari fakta sumber, semakin konservatif bahasanya.
+- Jangan memakai “viral/heboh/gempar” tanpa bukti.
+- Dampak ke pekerja, rumah tangga, masyarakat, dll hanya jika sumber mendukung.
+
+ANTI-FILLER:
+Jika evidence hanya cukup untuk 2–4 slide, berhenti di sana.
+Jangan mengulang fakta dengan sinonim.
+Jangan isi slide dengan opini generik, moral kosong, atau pertanyaan retoris tanpa fungsi.
+
+STYLE:
+Bahasa Indonesia percakapan: santai, tajam, konkret, mudah dipahami.
+Gunakan gue/lu jika alami.
+Hindari hiperbola dan framing partisan tanpa evidence.
+
+QUALITY CHECK INTERNAL:
+Pastikan:
+- hook lebih kuat dari headline tanpa mengarang,
+- tiap slide memberi information gain,
+- tidak ada evidence duplikat,
+- analisis tidak terdengar seperti fakta,
+- reversal benar-benar mengubah cara melihat kasus.
 
 OUTPUT:
-Keluarkan JSON saja: {{\"slides\":[\"...\"]}}. Tiap slide 40-500 karakter. Jangan masukkan URL. Jika fakta unik habis, kirim 1-4 slide; jangan isi filler.
+JSON valid saja, tanpa markdown, URL, atau komentar lain.
 
-SOURCE_TITLE: {title}
-SOURCE_BODY: {body}
+{{\"slides\":[\"...\"]}}
 
-EVIDENCE_PACK (gunakan ID untuk merencanakan slide, jangan tampilkan ID):
+Setiap slide 40–500 karakter.
+
+SOURCE_TITLE:
+{title}
+
+SOURCE_BODY:
+{body}
+
+EVIDENCE_PACK:
 {evidence}
 """
 
@@ -268,6 +351,61 @@ def _claim_grounding_issues(parts: list[str], body: str) -> list[str]:
             if marker in low and marker not in lower_body and not any(h in low for h in hedges):
                 issues.append(f"S{i}: unsupported claim '{marker}'")
     return issues
+
+
+def _number_value(value: str) -> float:
+    return float(value.replace(".", "").replace(",", "."))
+
+
+def _numeric_consistency_issues(parts: list[str]) -> list[str]:
+    text_value = "\n".join(parts).lower()
+    match = re.search(r"(\d+(?:[.,]\d+)?)\s*(?:dari|/)\s*(\d+(?:[.,]\d+)?)\D{0,80}(\d+(?:[.,]\d+)?)\s*%", text_value)
+    if not match:
+        return []
+    numerator, denominator, stated = (_number_value(value) for value in match.groups())
+    if denominator == 0:
+        return ["numeric denominator is zero"]
+    calculated = numerator / denominator * 100
+    if abs(calculated - stated) > 0.15:
+        return [f"numeric inconsistency: stated {stated:g}%, calculated {calculated:.2f}%"]
+    return []
+
+
+def _llm_editor(parts: list[str], body: str) -> dict:
+    if not (LLM_URL and LLM_MODEL and LLM_KEY):
+        raise RuntimeError("AI editor failed closed: LLM config incomplete")
+    payload = json.dumps({"model": LLM_MODEL, "temperature": 0,
+                          "messages": [{"role": "user", "content": AI_EDITOR_PROMPT.format(
+                              body=body[:12000], slides=json.dumps(parts, ensure_ascii=False))}],
+                          "response_format": {"type": "json_object"}}).encode()
+    req = Request(LLM_URL, data=payload, headers={"Authorization": f"Bearer {LLM_KEY}",
+                   "Content-Type": "application/json", "User-Agent": UA})
+    try:
+        with urlopen(req, timeout=45) as response:
+            data = json.loads(response.read(200_000))
+        raw = data["choices"][0]["message"]["content"]
+        result = json.loads(raw) if isinstance(raw, str) else raw
+    except (HTTPError, URLError, TimeoutError, ValueError, KeyError, IndexError, TypeError) as exc:
+        raise RuntimeError("AI editor failed closed: response invalid") from exc
+    if result.get("status") not in {"PASS", "REPAIR", "REJECT"} or not isinstance(result.get("issues", []), list):
+        raise RuntimeError("AI editor failed closed: contract invalid")
+    if result["status"] == "REPAIR":
+        slides = result.get("slides")
+        if not isinstance(slides, list) or not all(isinstance(slide, str) for slide in slides):
+            raise RuntimeError("AI editor failed closed: repair slides invalid")
+        result["slides"] = slides
+    return result
+
+
+def _review_and_repair(parts: list[str], item: dict, body: str) -> list[str]:
+    review = _llm_editor(parts, body)
+    if review["status"] == "PASS":
+        return parts
+    if review["status"] == "REJECT":
+        raise ValueError(f"AI editor rejected: {review.get('issues', [])}")
+    repaired = review["slides"]
+    validate(repaired, item, body, allow_url=False)
+    return repaired
 
 
 def _llm_draft(item: dict, body: str, correction: str = "") -> list[str]:
@@ -379,6 +517,8 @@ def validate(parts: list[str], item: dict, body: str, allow_url=True):
     if len(body) < 200: raise ValueError("source body too thin")
     issues = _claim_grounding_issues(parts, body)
     if issues: raise ValueError("; ".join(issues))
+    numeric_issues = _numeric_consistency_issues(parts)
+    if numeric_issues: raise ValueError("; ".join(numeric_issues))
 
 
 def token():
@@ -413,6 +553,8 @@ def run(dry=False, use_llm=True):
                 raise RuntimeError("article hero image missing")
             parts = _safe_draft(item, body, use_llm)
             validate(parts, item, body, allow_url=False)
+            if use_llm:
+                parts = _review_and_repair(parts, item, body)
             break
         except (RuntimeError, ValueError) as exc:
             last = exc

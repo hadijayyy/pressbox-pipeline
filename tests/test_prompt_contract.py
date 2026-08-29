@@ -41,21 +41,70 @@ def test_system_prompt_enforces_untrusted_source_contract():
     assert "Never swap which entity owns a number." in text
 
 
-def test_budakorporat_prompt_uses_full_viral_mechanics():
+def test_budakorporat_prompt_matches_requested_replacement():
     path = PIPELINE / "budakorporat-pipeline" / "budakorporat_pipeline.py"
     text = path.read_text()
     for phrase in (
-        "HOOK BERSTAKES + POWER GAP/CONTRARIAN FRAME",
-        "NUMBERED PROMISE + MICRO-UTILITY 1",
-        "tindakan observable → tanda di SOURCE_BODY → arti tersembunyi",
-        "REVERSAL/PRINCIPLE + SPECIFIC CTA",
-        "perubahan posisi pembaca",
-        "Value dan pemahaman harus muncul sebelum CTA/monetisasi",
+        "TUJUAN:",
+        "S1 — HOOK",
+        "S2 — EVIDENCE 1",
+        "S3 — EVIDENCE 2",
+        "S4 — EVIDENCE 3 / ESCALATION",
+        "S5 — REVERSAL + CTA",
+        "QUALITY CHECK INTERNAL:",
+        "Setiap slide 40–500 karakter.",
     ):
         assert phrase in text
-    assert "Jika fakta unik habis, kirim 1-4 slide" in text
-    assert "Jangan membuka dengan ringkasan netral" in text
-    assert "CTA spesifik" in text
+    assert "S1 HOOK BERSTAKES + POWER GAP/CONTRARIAN FRAME" not in text
+    assert "Value dan pemahaman harus muncul sebelum CTA/monetisasi" not in text
+
+
+def test_budakorporat_prompt_applies_viral_mechanics_without_copying_reference():
+    text = (PIPELINE / "budakorporat-pipeline" / "budakorporat_pipeline.py").read_text()
+    for phrase in (
+        "masalah dekat",
+        "konsekuensi konkret",
+        "power gap",
+        "janji spesifik",
+        "micro-utility",
+        "perubahan posisi pembaca",
+        "reversal",
+        "CTA spesifik",
+        "Value harus muncul sebelum CTA",
+        "tindakan observable → tanda → arti tersembunyi → potensi kerugian",
+        "Jangan meniru wording, klaim, angka, contoh, atau jumlah poin",
+    ):
+        assert phrase in text
+    assert "2,1 juta" not in text
+    assert "smartscrolling" not in text
+    assert "fitur tersembunyi iPhone" not in text
+
+
+def test_ai_editor_contract_is_fail_closed_and_allows_one_repair():
+    path = PIPELINE / "budakorporat-pipeline" / "budakorporat_pipeline.py"
+    text = path.read_text()
+    assert "AI_EDITOR_PROMPT" in text
+    assert "SOURCE_BODY" in text
+    assert '"status": "PASS"' in text
+    assert '"status": "REPAIR"' in text
+    assert '"status": "REJECT"' in text
+    assert "AI editor failed closed" in text
+    assert "_review_and_repair" in text
+    assert "validate(repaired, item, body, allow_url=False)" in text
+
+
+def test_numeric_consistency_rejects_wrong_explicit_ratio():
+    m = _load_budakorporat()
+    parts = ["17 dari 954 hektare disebut hanya 0,2% dalam laporan sumber ini."]
+    assert "numeric inconsistency" in ";".join(m._numeric_consistency_issues(parts))
+
+
+def _load_budakorporat():
+    path = PIPELINE / "budakorporat-pipeline" / "budakorporat_pipeline.py"
+    spec = importlib.util.spec_from_file_location("budakorporat_pipeline", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def test_malformed_llm_output_stops_generation_attempt():
