@@ -41,6 +41,23 @@ def test_system_prompt_enforces_untrusted_source_contract():
     assert "Never swap which entity owns a number." in text
 
 
+def test_budakorporat_prompt_uses_full_viral_mechanics():
+    path = PIPELINE / "budakorporat-pipeline" / "budakorporat_pipeline.py"
+    text = path.read_text()
+    for phrase in (
+        "HOOK BERSTAKES + POWER GAP/CONTRARIAN FRAME",
+        "NUMBERED PROMISE + MICRO-UTILITY 1",
+        "tindakan observable → tanda di SOURCE_BODY → arti tersembunyi",
+        "REVERSAL/PRINCIPLE + SPECIFIC CTA",
+        "perubahan posisi pembaca",
+        "Value dan pemahaman harus muncul sebelum CTA/monetisasi",
+    ):
+        assert phrase in text
+    assert "Jika fakta unik habis, kirim 1-4 slide" in text
+    assert "Jangan membuka dengan ringkasan netral" in text
+    assert "CTA spesifik" in text
+
+
 def test_malformed_llm_output_stops_generation_attempt():
     mvp = _load_mvp()
     source = inspect.getsource(mvp.generate_slides)

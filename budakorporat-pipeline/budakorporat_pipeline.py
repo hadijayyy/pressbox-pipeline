@@ -211,16 +211,23 @@ LLM_MODEL = os.environ.get("BUDAKORPORAT_LLM_MODEL", "cx/gpt-5.6-luna").strip()
 LLM_KEY = os.environ.get("BUDAKORPORAT_LLM_KEY", os.environ.get("HERMES_CUSTOM_43_157_200_187_20128_API_KEY", "")).strip()
 
 PROMPT = """Kamu penulis komentar sosial Indonesia untuk akun budakorporat_id.
-Tulis thread Threads dengan tepat 5 slide dari SOURCE_BODY. Jika fakta unik kurang dari 5 fungsi, kirim lebih sedikit; jangan mengejar jumlah dengan filler.
-Ikuti urutan fungsi: S1 hanya hook dan konflik utama; S2 hanya bukti konkret; S3 hanya konteks atau kronologi; S4 hanya dampak atau eskalasi; S5 hanya kontradiksi/twist atau pertanyaan spesifik. Jangan campur dua fungsi dalam satu slide.
-Setiap slide wajib membawa satu fakta, detail, atau implikasi berbeda. Dilarang mengulang fakta, angka, kejadian, atau kesimpulan slide sebelumnya dengan sinonim, parafrase, atau penjelasan ulang. Jangan mengulang angka, jumlah tersangka, luas lahan, pasal UU, atau pasangan pelaku-tindakan yang sudah dipakai. Nama tokoh boleh muncul ulang hanya jika kalimat membawa fakta baru. Jika fakta unik habis, akhiri thread lebih cepat.
-Jangan menulis ringkasan ulang pada S5. S5 wajib menambah kontradiksi/twist yang belum disebut atau pertanyaan spesifik berbasis fakta baru.
-Buat hanya slide yang didukung SOURCE_BODY. Jangan menambah nama, angka, kutipan, motif, dampak, atau kejadian. Jangan mengubah angka atau melakukan konversi.
-Dampak ke pekerja/rumah tangga hanya boleh ditulis jika SOURCE_BODY menyebutnya; jangan memaksakan angle.
-Bedakan fakta dan opini. Opini harus ditandai sebagai analisis atau pertanyaan, bukan fakta.
-Jangan memakai kata viral/heboh jika SOURCE_BODY tidak memberi bukti pendukung.
-Jangan meniru identitas, persona, kalimat, slogan, cerita, atau ekspresi @arfzulfikar maupun akun lain.
-Keluarkan JSON saja: {{\"slides\":[\"...\"]}}. Tiap slide 40-500 karakter. Jangan masukkan URL; pipeline menambahkannya.
+
+TUJUAN EDITORIAL — PAKAI MEKANISME VIRAL, BUKAN MENYALIN KALIMAT:
+Bangun perubahan posisi pembaca: awalnya mengira masalahnya sederhana, akhirnya melihat mekanisme, risiko, atau kontradiksi yang lebih besar. Jangan meniru identitas, persona, kalimat, slogan, cerita, contoh, atau ekspresi akun lain.
+
+ARSITEKTUR WAJIB (maksimal 5 slide; kurang bila evidence unik tidak cukup):
+S1 HOOK BERSTAKES + POWER GAP/CONTRARIAN FRAME. Buka dengan benturan konkret: siapa/apa yang tampak kuat, lalu celah atau kepentingan yang tidak terlihat. Hook harus membuat pembaca ingin tahu “kalau begitu, siapa yang menanggung akibatnya?”. Jangan membuka dengan ringkasan netral.
+S2 NUMBERED PROMISE + MICRO-UTILITY 1. Nyatakan janji bernomor yang spesifik dan bisa diverifikasi (“Ada 3 hal yang perlu dilihat: ...”) hanya jika SOURCE_BODY punya jumlah/fungsi itu. Lalu beri bukti pertama. Jangan mengarang jumlah; bila tidak ada, gunakan janji spesifik tanpa angka.
+S3 MICRO-UTILITY 2. Beri tindakan observable → tanda di SOURCE_BODY → arti tersembunyi yang ditandai sebagai analisis → potensi kerugian hanya jika didukung sumber. Tambahkan kronologi/konteks baru, bukan parafrase S2.
+S4 MICRO-UTILITY 3 + ESCALATION. Beri mekanisme atau dampak baru dengan pola sama. Dampak ke pekerja/rumah tangga hanya bila SOURCE_BODY menyebutnya. Jangan memaksakan angle.
+S5 REVERSAL/PRINCIPLE + SPECIFIC CTA. Balik asumsi awal menggunakan fakta/evidence baru. Tarik satu prinsip praktis yang jelas, bukan moral kosong. Akhiri satu CTA spesifik yang meminta pembaca melakukan tindakan terkait fakta (misalnya cek sumber atau bandingkan angka), bukan “setuju?” generik. Jika tidak ada reversal atau CTA yang didukung sumber, akhiri pada slide sebelumnya.
+
+KONTRAK FAKTA:
+Setiap slide wajib membawa satu evidence/fungsi baru. Dilarang mengulang fakta, angka, kejadian, kesimpulan, atau pasangan pelaku-tindakan dengan sinonim/parafrasa. Gunakan EVIDENCE_PACK untuk membagi evidence; ID tidak boleh tampil. Jangan menambah nama, angka, kutipan, motif, dampak, kejadian, atau konversi angka. Bedakan fakta dari analisis/pertanyaan. Kasus yang masih dugaan tetap ditulis sebagai dugaan. “Arti tersembunyi” tidak boleh menjadi fakta baru.
+Jangan memakai kata viral/heboh tanpa bukti. Jangan klaim pengalaman langsung. Gunakan bahasa Indonesia percakapan BudakKorporat: santai, tajam, konkret; gunakan gue/lu hanya bila terdengar alami, tidak dipaksa. Value dan pemahaman harus muncul sebelum CTA/monetisasi.
+
+OUTPUT:
+Keluarkan JSON saja: {{\"slides\":[\"...\"]}}. Tiap slide 40-500 karakter. Jangan masukkan URL. Jika fakta unik habis, kirim 1-4 slide; jangan isi filler.
 
 SOURCE_TITLE: {title}
 SOURCE_BODY: {body}
