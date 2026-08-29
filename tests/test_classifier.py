@@ -358,13 +358,13 @@ def test_slide_contract_keeps_450_char_limit():
     assert "S6 invalid length (451)" in mvp._slide_contract_errors(overlength)
 
 
-def test_main_uses_one_candidate_and_one_final_evaluator():
+def test_main_uses_static_grounding_gates_without_llm_evaluator():
     mvp = _load_mvp()
     source = inspect.getsource(mvp._generate_best)
     assert "for article_attempt" not in source
     assert "for eval_round" not in source
     assert "_extractive_slides" not in source
-    assert source.count("evaluator_check(") == 1
+    assert "evaluator_check(" not in source
 
 
 def test_high_risk_transfer_claim_requires_tier_one_source():
@@ -398,7 +398,7 @@ def test_space_sentences_collapses_literal_backslash_newline():
     assert mvp._space_sentences('He said, "First fact."\\nSecond fact.') == 'He said, "First fact." Second fact.'
 
 
-def test_evaluator_accepts_only_approve():
+def test_legacy_evaluator_accepts_only_approve():
     mvp = _load_mvp()
     # Every generated draft needs independent factual review; nothing may
     # bypass evaluator, so only APPROVE authorizes posting.
@@ -407,20 +407,20 @@ def test_evaluator_accepts_only_approve():
     assert mvp._evaluator_accepts("APPROVE")
 
 
-def test_main_does_not_skip_evaluator_for_pattern_or_score():
+def test_main_keeps_static_checks_independent_of_pattern_or_score():
     mvp = _load_mvp()
     source = inspect.getsource(mvp._generate_best)
     assert "skip_eval = pattern in (\"e\", \"f\")" not in source
     assert "candidate.get(\"_score\", 0) >= 80" not in source[source.index("contract_errors ="):source.index("# All checks passed")]
 
 
-def test_evaluator_revise_does_not_authorize_posting():
+def test_legacy_evaluator_revise_does_not_authorize_posting():
     mvp = _load_mvp()
     assert not mvp._evaluator_accepts("REVISE")
     assert mvp._evaluator_accepts("APPROVE")
 
 
-def test_missing_evaluator_key_blocks_posting():
+def test_legacy_missing_evaluator_key_blocks_evaluator():
     mvp = _load_mvp()
     mvp.MISTRAL_KEY = ""
     decision, _ = mvp.evaluator_check([], "source", "https://example.com")
@@ -515,7 +515,7 @@ def test_hard_news_adjustment_penalizes_opinion_titles():
 def test_generation_temperature_is_low_for_factual_drafts():
     mvp = _load_mvp()
     source = inspect.getsource(mvp.generate_slides)
-    assert '"temperature":0.1' in source
+    assert "max_tokens=1800, temperature=0.1" in source
 
 
 

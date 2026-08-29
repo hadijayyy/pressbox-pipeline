@@ -51,7 +51,7 @@ def test_generation_retry_changes_hook_variant():
     source = Path(PIPELINE).read_text()
     assert "generation_hook = hook_variant" in source
     assert "variants = [v for v in HOOK_VARIANTS if v != hook_variant]" in source
-    assert "assigned_evidence=assigned_evidence" in source
+    assert "evidence_plan=evidence_plan" in source
 
 
 def test_notification_failure_is_nonfatal(monkeypatch):
@@ -64,7 +64,7 @@ def test_notification_failure_is_nonfatal(monkeypatch):
     assert mvp.notify_telegram("test") is False
 
 
-def test_evaluator_remains_fail_closed():
+def test_legacy_evaluator_remains_fail_closed():
     mvp = _load_mvp()
     assert mvp._evaluator_accepts("APPROVE")
     assert not mvp._evaluator_accepts("REVISE")

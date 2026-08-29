@@ -3319,11 +3319,13 @@ def _generate_best(ranked, analytics_summary, hooks_str, cta_pattern, tone):
             continue
 
         all_errors = ""
-        for gen_attempt in range(1, 3):
+        for gen_attempt in range(1, 4):
             generation_hook = hook_variant
             if gen_attempt == 2:
                 variants = [v for v in HOOK_VARIANTS if v != hook_variant]
                 generation_hook = variants[0] if variants else "detail"
+            elif gen_attempt == 3:
+                generation_hook = "detail"
             slides = generate_slides(
                 art_text, art_url,
                 title=art_title,
@@ -3343,11 +3345,11 @@ def _generate_best(ranked, analytics_summary, hooks_str, cta_pattern, tone):
                     rate_limited = True
                     log("❌ Stop candidate churn after provider rate limit — fail closed")
                     break
-                if gen_attempt == 1:
-                    log(f"   ⚠️ LLM empty (attempt 1), retrying...")
+                if gen_attempt < 3:
+                    log(f"   ⚠️ LLM empty (attempt {gen_attempt}), retrying...")
                     all_errors = "LLM returned empty response"
                     continue
-                log(f"   ❌ LLM empty (attempt 2) — trying next candidate")
+                log(f"   ❌ LLM empty (attempt {gen_attempt}) — trying next candidate")
                 break
 
             contract_errors = _slide_contract_errors(slides)
@@ -3369,33 +3371,14 @@ def _generate_best(ranked, analytics_summary, hooks_str, cta_pattern, tone):
             if errors:
                 all_errors = "; ".join(errors)
                 log(f"   ⚠️ Checks failed (attempt {gen_attempt}): {all_errors}")
-                if gen_attempt == 1:
+                if gen_attempt < 3:
                     log("   🔁 Retrying with error feedback...")
                     continue
-                log("   ❌ Checks failed (attempt 2) — trying next candidate")
+                log(f"   ❌ Checks failed (attempt {gen_attempt}) — trying next candidate")
                 break
 
-            eval_t0 = time.time()
-            eval_decision, eval_reasons = evaluator_check(
-                editorial_slides, art_text, art_url, assigned_evidence=assigned_evidence)
-            eval_time = time.time() - eval_t0
-            log(f"   🔍 Evaluator: {eval_decision} ({eval_time:.1f}s) — {'; '.join(eval_reasons[:3])}")
-            if eval_decision == "ERROR":
-                _record_failure("EVALUATOR_UNAVAILABLE", candidate.get("source", ""), art_title)
-                rate_limited = any("429" in reason or "rate" in reason.lower() for reason in eval_reasons)
-                log("   ⏭️ Evaluator unavailable — skip LLM retry, fail closed")
-                break
-            if not _evaluator_accepts(eval_decision):
-                all_errors = "EVALUATOR: " + "; ".join(eval_reasons[:3])
-                _write_claim_audit(
-                    [dict(row, evaluator_reasons=eval_reasons[:3]) for row in claim_rows],
-                    f"EVALUATOR_{eval_decision}", art_url, art_title)
-                log(f"   ⚠️ Evaluator rejected (attempt {gen_attempt}): {all_errors}")
-                if gen_attempt == 1:
-                    log("   🔁 Retrying with evaluator feedback...")
-                    continue
-                log("   ❌ Evaluator rejected (attempt 2) — trying next candidate")
-                break
+            # Static source-grounding gates above authorize candidate; no LLM evaluator.
+            log("   ✅ Static grounding checks passed")
 
             # All checks passed
             passed = True

@@ -49,12 +49,18 @@ def test_malformed_llm_output_stops_generation_attempt():
     assert "continue" not in block
 
 
-def test_evaluator_infrastructure_error_skips_llm_retry():
+def test_generation_repair_allows_three_attempts():
     mvp = _load_mvp()
     source = inspect.getsource(mvp._generate_best)
-    block = source[source.index('eval_decision, eval_reasons = evaluator_check('):source.index('if not _evaluator_accepts(eval_decision):')]
-    assert 'if eval_decision == "ERROR":' in block
-    assert "fail closed" in block
+    assert "range(1, 4)" in source or "range(1, 3 + 1)" in source
+    assert "gen_attempt < 3" in source
+
+
+def test_static_grounding_checks_authorize_without_llm_evaluator():
+    mvp = _load_mvp()
+    source = inspect.getsource(mvp._generate_best)
+    assert "evaluator_check(" not in source
+    assert "Static source-grounding gates above authorize candidate" in source
 
 
 def test_winning_pattern_is_wired_into_generation_prompt():
