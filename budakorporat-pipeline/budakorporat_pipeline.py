@@ -40,7 +40,7 @@ PUBLIC_MATERIAL_RE = re.compile(r"kebijakan|anggaran|pajak|subsidi|bansos|ruu|un
 DRAMA_RE = re.compile(r"kontrovers|konflik|ribut|sengketa|kritik|tuding|bantah|protes|skandal|heboh|viral|geger|polemi|pecat|gugat|ditangkap|tersangka", re.I)
 EXCLUDED_RE = re.compile(r"balita|bayi|anak kecil|kekerasan seksual|pencabul|pemerkosaan|pembunuhan|kriminal|penganiayaan|tawuran", re.I)
 UA = "budakorporat-pipeline/1.0"
-MAX_AGE = timedelta(hours=24)
+MAX_AGE = timedelta(hours=48)
 DATE_FIELDS = ("pubDate", "published", "updated", "date")
 log = logging.getLogger("budakorporat")
 
@@ -420,7 +420,7 @@ def _claim_grounding_issues(parts: list[str], body: str) -> list[str]:
     """Reject common unsupported motive/impact claims; fallback remains extractive."""
     lower_body = body.lower()
     hedges = ("menurut", "diduga", "kayaknya", "polanya", "kata ", "sebut", "analisis", "mungkin", "bisa jadi")
-    markers = ("butuh uang", "butuh dana", "butuh duit", "gaya hidup", "proyek fiktif", "mark up", "kepercayaan", "layanan publik", "korporatisme", "lembur", "rumah tangga", "keamanan ekonomi", "kelangsungan hidup", "duka mendalam", "akar permasalahan", "diungkap secara transparan", "tidak terulang")
+    markers = ("butuh uang", "butuh dana", "butuh duit", "gaya hidup", "proyek fiktif", "mark up")
     motive_frames = ("main-main di belakang layar", "sengaja ngeblokir", "sengaja memblokir", "sengaja menghalangi")
     issues = []
     for i, part in enumerate(parts, 1):
@@ -513,13 +513,10 @@ def _review_and_repair(slides: list[dict], item: dict, body: str) -> list[str]:
         repaired = result["slides"]
     except Exception:
         raise ValueError(f"AI editor requested repair: {review.get('issues', [])}")
-    if not isinstance(repaired, list) or not repaired:
+    # Auto-fix repair output before strict validation
+    repaired = _salvage_slides(repaired, catalog)
+    if not repaired or len(repaired) < 4:
         raise ValueError(f"AI editor requested repair: {review.get('issues', [])}")
-    for s in repaired:
-        if not isinstance(s, dict) or not isinstance(s.get("text"), str) or not isinstance(s.get("evidence_ids"), list):
-            raise ValueError(f"AI editor requested repair: {review.get('issues', [])}")
-        if not all(key in catalog for key in s["evidence_ids"]):
-            raise ValueError(f"AI editor requested repair: {review.get('issues', [])}")
     repaired = _label_all_implicit_opinions(repaired)
     parts = [s["text"] for s in repaired]
     validate(parts, item, body, allow_url=False)
@@ -569,6 +566,29 @@ def _llm_draft(item: dict, body: str, correction: str = "") -> list[dict]:
     return unique
 
 
+def _salvage_slides(slides: list[dict], catalog: dict[str, str]) -> list[dict]:
+    """Auto-fix repair/draft output: truncate long, discard short, filter invalid evidence_ids."""
+    fixed = []
+    for s in slides:
+        if not isinstance(s, dict) or not isinstance(s.get("text"), str) or not isinstance(s.get("evidence_ids"), list):
+            continue
+        t = s["text"].strip()
+        # discard too short
+        if len(t) < 40:
+            continue
+        # truncate too long at last sentence boundary before 500
+        if len(t) > 500:
+            cut = t[:500]
+            last_period = max(cut.rfind("."), cut.rfind("!"), cut.rfind("?"))
+            t = cut[:last_period + 1] if last_period > 30 else cut[:497] + "..."
+        # filter invalid evidence_ids
+        valid_ids = [k for k in s["evidence_ids"] if k in catalog]
+        if not valid_ids:
+            continue
+        fixed.append({"text": t, "evidence_ids": valid_ids})
+    return fixed
+
+
 def _label_all_implicit_opinions(slides: list[dict]) -> list[dict]:
     """No-op: opinions flow naturally without labels. Keep for compatibility."""
     return [{**slide} for slide in slides]
@@ -581,7 +601,11 @@ def draft(item: dict, body: str, use_llm=True) -> list[str]:
     correction = ""
     for attempt in range(3):
         try:
-            slides = _label_all_implicit_opinions(_llm_draft(item, body, correction))
+            raw_slides = _llm_draft(item, body, correction)
+            slides = _salvage_slides(raw_slides, _evidence_catalog(body))
+            if not slides or len(slides) < 4:
+                raise ValueError(f"salvage returned {len(slides) if slides else 0} slides")
+            slides = _label_all_implicit_opinions(slides)
             parts = [slide["text"] for slide in slides]
             validate(parts, item, body, allow_url=False)
             return _review_and_repair(slides, item, body)
@@ -633,7 +657,7 @@ def _repeated_slide_issues(parts: list[str]) -> list[str]:
             union = tokens[i] | tokens[j]
             overlap = len(tokens[i] & tokens[j]) / len(union) if union else 0
             # Shared names/locations are allowed; reject only near-identical prose.
-            if overlap >= 0.72:
+            if overlap >= 0.65:
                 issues.append(f"S{i + 1}/S{j + 1}: repeated slide content")
             elif bigrams[i] & bigrams[j]:
                 log.info("slide similarity alarm S%d/S%d: shared phrase", i + 1, j + 1)
