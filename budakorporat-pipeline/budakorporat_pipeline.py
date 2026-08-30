@@ -23,6 +23,8 @@ FEEDS = [
     "https://www.cnnindonesia.com/nasional/rss",
     "https://www.antaranews.com/rss/politik.xml",
     "https://rss.tempo.co/",
+    "https://www.cnbcindonesia.com/news/rss",
+    "https://nasional.sindonews.com/rss",
 ]
 POLITICAL_RE = re.compile(r"politik|pemerintah|presiden|dpr|parlemen|menteri|partai|pemilu|pilkada|kpk|koalisi|istana|kebijakan|uu |undang-undang|anggaran|pajak|korupsi", re.I)
 PUBLIC_POWER_ACTION_RE = re.compile(r"menandatangani|mengesahkan|menerbitkan|mencabut|memberlakukan|mengalokasikan|memangkas|menaikkan|menurunkan", re.I)
@@ -31,7 +33,7 @@ PUBLIC_MATERIAL_RE = re.compile(r"kebijakan|anggaran|pajak|subsidi|bansos|ruu|un
 DRAMA_RE = re.compile(r"kontrovers|konflik|ribut|sengketa|kritik|tuding|bantah|protes|skandal|heboh|viral|geger|polemi|pecat|gugat|ditangkap|tersangka", re.I)
 EXCLUDED_RE = re.compile(r"balita|bayi|anak kecil|kekerasan seksual|pencabul|pemerkosaan|pembunuhan|kriminal|penganiayaan|tawuran", re.I)
 UA = "budakorporat-pipeline/1.0"
-MAX_AGE = timedelta(hours=12)
+MAX_AGE = timedelta(hours=24)
 DATE_FIELDS = ("pubDate", "published", "updated", "date")
 log = logging.getLogger("budakorporat")
 

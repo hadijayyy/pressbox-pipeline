@@ -13,6 +13,12 @@ def test_policy_opportunity_gate():
     assert not p._has_political_opportunity({"title": "Presiden akan menutup muktamar", "description": "acara berlangsung tertib"})
 
 
+def test_candidate_pool_uses_24_hour_freshness_and_live_political_sources():
+    assert p.MAX_AGE == p.timedelta(hours=24)
+    assert "https://www.cnbcindonesia.com/news/rss" in p.FEEDS
+    assert "https://nasional.sindonews.com/rss" in p.FEEDS
+
+
 def test_prompt_forbids_invented_reader_stakes_and_rejected_frames():
     assert "Jangan menyeret pembaca, pajak, kerugian negara" in p.PROMPT
     assert "hapus klaimnya; jangan sekadar melunakkan" in p.PROMPT
