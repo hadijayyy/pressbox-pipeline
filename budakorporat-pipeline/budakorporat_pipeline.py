@@ -242,6 +242,8 @@ AI_EDITOR_PROMPT = """Kamu reviewer editorial fail-closed.
 Review setiap slide hanya terhadap EVIDENCE yang ditautkan pada slide itu. SOURCE_BODY hanya konteks; jangan pakai fakta di luar EVIDENCE slide untuk membenarkan klaim. Jangan cari fakta baru. Jangan mengubah angka,
 nama, kutipan, motif, dampak, atau sebab-akibat tanpa dukungan SOURCE_BODY.
 Deteksi klaim tersirat, framing hiperbolik, evidence berulang, angka tidak konsisten, dan tulisan datar.
+**ATURAN KETAT: Jangan ubah fakta sumber.** Jika sumber bilang "tidak ada kebakaran", jangan tulis "api padam" atau "terbakar". Jika sumber bilang "bukan kebakaran", jangan-framing seolah memang kebakaran. Fakta sumber harus persis, bukan diplesetkan.
+**ATURAN KETAT: Angka spesifik harus ada di sumber.** Jika slide menyebut "3 mobil" atau "14 personel", angka itu HARUS muncul di SOURCE_BODY. Jika tidak ada, hapus angka atau ganti deskriptif ("beberapa mobil damkar").
 Periksa gaya editorial: draft harus punya POV tajam — jangan cuma ringkasan netral. Tulisan datar tanpa "grease" = REPAIR.
 Contoh REPAIR: "Keputusan ini diambil setelah kajian mendalam" = BORING, harus di-repair jadi sesuatu yang bikin emosi.
 Contoh PASS: "Kajian mendalam? Siapa yang kajian? Yang diuntungkan siapa?" = SPICY, PASS.
@@ -431,6 +433,38 @@ def _claim_grounding_issues(parts: list[str], body: str) -> list[str]:
         for frame in motive_frames:
             if frame in low and frame not in lower_body:
                 issues.append(f"S{i}: unsupported motive framing '{frame}'")
+    return issues
+
+
+def _factual_drift_issues(parts: list[str], body: str) -> list[str]:
+    """Reject slides that contradict explicit source statements."""
+    lower_body = body.lower()
+    issues = []
+    # Check for "X happened" when source says "X did NOT happen"
+    negation_pairs = [
+        ("tidak ada kebakaran", ["api padam", "api menyala", "terbakar", "kebakaran terjadi"]),
+        ("bukan kebakaran", ["api padam", "api menyala", "terbakar", "kebakaran terjadi"]),
+    ]
+    for i, part in enumerate(parts, 1):
+        low = part.lower()
+        for negated_fact, contradicts in negation_pairs:
+            if negated_fact in lower_body:
+                for c in contradicts:
+                    if c in low:
+                        issues.append(f"S{i}: contradicts source (source says '{negated_fact}', slide implies '{c}')")
+    return issues
+
+
+def _unsourced_number_issues(parts: list[str], body: str) -> list[str]:
+    """Reject specific numbers in slides that don't appear in source."""
+    lower_body = body.lower()
+    issues = []
+    for i, part in enumerate(parts, 1):
+        # Match numbers with units (mobil, personel, orang, unit, dll)
+        for m in re.finditer(r'\b(\d+)\s*(mobil|personel|orang|unit|armada|truk|personil|petugas)\b', part.lower()):
+            num, unit = m.group(1), m.group(2)
+            if f"{num} {unit}" not in lower_body and f"{num} {unit}" not in lower_body:
+                issues.append(f"S{i}: unsourced number '{num} {unit}' not in article")
     return issues
 
 
@@ -685,6 +719,10 @@ def validate(parts: list[str], item: dict, body: str, allow_url=True):
     if len(body) < 200: raise ValueError("source body too thin")
     issues = _claim_grounding_issues(parts, body)
     if issues: raise ValueError("; ".join(issues))
+    drift = _factual_drift_issues(parts, body)
+    if drift: raise ValueError("; ".join(drift))
+    unsourced = _unsourced_number_issues(parts, body)
+    if unsourced: raise ValueError("; ".join(unsourced))
     numeric_issues = _numeric_consistency_issues(parts)
     if numeric_issues: raise ValueError("; ".join(numeric_issues))
 
