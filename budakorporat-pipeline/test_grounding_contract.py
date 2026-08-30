@@ -9,14 +9,39 @@ import budakorporat_pipeline as p
 def test_policy_opportunity_gate():
     assert p._has_political_opportunity({"title": "DPR bahas anggaran", "description": "pengawasan pemerintah"})
     assert p._has_political_opportunity({"title": "Presiden menandatangani keputusan baru", "description": "aturan berlaku nasional"})
+    assert p._has_political_opportunity({"title": "Pemerintah melonggarkan syarat devisa", "description": "eksportir mendapat fasilitas"})
+    assert p._has_political_opportunity({"title": "Kementerian menerapkan panduan pengawasan", "description": "hak pekerja dilindungi"})
     assert not p._has_political_opportunity({"title": "Polisi menangkap pencuri ruko", "description": "laporan warga"})
     assert not p._has_political_opportunity({"title": "Presiden akan menutup muktamar", "description": "acara berlangsung tertib"})
+    assert not p._has_political_opportunity({"title": "Menteri mengajak kampus berkarya", "description": "acara organisasi"})
 
 
 def test_candidate_pool_uses_24_hour_freshness_and_live_political_sources():
     assert p.MAX_AGE == p.timedelta(hours=24)
     assert "https://www.cnbcindonesia.com/news/rss" in p.FEEDS
     assert "https://nasional.sindonews.com/rss" in p.FEEDS
+    assert {
+        "https://feed.liputan6.com/rss/news",
+        "https://sindikasi.okezone.com/index.php/rss/1/RSS2.0",
+        "https://www.inews.id/feed",
+        "https://katadata.co.id/rss",
+    } <= set(p.FEEDS)
+    assert not {
+        "https://www.kompas.com/rss",
+        "https://rss.detik.com/index.php/detikcom",
+        "https://rss.tempo.co/",
+    } & set(p.FEEDS)
+
+
+def test_article_text_uses_json_ld_article_body():
+    body = "Isi artikel penuh tentang pengawasan kebijakan publik. " * 8
+    raw = f'<script type="application/ld+json">{{"@type":"NewsArticle","articleBody":{json.dumps(body)}}}</script>'
+    assert p._extract_article_text(raw) == body.strip()
+
+
+def test_article_text_supports_c_detail_body():
+    body = "Isi artikel penuh tentang pengawasan kebijakan publik. " * 8
+    assert p._extract_article_text(f'<div class="c-detail read"><p>{body}</p></div>') == body.strip()
 
 
 def test_prompt_forbids_invented_reader_stakes_and_rejected_frames():

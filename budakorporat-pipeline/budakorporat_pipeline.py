@@ -18,16 +18,23 @@ TOKEN_FILE = Path.home() / ".hermes" / "threads_token_budakorporat.json"
 USER = "budakorporat_id"
 USER_ID = "27516379201355016"
 FEEDS = [
-    "https://www.kompas.com/rss",
-    "https://rss.detik.com/index.php/detikcom",
     "https://www.cnnindonesia.com/nasional/rss",
-    "https://www.antaranews.com/rss/politik.xml",
-    "https://rss.tempo.co/",
+    "https://www.cnnindonesia.com/internasional/rss",
     "https://www.cnbcindonesia.com/news/rss",
+    "https://www.cnbcindonesia.com/market/rss",
     "https://nasional.sindonews.com/rss",
+    "https://ekbis.sindonews.com/rss",
+    "https://feed.liputan6.com/rss/news",
+    "https://feed.liputan6.com/rss/bisnis",
+    "https://sindikasi.okezone.com/index.php/rss/1/RSS2.0",
+    "https://sindikasi.okezone.com/index.php/rss/11/RSS2.0",
+    "https://www.inews.id/feed",
+    "https://katadata.co.id/rss",
+    "https://www.antaranews.com/rss/terkini.xml",
+    "https://www.antaranews.com/rss/top-news.xml",
 ]
 POLITICAL_RE = re.compile(r"politik|pemerintah|presiden|dpr|parlemen|menteri|partai|pemilu|pilkada|kpk|koalisi|istana|kebijakan|uu |undang-undang|anggaran|pajak|korupsi", re.I)
-PUBLIC_POWER_ACTION_RE = re.compile(r"menandatangani|mengesahkan|menerbitkan|mencabut|memberlakukan|mengalokasikan|memangkas|menaikkan|menurunkan", re.I)
+PUBLIC_POWER_ACTION_RE = re.compile(r"menandatangani|mengesahkan|menerbitkan|mencabut|memberlakukan|mengalokasikan|memangkas|menaikkan|menurunkan|mengizinkan|merelaksasi|melonggarkan|menetapkan|meminta|menyiapkan|memberikan|menangani|menerapkan|menindaklanjuti|mewacanakan|memfinalisasi|mengawasi|memeriksa|membatasi|melarang|menjamin|melindungi", re.I)
 PUBLIC_ACTOR_RE = re.compile(r"dpr|parlemen|presiden|menteri|pemerintah", re.I)
 PUBLIC_MATERIAL_RE = re.compile(r"kebijakan|anggaran|pajak|subsidi|bansos|ruu|undang-undang|peraturan|pengawasan|akuntabilitas|transparansi|korupsi|kpk|tppu|aset|konflik\s+kepentingan|penyalahgunaan\s+wewenang|hak\s+publik|pelayanan\s+publik", re.I)
 DRAMA_RE = re.compile(r"kontrovers|konflik|ribut|sengketa|kritik|tuding|bantah|protes|skandal|heboh|viral|geger|polemi|pecat|gugat|ditangkap|tersangka", re.I)
@@ -141,7 +148,7 @@ class _ArticleTextParser(HTMLParser):
     def handle_starttag(self, tag, attrs):
         attrs = dict(attrs)
         classes = (attrs.get("class") or "").lower().replace("-", "_")
-        is_body = tag == "article" or any(k in classes for k in ("article_body", "article_content", "story_body", "post_content", "entry_content"))
+        is_body = tag == "article" or any(k in classes for k in ("article_body", "article_content", "story_body", "post_content", "entry_content", "c_detail"))
         if is_body and not self.active:
             self.active, self.depth = True, 1
         elif self.active:
@@ -165,7 +172,12 @@ class _ArticleTextParser(HTMLParser):
 def _extract_article_text(raw: str) -> str:
     parser = _ArticleTextParser()
     parser.feed(raw)
-    return text(" ".join(parser.parts))
+    body = text(" ".join(parser.parts))
+    if len(body) < 200:
+        matches = re.findall(r'"articleBody"\s*:\s*("(?:\\.|[^"\\])*")', raw, re.I)
+        bodies = [text(json.loads(match)) for match in matches]
+        body = max(bodies, key=len, default=body)
+    return body
 
 
 def article_body(item: dict) -> str:
