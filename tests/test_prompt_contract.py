@@ -97,6 +97,15 @@ def test_ai_editor_contract_is_fail_closed_and_allows_one_repair():
     assert "validate(repaired, item, body, allow_url=False)" in text
 
 
+def test_public_slide_rejects_internal_prompt_metadata():
+    m = _load_budakorporat()
+    body = "RUU ini memuat aturan penting tentang perampasan aset dan tindak pidana. " * 8
+    item = {"url": "https://example.test/source"}
+    slide = "SOURCE_BODY bocor ke publik dan tidak boleh muncul sebagai bagian dari konten."
+    with __import__("pytest").raises(ValueError, match="internal prompt metadata leaked"):
+        m.validate([slide], item, body, allow_url=False)
+
+
 def test_numeric_consistency_rejects_wrong_explicit_ratio():
     m = _load_budakorporat()
     parts = ["17 dari 954 hektare disebut hanya 0,2% dalam laporan sumber ini."]

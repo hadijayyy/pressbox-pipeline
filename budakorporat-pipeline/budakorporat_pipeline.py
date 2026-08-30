@@ -236,6 +236,8 @@ REPAIR hanya jika bisa memperbaiki dari SOURCE_BODY tanpa fakta baru.
 REJECT jika evidence tidak cukup, tulisan datar tanpa tesis/opini, atau serangan diarahkan ke pribadi tanpa dasar.
 Pastikan emosi berasal dari ketimpangan, kontradiksi, risiko, atau dampak yang benar-benar didukung SOURCE_BODY.
 Setiap slide hasil repair 40–500 karakter.
+Jangan pernah menulis nama field internal seperti SOURCE_BODY, SOURCE_TITLE,
+EVIDENCE_PACK, SLIDES, atau metadata prompt ke dalam slide publik.
 
 SOURCE_BODY:
 {body}
@@ -318,11 +320,14 @@ Pastikan:
 - reversal benar-benar mengubah cara melihat kasus.
 
 OUTPUT:
-JSON valid saja, tanpa markdown, URL, atau komentar lain.
+JSON valid saja, tanpa markdown, URL, komentar lain, atau nama field internal.
 
 {{\"slides\":[\"...\"]}}
 
 Setiap slide 40–500 karakter.
+
+Jangan pernah menulis SOURCE_BODY, SOURCE_TITLE, EVIDENCE_PACK, SLIDES, atau
+metadata prompt ke dalam slide publik. Gunakan fakta source langsung.
 
 SOURCE_TITLE:
 {title}
@@ -519,9 +524,13 @@ def _repeated_slide_issues(parts: list[str]) -> list[str]:
     return issues
 
 
+_INTERNAL_LABEL_RE = re.compile(r"\b(?:SOURCE_BODY|SOURCE_TITLE|EVIDENCE_PACK|SLIDES)\b", re.I)
+
+
 def validate(parts: list[str], item: dict, body: str, allow_url=True):
     if not 1 <= len(parts) <= 5: raise ValueError("invalid thread parts: need 1-5 slides")
     if any(not p.strip() or len(p) < 40 or len(p) > 500 for p in parts): raise ValueError("part must be 40-500 chars")
+    if any(_INTERNAL_LABEL_RE.search(p) for p in parts): raise ValueError("internal prompt metadata leaked")
     repeated = _repeated_slide_issues(parts)
     if repeated: raise ValueError("; ".join(repeated))
     evidence_issues = _evidence_slide_issues(parts, body)
