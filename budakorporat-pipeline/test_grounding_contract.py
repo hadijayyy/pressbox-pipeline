@@ -82,9 +82,19 @@ def test_hashtag_rejected():
         p.validate(["Fakta sumber tetap dijaga tetapi tag dilarang #politik"], {"url": "https://example.test"}, body, allow_url=False)
 
 
+def test_unsourced_motive_framing_rejected():
+    body = "Kalimat sumber menjelaskan perubahan aturan tanpa menyebut motif pihak mana pun. " * 8
+    with __import__("pytest").raises(ValueError, match="unsupported motive framing"):
+        p.validate(["Aturan berubah lagi. Ada yang main-main di belakang layar dalam proses ini."], {"url": "https://example.test"}, body, allow_url=False)
+    with __import__("pytest").raises(ValueError, match="unsupported motive framing"):
+        p.validate(["Aturan berubah lagi karena ada pihak yang sengaja ngeblokir kader tertentu."], {"url": "https://example.test"}, body, allow_url=False)
+
+
 def test_prompt_limits_opinion_and_speculation():
     assert "Mayoritas slide wajib berupa fakta sumber" in p.PROMPT
     assert "Maksimal satu slide boleh memuat opini" in p.PROMPT
+    assert "Opini opsional" in p.PROMPT
+    assert "draft grounded tanpa opini tetap PASS" in p.AI_EDITOR_PROMPT
     assert "Jangan membuat pertanyaan spekulatif" in p.PROMPT
     assert "Jangan menghitung persentase" in p.PROMPT
     assert "Opini hanya boleh membandingkan fakta" in p.PROMPT
@@ -101,3 +111,31 @@ def test_validator_enforces_one_labeled_opinion():
             "Analisis: dua fakta eksplisit menunjukkan kontradiksi kebijakan yang jelas.",
             "Penilaian: dua fakta lain menunjukkan standar lembaga yang berbeda.",
         ], item, body, allow_url=False)
+
+
+def test_draft_labels_one_implicit_opinion_before_validation(monkeypatch):
+    slides = [
+        {"text": "Fakta sumber tetap utuh. Artinya, dua fakta menunjukkan kontradiksi kebijakan.", "evidence_ids": ["E1"]},
+        {"text": "Fakta sumber kedua menjelaskan keputusan pemerintah secara konkret.", "evidence_ids": ["E2"]},
+    ]
+    validated = []
+    monkeypatch.setattr(p, "_llm_draft", lambda *args: slides)
+    monkeypatch.setattr(p, "validate", lambda parts, *_args, **_kwargs: validated.append(parts.copy()))
+    monkeypatch.setattr(p, "_review_and_repair", lambda normalized, *_args: [slide["text"] for slide in normalized])
+
+    parts = p.draft({"title": "Judul", "url": "https://example.test"}, "Isi sumber " * 80)
+
+    assert parts[0].startswith("Analisis: ")
+    assert validated[0][0].startswith("Analisis: ")
+
+
+def test_draft_does_not_hide_multiple_implicit_opinions(monkeypatch):
+    slides = [
+        {"text": "Fakta pertama tersedia. Artinya, ada kontradiksi kebijakan.", "evidence_ids": ["E1"]},
+        {"text": "Fakta kedua tersedia. Ini menunjukkan standar lembaga berbeda.", "evidence_ids": ["E2"]},
+    ]
+    monkeypatch.setattr(p, "_llm_draft", lambda *args: slides)
+    monkeypatch.setattr(p, "_review_and_repair", lambda normalized, *_args: [slide["text"] for slide in normalized])
+
+    with __import__("pytest").raises(RuntimeError, match="3 percobaan"):
+        p.draft({"title": "Judul", "url": "https://example.test"}, "Isi sumber " * 80)

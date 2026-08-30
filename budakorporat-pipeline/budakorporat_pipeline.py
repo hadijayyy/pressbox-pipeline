@@ -242,8 +242,8 @@ AI_EDITOR_PROMPT = """Kamu reviewer editorial fail-closed.
 Review setiap slide hanya terhadap EVIDENCE yang ditautkan pada slide itu. SOURCE_BODY hanya konteks; jangan pakai fakta di luar EVIDENCE slide untuk membenarkan klaim. Jangan cari fakta baru. Jangan mengubah angka,
 nama, kutipan, motif, dampak, atau sebab-akibat tanpa dukungan SOURCE_BODY.
 Deteksi klaim tersirat, framing hiperbolik, evidence berulang, angka tidak konsisten, dan tulisan datar.
-Periksa gaya editorial: harus ada tesis/opini yang jelas dan emosi yang lahir dari fakta source.
-Tolak atau repair tulisan yang hanya merangkum kejadian, tanpa konflik kepentingan, ketimpangan, kontradiksi, risiko, atau posisi editorial.
+Periksa gaya editorial: utamakan fakta tajam dan emosi yang lahir dari fakta source. Opini tidak wajib.
+Jangan menolak tulisan grounded hanya karena tanpa tesis/opini; draft grounded tanpa opini tetap PASS. Tolak ringkasan datar hanya jika tidak punya information gain.
 Opini harus menyerang kebijakan, lembaga, aturan, insentif, standar ganda, atau distribusi kuasa—bukan pribadi tanpa dasar.
 Jangan meloloskan tuduhan motif, vonis kriminal, atau klaim dampak yang tidak didukung SOURCE_BODY.
 Desakan atau rekomendasi bukan bukti bahwa respons pemerintah lambat, gagal, tidak cukup, simbolik, atau terfragmentasi. Klaim penilaian itu wajib punya evidence eksplisit.
@@ -255,9 +255,9 @@ atau
 atau
 {{"status": "REJECT", "issues": [{{"slide": 1, "type": "...", "reason": "..."}}]}}
 
-PASS hanya jika semua slide grounded, tiap slide punya information gain, dan opini editorialnya jelas.
+PASS jika semua slide grounded dan tiap slide punya information gain; opini editorial opsional.
 REPAIR jika generator perlu menulis ulang dari evidence tertaut; jangan keluarkan slides baru.
-REJECT jika evidence tidak cukup, tulisan datar tanpa tesis/opini, atau serangan diarahkan ke pribadi tanpa dasar.
+REJECT jika evidence tidak cukup, tulisan tidak punya information gain, atau serangan diarahkan ke pribadi tanpa dasar.
 Pastikan emosi berasal dari ketimpangan, kontradiksi, risiko, atau dampak yang benar-benar didukung SOURCE_BODY.
 Setiap slide hasil repair 40–500 karakter.
 Jangan pernah menulis nama field internal seperti SOURCE_BODY, SOURCE_TITLE,
@@ -319,7 +319,7 @@ ATURAN FAKTA:
 - Dugaan tetap ditulis sebagai dugaan.
 - Jangan mengasumsikan motif.
 - Opini hanya boleh membandingkan fakta eksplisit dari evidence slide itu; jangan memakai metafora sebagai klaim baru.
-- Opini wajib berbentuk penilaian yang membandingkan dua fakta eksplisit dari evidence slide itu. Jika cuma ada satu fakta, tulis fakta tajam tanpa menambah motif, dampak, atau ketimpangan.
+- Jika dipakai, opini wajib berbentuk penilaian yang membandingkan dua fakta eksplisit dari evidence slide itu. Jika cuma ada satu fakta, tulis fakta tajam tanpa menambah motif, dampak, atau ketimpangan.
 - Jangan menyeret pembaca, pajak, kerugian negara, korban, lingkungan, atau kegagalan pengawasan kecuali evidence slide menyebutnya eksplisit.
 - Saat alasan penolakan mengutip klaim atau framing unsupported, hapus klaimnya; jangan sekadar melunakkan atau mengganti sinonimnya.
 - Jika tidak ada kontradiksi eksplisit di evidence, buat hook dari fakta paling berdampak tanpa menciptakan kontradiksi.
@@ -337,7 +337,7 @@ Bahasa Indonesia percakapan: santai, tajam, konkret, mudah dipahami.
 Gunakan gue/lu jika alami.
 Spicy dan emosional: buat pembaca merasa marah, dicurangi, takut, frustrasi, atau terganggu oleh kontradiksi yang ada di source.
 Mayoritas slide wajib berupa fakta sumber. Maksimal satu slide boleh memuat opini; awali dengan "Analisis:" atau "Penilaian:" dan batasi inferensi pada evidence_ids slide itu.
-Opini wajib jelas dan kuat, terutama di S1 atau S5; jangan berhenti sebagai laporan netral. Jangan membuat pertanyaan spekulatif.
+Opini opsional. Jika evidence tidak mendukung opini, tulis fakta tajam. Jangan membuat pertanyaan spekulatif.
 Serang kebijakan, lembaga, aturan, insentif, standar ganda, dan distribusi kuasa—bukan pribadi.
 Satu punchline kuat cukup; jangan semua slide berteriak.
 Hindari hiperbola, tuduhan motif, vonis kriminal, dan framing partisan tanpa evidence.
@@ -402,12 +402,16 @@ def _claim_grounding_issues(parts: list[str], body: str) -> list[str]:
     lower_body = body.lower()
     hedges = ("menurut", "diduga", "kayaknya", "polanya", "kata ", "sebut", "analisis", "mungkin", "bisa jadi")
     markers = ("butuh uang", "butuh dana", "butuh duit", "gaya hidup", "proyek fiktif", "mark up", "kepercayaan", "layanan publik", "korporatisme", "lembur", "rumah tangga", "keamanan ekonomi", "kelangsungan hidup", "duka mendalam", "akar permasalahan", "diungkap secara transparan", "tidak terulang")
+    motive_frames = ("main-main di belakang layar", "sengaja ngeblokir", "sengaja memblokir", "sengaja menghalangi")
     issues = []
     for i, part in enumerate(parts, 1):
         low = part.lower()
         for marker in markers:
             if marker in low and marker not in lower_body and not any(h in low for h in hedges):
                 issues.append(f"S{i}: unsupported claim '{marker}'")
+        for frame in motive_frames:
+            if frame in low and frame not in lower_body:
+                issues.append(f"S{i}: unsupported motive framing '{frame}'")
     return issues
 
 
@@ -505,6 +509,14 @@ def _llm_draft(item: dict, body: str, correction: str = "") -> list[dict]:
     return unique
 
 
+def _label_single_implicit_opinion(slides: list[dict]) -> list[dict]:
+    normalized = [{**slide} for slide in slides]
+    implicit = [slide for slide in normalized if _INFERENCE_RE.search(slide["text"]) and not _OPINION_LABEL_RE.search(slide["text"])]
+    if len(implicit) == 1 and not any(_OPINION_LABEL_RE.search(slide["text"]) for slide in normalized):
+        implicit[0]["text"] = f'Analisis: {implicit[0]["text"]}'
+    return normalized
+
+
 def draft(item: dict, body: str, use_llm=True) -> list[str]:
     if not use_llm:
         return _deterministic_draft(item, body)
@@ -512,7 +524,7 @@ def draft(item: dict, body: str, use_llm=True) -> list[str]:
     correction = ""
     for attempt in range(3):
         try:
-            slides = _llm_draft(item, body, correction)
+            slides = _label_single_implicit_opinion(_llm_draft(item, body, correction))
             parts = [slide["text"] for slide in slides]
             validate(parts, item, body, allow_url=False)
             return _review_and_repair(slides, item, body)
