@@ -25,7 +25,9 @@ FEEDS = [
     "https://rss.tempo.co/",
 ]
 POLITICAL_RE = re.compile(r"politik|pemerintah|presiden|dpr|parlemen|menteri|partai|pemilu|pilkada|kpk|koalisi|istana|kebijakan|uu |undang-undang|anggaran|pajak|korupsi", re.I)
-POLITICAL_OPPORTUNITY_RE = re.compile(r"kebijakan|anggaran|pajak|subsidi|bansos|ruu|undang-undang|peraturan|pengawasan|akuntabilitas|transparansi|korupsi|kpk|tppu|aset|konflik\s+kepentingan|penyalahgunaan\s+wewenang|hak\s+publik|pelayanan\s+publik|dpr|parlemen|presiden|menteri|pemerintah", re.I)
+PUBLIC_POWER_ACTION_RE = re.compile(r"menandatangani|mengesahkan|menerbitkan|mencabut|memberlakukan|mengalokasikan|memangkas|menaikkan|menurunkan", re.I)
+PUBLIC_ACTOR_RE = re.compile(r"dpr|parlemen|presiden|menteri|pemerintah", re.I)
+PUBLIC_MATERIAL_RE = re.compile(r"kebijakan|anggaran|pajak|subsidi|bansos|ruu|undang-undang|peraturan|pengawasan|akuntabilitas|transparansi|korupsi|kpk|tppu|aset|konflik\s+kepentingan|penyalahgunaan\s+wewenang|hak\s+publik|pelayanan\s+publik", re.I)
 DRAMA_RE = re.compile(r"kontrovers|konflik|ribut|sengketa|kritik|tuding|bantah|protes|skandal|heboh|viral|geger|polemi|pecat|gugat|ditangkap|tersangka", re.I)
 EXCLUDED_RE = re.compile(r"balita|bayi|anak kecil|kekerasan seksual|pencabul|pemerkosaan|pembunuhan|kriminal|penganiayaan|tawuran", re.I)
 UA = "budakorporat-pipeline/1.0"
@@ -96,7 +98,8 @@ def _candidate_score(item: dict, corroboration: int = 0) -> int:
 
 def _has_political_opportunity(item: dict) -> bool:
     """Require a policy, power, public-money, or accountability angle."""
-    return bool(POLITICAL_OPPORTUNITY_RE.search(f"{item['title']} {item.get('description', '')}"))
+    hay = f"{item['title']} {item.get('description', '')}"
+    return bool(PUBLIC_MATERIAL_RE.search(hay) or (PUBLIC_ACTOR_RE.search(hay) and PUBLIC_POWER_ACTION_RE.search(hay)))
 
 
 def collect() -> list[dict]:
@@ -302,6 +305,9 @@ ATURAN FAKTA:
 - Dugaan tetap ditulis sebagai dugaan.
 - Jangan mengasumsikan motif.
 - Opini hanya boleh membandingkan fakta eksplisit dari evidence slide itu; jangan memakai metafora sebagai klaim baru.
+- Opini wajib berbentuk penilaian yang membandingkan dua fakta eksplisit dari evidence slide itu. Jika cuma ada satu fakta, tulis fakta tajam tanpa menambah motif, dampak, atau ketimpangan.
+- Jangan menyeret pembaca, pajak, kerugian negara, korban, lingkungan, atau kegagalan pengawasan kecuali evidence slide menyebutnya eksplisit.
+- Saat alasan penolakan mengutip klaim atau framing unsupported, hapus klaimnya; jangan sekadar melunakkan atau mengganti sinonimnya.
 - Jika tidak ada kontradiksi eksplisit di evidence, buat hook dari fakta paling berdampak tanpa menciptakan kontradiksi.
 - Semakin jauh kesimpulan dari fakta sumber, semakin konservatif bahasanya.
 - Jangan memakai “viral/heboh/gempar” tanpa bukti.
@@ -501,6 +507,7 @@ def draft(item: dict, body: str, use_llm=True) -> list[str]:
             log.warning("LLM draft rejected attempt %d: %s", attempt + 1, exc)
             correction = ("\n\nPERBAIKI OUTPUT SEBELUMNYA. Alasan penolakan: "
                           f"{type(exc).__name__}: {str(exc)[:500]}. Tulis ulang dari SOURCE_BODY saja. "
+                          "Hapus semua klaim, pertanyaan, metafora, dan framing yang dikutip dalam alasan penolakan; jangan parafrasekan. "
                           "Pakai 1-5 slide sesuai fakta unik; jangan mengulang fakta atau mengejar jumlah slide. "
                           "Setiap slide harus mengambil evidence berbeda; jika evidence habis, hapus slide. "
                           "Ikuti fungsi slide berurutan jika didukung sumber. Keluarkan JSON valid; tiap slide berupa object text 40-500 karakter dan evidence_ids valid.")
@@ -549,12 +556,16 @@ def _repeated_slide_issues(parts: list[str]) -> list[str]:
 
 
 _INTERNAL_LABEL_RE = re.compile(r"\b(?:SOURCE_BODY|SOURCE_TITLE|EVIDENCE_PACK|SLIDES)\b", re.I)
+_OPINION_LABEL_RE = re.compile(r"^\s*(?:Analisis|Penilaian):", re.I)
+_INFERENCE_RE = re.compile(r"(?:^|[.!?]\s+)(?:Artinya|Ini (?:menunjukkan|berarti|membuktikan)|Secara struktur|Yang perlu diperhatikan)\b", re.I)
 
 
 def validate(parts: list[str], item: dict, body: str, allow_url=True):
     if not 1 <= len(parts) <= 5: raise ValueError("invalid thread parts: need 1-5 slides")
     if any(not p.strip() or len(p) < 40 or len(p) > 500 for p in parts): raise ValueError("part must be 40-500 chars")
     if any(_INTERNAL_LABEL_RE.search(p) for p in parts): raise ValueError("internal prompt metadata leaked")
+    if sum(bool(_OPINION_LABEL_RE.search(p)) for p in parts) > 1: raise ValueError("at most one opinion slide allowed")
+    if any(_INFERENCE_RE.search(p) and not _OPINION_LABEL_RE.search(p) for p in parts): raise ValueError("opinion must be labeled Analisis: or Penilaian:")
     repeated = _repeated_slide_issues(parts)
     if repeated: raise ValueError("; ".join(repeated))
     # Explicit evidence IDs plus per-slide AI review supersede lexical matching.
