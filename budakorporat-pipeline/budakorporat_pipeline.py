@@ -229,6 +229,7 @@ Periksa gaya editorial: harus ada tesis/opini yang jelas dan emosi yang lahir da
 Tolak atau repair tulisan yang hanya merangkum kejadian, tanpa konflik kepentingan, ketimpangan, kontradiksi, risiko, atau posisi editorial.
 Opini harus menyerang kebijakan, lembaga, aturan, insentif, standar ganda, atau distribusi kuasa—bukan pribadi tanpa dasar.
 Jangan meloloskan tuduhan motif, vonis kriminal, atau klaim dampak yang tidak didukung SOURCE_BODY.
+Desakan atau rekomendasi bukan bukti bahwa respons pemerintah lambat, gagal, tidak cukup, simbolik, atau terfragmentasi. Klaim penilaian itu wajib punya evidence eksplisit.
 
 Keluarkan JSON valid saja:
 {{"status": "PASS", "issues": []}}
@@ -296,9 +297,12 @@ ATURAN FAKTA:
 - Setiap S1–S4 harus membawa fungsi informasi/evidence baru.
 - Satu evidence tidak boleh dipakai ulang sebagai bukti utama.
 - Jangan menambah nama, angka, kutipan, motif, dampak, kejadian, atau sebab-akibat yang tidak ada di sumber.
+- Jangan menghitung persentase, rasio, atau total baru; hanya pakai angka yang tertulis verbatim di evidence.
 - Bedakan fakta, dugaan, dan analisis.
 - Dugaan tetap ditulis sebagai dugaan.
 - Jangan mengasumsikan motif.
+- Opini hanya boleh membandingkan fakta eksplisit dari evidence slide itu; jangan memakai metafora sebagai klaim baru.
+- Jika tidak ada kontradiksi eksplisit di evidence, buat hook dari fakta paling berdampak tanpa menciptakan kontradiksi.
 - Semakin jauh kesimpulan dari fakta sumber, semakin konservatif bahasanya.
 - Jangan memakai “viral/heboh/gempar” tanpa bukti.
 - Dampak ke pekerja, rumah tangga, masyarakat, dll hanya jika sumber mendukung.
@@ -467,10 +471,18 @@ def _llm_draft(item: dict, body: str, correction: str = "") -> list[dict]:
         ids = slide["evidence_ids"]
         if not 1 <= len(ids) <= 5 or not all(isinstance(key, str) and key in catalog for key in ids):
             raise RuntimeError("LLM evidence id invalid")
-    used = [key for slide in slides for key in slide["evidence_ids"]]
-    if len(used) != len(set(used)):
-        raise RuntimeError("LLM evidence repeated across slides")
-    return slides
+    used = set()
+    unique = []
+    for slide in slides:
+        available = []
+        for key in slide["evidence_ids"]:
+            if key not in used and key not in available:
+                available.append(key)
+        if available:
+            slide["evidence_ids"] = available
+            unique.append(slide)
+            used.update(available)
+    return unique
 
 
 def draft(item: dict, body: str, use_llm=True) -> list[str]:
