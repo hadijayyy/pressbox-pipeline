@@ -242,10 +242,12 @@ AI_EDITOR_PROMPT = """Kamu reviewer editorial fail-closed.
 Review setiap slide hanya terhadap EVIDENCE yang ditautkan pada slide itu. SOURCE_BODY hanya konteks; jangan pakai fakta di luar EVIDENCE slide untuk membenarkan klaim. Jangan cari fakta baru. Jangan mengubah angka,
 nama, kutipan, motif, dampak, atau sebab-akibat tanpa dukungan SOURCE_BODY.
 Deteksi klaim tersirat, framing hiperbolik, evidence berulang, angka tidak konsisten, dan tulisan datar.
-Periksa gaya editorial: utamakan fakta tajam dan emosi yang lahir dari fakta source. Opini tidak wajib.
-Jangan menolak tulisan grounded hanya karena tanpa tesis/opini; draft grounded tanpa opini tetap PASS. Tolak ringkasan datar hanya jika tidak punya information gain.
-Opini harus menyerang kebijakan, lembaga, aturan, insentif, standar ganda, atau distribusi kuasa—bukan pribadi tanpa dasar.
-Jangan meloloskan tuduhan motif, vonis kriminal, atau klaim dampak yang tidak didukung SOURCE_BODY.
+Periksa gaya editorial: draft harus punya POV tajam — jangan cuma ringkasan netral. Tulisan datar tanpa "grease" = REPAIR.
+Contoh REPAIR: "Keputusan ini diambil setelah kajian mendalam" = BORING, harus di-repair jadi sesuatu yang bikin emosi.
+Contoh PASS: "Kajian mendalam? Siapa yang kajian? Yang diuntungkan siapa?" = SPICY, PASS.
+Draft grounded tanpa opini tetap PASS jika factual-nya tajam. Tapi draft yang terlalu hati-hati dan kehilangan emosi = REPAIR.
+Opini kuat diperbolehkan selama berbasis evidence. Serangan kebijakan/lembaga/aturan/insentif/standar ganda/distribusi kuasa = PASS. Serangan pribadi tanpa dasar = REPAIR.
+Jangan meloloskan tuduhan motif, vonis kriminal, atau klaim dampak yang tidak didukung SOURCE_BODY. Tapi jangan tolak framing bold yang grounded hanya karena "terlalu tajam".
 Desakan atau rekomendasi bukan bukti bahwa respons pemerintah lambat, gagal, tidak cukup, simbolik, atau terfragmentasi. Klaim penilaian itu wajib punya evidence eksplisit.
 
 Keluarkan JSON valid saja:
@@ -255,8 +257,7 @@ atau
 atau
 {{"status": "REJECT", "issues": [{{"slide": 1, "type": "...", "reason": "..."}}]}}
 
-PASS jika semua slide grounded dan tiap slide punya information gain; opini editorial opsional.
-REPAIR jika generator perlu menulis ulang dari evidence tertaut; jangan keluarkan slides baru.
+PASS jika semua slide grounded, tiap slide punya information gain, dan punya emosi/grease. REPAIR jika generator perlu menulis ulang dari evidence tertaut; jangan keluarkan slides baru.
 REJECT jika evidence tidak cukup, tulisan tidak punya information gain, atau serangan diarahkan ke pribadi tanpa dasar.
 Pastikan emosi berasal dari ketimpangan, kontradiksi, risiko, atau dampak yang benar-benar didukung SOURCE_BODY.
 Setiap slide hasil repair 40–500 karakter.
@@ -272,8 +273,17 @@ SLIDES_WITH_EVIDENCE:
 
 PROMPT = """Kamu penulis komentar sosial Indonesia untuk akun budakorporat_id.
 
+⚠️ ATURAN PALING PENTING — WAJIB DIPATUHI:
+Konten kamu HARUS SPICY DAN EMOSIONAL. Bukan news wire. Bukan ringkasan netral. Bukan siaran pers.
+Setiap slide harus bikin pembaca MERASA SESUATU: marah, kecewa, sedih, curious, atau tertawa.
+Jika kamu menulis seperti news wire ("X menetapkan aturan Y", "Keputusan diambil setelah kajian"), kamu GAGAL.
+Contoh BORING (DILARANG): "Pemerintah menetapkan aturan baru tentang larangan rangkap jabatan."
+Contoh SPICY (WAJIB): "Pemerintah bilang larangan rangkap jabatan demi transparansi. Tapi aturannya sendiri punya lubang segede gudang."
+Contoh LAIN SPICY (WAJIB): "Lu bayar pajak. Tapi yang dapat untung siapa? Bukan lu."
+Contoh LAIN SPICY (WAJIB): "Aturan baru? Jangan senang dulu. Lu baca pasal kecilnya belum?"
+
 TUJUAN:
-Buat thread yang mengubah cara pandang pembaca: dari melihat kasus secara sederhana menjadi memahami mekanisme, kontradiksi, insentif, risiko, atau konsekuensi yang lebih besar.
+Buat thread yang bikin pembaca emosi: kecewa, sedih, marah, atau tertawa. Bukan cuma informatif — harus bikin orang nggak bisa scrolling lewat. Fakta yang disampaikan harus di-framing supaya pembaca merasakan dampaknya secara personal.
 
 MEKANISME VIRAL YANG DIADAPTASI:
 - Mulai dari masalah dekat dengan konsekuensi konkret bagi pembaca, bukan klaim heboh.
@@ -287,23 +297,26 @@ MEKANISME VIRAL YANG DIADAPTASI:
 Jangan meniru kalimat, persona, slogan, cerita, atau ekspresi akun lain.
 
 STRUKTUR:
-Utamakan 3–4 slide; maksimal 5. Jika evidence unik tidak cukup, gunakan lebih sedikit. Sebelum output, cek mekanis bahwa tidak ada evidence ID yang muncul di lebih dari satu slide.
+Utamakan 4 slide; maksimal 5. Jika evidence kuat, boleh naik ke 5. Jika evidence unik tidak cukup untuk 4, gunakan lebih sedikit. Sebelum output, cek mekanis bahwa tidak ada evidence ID yang muncul di lebih dari satu slide.
 
-S1 — HOOK
-Buka dengan kontradiksi konkret antara apa yang terlihat di permukaan dan apa yang ditunjukkan evidence. Jangan buka dengan ringkasan netral. Jangan mengarang konflik, motif, atau kepentingan.
+S1 — HOOK (WAJIB SPICY — bukan ringkasan netral)
+Buka dengan kontradiksi yang bikin emosi: marah, curious, atau nggak percaya. 
+Contoh: "Lu bayar pajak. Tapi yang dapat untung siapa? Bukan lu."
+Jangan buka dengan "X menetapkan aturan Y" — itu boring.
+Jangan mengarang konflik, motif, atau kepentingan.
 
 S2 — EVIDENCE 1
-Berikan fakta/konteks penting pertama. Boleh pakai janji bernomor hanya jika jumlah evidence memang tersedia di EVIDENCE_PACK.
+Berikan fakta/konteks penting pertama dengan framing yang bikin emosi. Contoh: "Selama ini lu kira aturannya adil. Tapi ini yang sebenarnya terjadi."
 
 S3 — EVIDENCE 2
-Berikan evidence baru + konteks baru + analisis seperlunya.
+Berikan evidence baru + konteks baru + analisis yang bikin pembaca frustasi atau marah.
 Jika melakukan inferensi, tandai jelas dengan bahasa seperti:
-“Ini bisa berarti…”
-“Secara struktur…”
-“Yang perlu diperhatikan…”
+"Ini bisa berarti…"
+"Secara struktur…"
+"Yang perlu diperhatikan…”
 
 S4 — EVIDENCE 3 / ESCALATION
-Tambahkan mekanisme, kontradiksi, kronologi, angka, aturan, atau konsekuensi baru yang belum dipakai.
+Tambahkan mekanisme, kontradiksi, kronologi, angka, aturan, atau konsekuensi baru yang belum dipakai. Framing: bikin pembaca merasa "kok bisa sih?"
 
 S5 — REVERSAL + CTA
 Balik asumsi awal hanya jika tersedia evidence baru yang belum dipakai slide lain. Tarik satu prinsip praktis dan tutup dengan CTA spesifik seperti cek sumber, bandingkan angka, baca kronologi, atau cek aturan.
@@ -318,17 +331,14 @@ ATURAN FAKTA:
 - Bedakan fakta, dugaan, dan analisis.
 - Dugaan tetap ditulis sebagai dugaan.
 - Jangan mengasumsikan motif.
-- Opini hanya boleh membandingkan fakta eksplisit dari evidence slide itu; jangan memakai metafora sebagai klaim baru.
-- Jika dipakai, opini wajib berbentuk penilaian yang membandingkan dua fakta eksplisit dari evidence slide itu. Jika cuma ada satu fakta, tulis fakta tajam tanpa menambah motif, dampak, atau ketimpangan.
-- Jangan menyeret pembaca, pajak, kerugian negara, korban, lingkungan, atau kegagalan pengawasan kecuali evidence slide menyebutnya eksplisit.
-- Saat alasan penolakan mengutip klaim atau framing unsupported, hapus klaimnya; jangan sekadar melunakkan atau mengganti sinonimnya.
+- Opini boleh membandingkan fakta eksplisit dari evidence. Opini juga boleh menarik kesimpulan tajam dari fakta — asal evidence mendukung. Jangan memakai metafora sebagai klaim baru.
 - Jika tidak ada kontradiksi eksplisit di evidence, buat hook dari fakta paling berdampak tanpa menciptakan kontradiksi.
-- Semakin jauh kesimpulan dari fakta sumber, semakin konservatif bahasanya.
+- Semakin jauh kesimpulan dari fakta sumber, semakin konservatif bahasanya — tapi tetap tajam, jangan netral.
 - Jangan memakai “viral/heboh/gempar” tanpa bukti.
 - Dampak ke pekerja, rumah tangga, masyarakat, dll hanya jika sumber mendukung.
 
 ANTI-FILLER:
-Jika evidence hanya cukup untuk 2–4 slide, berhenti di sana.
+Jika evidence hanya cukup untuk 4 slide, berhenti di 4. Jika tidak cukup untuk 4, cari evidence lain di source.
 Jangan mengulang fakta dengan sinonim.
 Jangan isi slide dengan opini generik, moral kosong, atau pertanyaan retoris tanpa fungsi.
 
@@ -336,19 +346,28 @@ STYLE:
 Bahasa Indonesia percakapan: santai, tajam, konkret, mudah dipahami.
 Gunakan gue/lu jika alami.
 Spicy dan emosional: buat pembaca merasa marah, dicurangi, takut, frustrasi, atau terganggu oleh kontradiksi yang ada di source.
-Mayoritas slide wajib berupa fakta sumber. Maksimal satu slide boleh memuat opini; awali dengan "Analisis:" atau "Penilaian:" dan batasi inferensi pada evidence_ids slide itu.
-Opini opsional. Jika evidence tidak mendukung opini, tulis fakta tajam. Jangan membuat pertanyaan spekulatif.
-Serang kebijakan, lembaga, aturan, insentif, standar ganda, dan distribusi kuasa—bukan pribadi.
-Satu punchline kuat cukup; jangan semua slide berteriak.
-Hindari hiperbola, tuduhan motif, vonis kriminal, dan framing partisan tanpa evidence.
+Contoh framing BORING (DILARANG):
+- "Aturan ini berlaku untuk masa jabatan saat ini maupun calon di masa depan."
+- "Keputusan ini diambil setelah kajian mendalam."
+Contoh framing SPICY (WAJIB):
+- "Aturan baru? Jangan senang dulu. Lu baca pasal kecilnya belum?"
+- "Kajian mendalam? Siapa yang kajian? Yang diuntungkan siapa?"
+Slide harus punya POV tajam — jangan cuma menyampaikan berita. Fakta yang disampaikan harus di-framing supaya pembaca merasakan dampaknya.
+Mayoritas slide wajib berupa fakta sumber. Slide opini/inferensi boleh banyak — tulis natural tanpa label "Analisis:" atau "Penilaian:". Opini harus mengalir dalam cerita, bukan pakai prefix.
+Opini kuat diperbolehkan. Jika evidence mendukung, serang langsung — jangan soft-pedal. Jika tidak ada bukti, tulis fakta tajam tanpa opini.
+Serang kebijakan, lembaga, aturan, insentif, standar ganda, dan distribusi kuasa — bukan pribadi.
+Satu punchline kuat per thread. Setiap slide harus bikin pembaca ingin lanjut ke slide berikutnya.
+Hindari hiperbola, tuduhan motif, vonis kriminal, dan framing partisan tanpa evidence. Tapi jangan terlalu hati-hati sampai kehilangangrease.
+Setiap slide harus punya "grease" — sesuatu yang bikin pembaca geram, curious, atau merasa dipermainkan. Bukan cuma informasi.
 
 QUALITY CHECK INTERNAL:
 Pastikan:
-- hook lebih kuat dari headline tanpa mengarang,
-- tiap slide memberi information gain,
+- hook bikin emosi (marah/curious/frustrasi) tanpa mengarang,
+- tiap slide punya information gain,
 - tidak ada evidence duplikat,
 - analisis tidak terdengar seperti fakta,
-- reversal benar-benar mengubah cara melihat kasus.
+- reversal benar-benar mengubah cara melihat kasus,
+- setiap slide bikin pembaca ingin lanjut ke slide berikutnya.
 
 OUTPUT:
 JSON valid saja, tanpa markdown, URL, komentar lain, atau nama field internal.
@@ -463,7 +482,48 @@ def _review_and_repair(slides: list[dict], item: dict, body: str) -> list[str]:
         return parts
     if review["status"] == "REJECT":
         raise ValueError(f"AI editor rejected: {review.get('issues', [])}")
-    raise ValueError(f"AI editor requested repair: {review.get('issues', [])}")
+    # REPAIR: attempt one targeted fix before raising to outer retry loop
+    issues_text = json.dumps(review.get("issues", []), ensure_ascii=False)
+    catalog = _evidence_catalog(body)
+    current_slides = [{"text": s["text"], "evidence_ids": s["evidence_ids"],
+                       "evidence": [catalog[k] for k in s["evidence_ids"] if k in catalog]}
+                      for s in slides]
+    repair_prompt = (
+        f"Perbaiki slide berikut berdasarkan issue editor. "
+        f"HAPUS klaim/framing yang disebut di issue. Jangan ganti sinonim — hapus total. "
+        f"Tulis ulang hanya bagian yang bermasalah, pertahankan bagian lain. "
+        f"PENTING: Hasil repair HARUS SPICY DAN EMOSIONAL. Bukan news wire. Bukan ringkasan netral. "
+        f"Contoh BORING (DILARANG): 'Keputusan diambil setelah kajian mendalam.' "
+        f"Contoh SPICY (WAJIB): 'Kajian mendalam? Siapa yang kajian? Yang diuntungkan siapa?' "
+        f"Output JSON: {{\"slides\":[{{\"text\":\"...\",\"evidence_ids\":[\"E1\"]}}]}}\n\n"
+        f"ISSUES:\n{issues_text}\n\n"
+        f"CURRENT SLIDES:\n{json.dumps(current_slides, ensure_ascii=False)}\n\n"
+        f"SOURCE_BODY (gunakan sebagai satu-satunya sumber fakta):\n{body[:12000]}"
+    )
+    payload = json.dumps({"model": LLM_MODEL, "temperature": 0.3,
+                          "messages": [{"role": "user", "content": repair_prompt}],
+                          "response_format": {"type": "json_object"}}).encode()
+    req = Request(LLM_URL, data=payload, headers={"Authorization": f"Bearer {LLM_KEY}",
+                   "Content-Type": "application/json", "User-Agent": UA})
+    try:
+        with urlopen(req, timeout=45) as response:
+            data = json.loads(response.read(200_000))
+        raw = data["choices"][0]["message"]["content"]
+        result = json.loads(raw) if isinstance(raw, str) else raw
+        repaired = result["slides"]
+    except Exception:
+        raise ValueError(f"AI editor requested repair: {review.get('issues', [])}")
+    if not isinstance(repaired, list) or not repaired:
+        raise ValueError(f"AI editor requested repair: {review.get('issues', [])}")
+    for s in repaired:
+        if not isinstance(s, dict) or not isinstance(s.get("text"), str) or not isinstance(s.get("evidence_ids"), list):
+            raise ValueError(f"AI editor requested repair: {review.get('issues', [])}")
+        if not all(key in catalog for key in s["evidence_ids"]):
+            raise ValueError(f"AI editor requested repair: {review.get('issues', [])}")
+    repaired = _label_all_implicit_opinions(repaired)
+    parts = [s["text"] for s in repaired]
+    validate(parts, item, body, allow_url=False)
+    return parts
 
 
 def _llm_draft(item: dict, body: str, correction: str = "") -> list[dict]:
@@ -509,12 +569,9 @@ def _llm_draft(item: dict, body: str, correction: str = "") -> list[dict]:
     return unique
 
 
-def _label_single_implicit_opinion(slides: list[dict]) -> list[dict]:
-    normalized = [{**slide} for slide in slides]
-    implicit = [slide for slide in normalized if _INFERENCE_RE.search(slide["text"]) and not _OPINION_LABEL_RE.search(slide["text"])]
-    if len(implicit) == 1 and not any(_OPINION_LABEL_RE.search(slide["text"]) for slide in normalized):
-        implicit[0]["text"] = f'Analisis: {implicit[0]["text"]}'
-    return normalized
+def _label_all_implicit_opinions(slides: list[dict]) -> list[dict]:
+    """No-op: opinions flow naturally without labels. Keep for compatibility."""
+    return [{**slide} for slide in slides]
 
 
 def draft(item: dict, body: str, use_llm=True) -> list[str]:
@@ -524,7 +581,7 @@ def draft(item: dict, body: str, use_llm=True) -> list[str]:
     correction = ""
     for attempt in range(3):
         try:
-            slides = _label_single_implicit_opinion(_llm_draft(item, body, correction))
+            slides = _label_all_implicit_opinions(_llm_draft(item, body, correction))
             parts = [slide["text"] for slide in slides]
             validate(parts, item, body, allow_url=False)
             return _review_and_repair(slides, item, body)
@@ -536,7 +593,9 @@ def draft(item: dict, body: str, use_llm=True) -> list[str]:
                           "Hapus semua klaim, pertanyaan, metafora, dan framing yang dikutip dalam alasan penolakan; jangan parafrasekan. "
                           "Pakai 1-5 slide sesuai fakta unik; jangan mengulang fakta atau mengejar jumlah slide. "
                           "Setiap slide harus mengambil evidence berbeda; jika evidence habis, hapus slide. "
-                          "Ikuti fungsi slide berurutan jika didukung sumber. Keluarkan JSON valid; tiap slide berupa object text 40-500 karakter dan evidence_ids valid.")
+                          "Ikuti fungsi slide berurutan jika didukung sumber. Keluarkan JSON valid; tiap slide berupa object text 40-500 karakter dan evidence_ids valid. "
+                          "ATURAN KRITIS: Tulis natural seperti cerita — JANGAN pakai prefix 'Analisis:' atau 'Penilaian:'. Opini mengalir dalam kalimat. Opini unlimited. "
+                          "Slide non-opini wajib murni fakta source — JANGAN pakai bahasa inferensi di slide non-opini.")
     raise RuntimeError(f"Mistral gagal menghasilkan draft valid setelah 3 percobaan: {last}")
 
 
@@ -587,11 +646,11 @@ _INFERENCE_RE = re.compile(r"(?:^|[.!?]\s+)(?:Artinya|Ini (?:menunjukkan|berarti
 
 
 def validate(parts: list[str], item: dict, body: str, allow_url=True):
-    if not 1 <= len(parts) <= 5: raise ValueError("invalid thread parts: need 1-5 slides")
+    if not 4 <= len(parts) <= 5: raise ValueError("invalid thread parts: need 4-5 slides")
     if any(not p.strip() or len(p) < 40 or len(p) > 500 for p in parts): raise ValueError("part must be 40-500 chars")
     if any(_INTERNAL_LABEL_RE.search(p) for p in parts): raise ValueError("internal prompt metadata leaked")
-    if sum(bool(_OPINION_LABEL_RE.search(p)) for p in parts) > 1: raise ValueError("at most one opinion slide allowed")
-    if any(_INFERENCE_RE.search(p) and not _OPINION_LABEL_RE.search(p) for p in parts): raise ValueError("opinion must be labeled Analisis: or Penilaian:")
+    # ponytail: removed max-1-opinion cap — user wants unlimited opinions; editor checks grounding only.
+    # ponytail: no label enforcement — opinions flow naturally, no "Analisis:" or "Penilaian:" prefix.
     repeated = _repeated_slide_issues(parts)
     if repeated: raise ValueError("; ".join(repeated))
     # Explicit evidence IDs plus per-slide AI review supersede lexical matching.
