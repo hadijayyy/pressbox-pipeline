@@ -71,6 +71,10 @@ def test_budakorporat_prompt_applies_viral_mechanics_without_copying_reference()
         "reversal",
         "CTA spesifik",
         "Value harus muncul sebelum CTA",
+        "Spicy dan emosional",
+        "Opini wajib jelas dan kuat",
+        "Serang kebijakan, lembaga, aturan, insentif, standar ganda, dan distribusi kuasa",
+        "Satu punchline kuat cukup",
         "tindakan observable → tanda → arti tersembunyi → potensi kerugian",
         "Jangan meniru wording, klaim, angka, contoh, atau jumlah poin",
     ):
@@ -97,6 +101,21 @@ def test_numeric_consistency_rejects_wrong_explicit_ratio():
     m = _load_budakorporat()
     parts = ["17 dari 954 hektare disebut hanya 0,2% dalam laporan sumber ini."]
     assert "numeric inconsistency" in ";".join(m._numeric_consistency_issues(parts))
+
+
+def test_source_selector_excludes_crime_and_requires_political_conflict():
+    m = _load_budakorporat()
+    assert m.EXCLUDED_RE.search("balita kritis setelah dugaan penganiayaan")
+    assert m.POLITICAL_RE.search("DPR kritik kebijakan anggaran pemerintah")
+    assert m.DRAMA_RE.search("DPR kritik kebijakan anggaran pemerintah")
+    assert not (m.POLITICAL_RE.search("balita kritis") and m.DRAMA_RE.search("balita kritis"))
+
+
+def test_candidate_score_uses_bounded_corroboration_proxy():
+    m = _load_budakorporat()
+    item = {"title": "DPR kritik kebijakan pemerintah", "description": "x" * 200, "source": "example.test"}
+    assert m._candidate_score(item, corroboration=2) == 11
+    assert m._candidate_score(item, corroboration=99) == m._candidate_score(item, corroboration=3)
 
 
 def _load_budakorporat():

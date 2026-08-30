@@ -24,8 +24,9 @@ FEEDS = [
     "https://www.antaranews.com/rss/politik.xml",
     "https://rss.tempo.co/",
 ]
-POLITICAL_RE = re.compile(r"politik|pemerintah|presiden|dpr|parlemen|menteri|partai|pemilu|pilkada|kpk|koalisi|istana|hukum|korupsi", re.I)
+POLITICAL_RE = re.compile(r"politik|pemerintah|presiden|dpr|parlemen|menteri|partai|pemilu|pilkada|kpk|koalisi|istana|kebijakan|uu |undang-undang|anggaran|pajak|korupsi", re.I)
 DRAMA_RE = re.compile(r"kontrovers|konflik|ribut|sengketa|kritik|tuding|bantah|protes|skandal|heboh|viral|geger|polemi|pecat|gugat|ditangkap|tersangka", re.I)
+EXCLUDED_RE = re.compile(r"balita|bayi|anak kecil|kekerasan seksual|pencabul|pemerkosaan|pembunuhan|kriminal|penganiayaan|tawuran", re.I)
 UA = "budakorporat-pipeline/1.0"
 MAX_AGE = timedelta(hours=12)
 DATE_FIELDS = ("pubDate", "published", "updated", "date")
@@ -86,9 +87,10 @@ def _published_at(value: str):
     return dt.astimezone(timezone.utc) if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
-def _candidate_score(item: dict) -> int:
+def _candidate_score(item: dict, corroboration: int = 0) -> int:
     hay = f"{item['title']} {item.get('description', '')}"
-    return (4 if DRAMA_RE.search(hay) else 0) + (3 if POLITICAL_RE.search(hay) else 0) + (2 if item["source"] == "news.google.com" else 0) + min(len(item.get("description", "")) // 100, 2)
+    # No engagement API in RSS; corroboration + conflict signals are bounded virality proxies.
+    return (4 if DRAMA_RE.search(hay) else 0) + (3 if POLITICAL_RE.search(hay) else 0) + min(corroboration, 3) + min(len(item.get("description", "")) // 100, 2)
 
 
 def collect() -> list[dict]:
@@ -100,15 +102,18 @@ def collect() -> list[dict]:
                 published = _published_at(item.get("published", ""))
                 if not published or published < now - MAX_AGE or published > now + timedelta(minutes=10): continue
                 hay = f"{item['title']} {item.get('description', '')}"
-                if not (POLITICAL_RE.search(hay) and DRAMA_RE.search(hay)): continue
+                if EXCLUDED_RE.search(hay) or not POLITICAL_RE.search(hay): continue
+                # Drama is ranking signal, not hard gate: politics can be important without conflict wording.
+                normalized = re.sub(r"\W+", " ", item["title"].lower()).strip()
+                title_hits[normalized] = title_hits.get(normalized, 0) + 1
                 key = hashlib.sha256(item["url"].encode()).hexdigest()
                 if key not in seen:
-                    seen.add(key); title_hits[re.sub(r"\W+", " ", item["title"].lower()).strip()] = title_hits.get(re.sub(r"\W+", " ", item["title"].lower()).strip(), 0) + 1; item["key"] = key; out.append(item)
+                    seen.add(key); item["key"] = key; out.append(item)
         except Exception as exc:
             log.warning("feed failed %s: %s", feed, exc)
     for item in out:
         normalized = re.sub(r"\W+", " ", item["title"].lower()).strip()
-        item["score"] = _candidate_score(item) + min(title_hits[normalized], 3)
+        item["score"] = _candidate_score(item, title_hits[normalized])
     return sorted(out, key=lambda x: (x["score"], x.get("published", "")), reverse=True)
 
 
@@ -213,7 +218,11 @@ LLM_KEY = os.environ.get("BUDAKORPORAT_LLM_KEY", os.environ.get("HERMES_CUSTOM_4
 AI_EDITOR_PROMPT = """Kamu reviewer editorial fail-closed.
 Review SLIDES only against SOURCE_BODY. Jangan cari fakta baru. Jangan mengubah angka,
 nama, kutipan, motif, dampak, atau sebab-akibat tanpa dukungan SOURCE_BODY.
-Deteksi klaim tersirat, framing hiperbolik, evidence berulang, dan angka tidak konsisten.
+Deteksi klaim tersirat, framing hiperbolik, evidence berulang, angka tidak konsisten, dan tulisan datar.
+Periksa gaya editorial: harus ada tesis/opini yang jelas dan emosi yang lahir dari fakta source.
+Tolak atau repair tulisan yang hanya merangkum kejadian, tanpa konflik kepentingan, ketimpangan, kontradiksi, risiko, atau posisi editorial.
+Opini harus menyerang kebijakan, lembaga, aturan, insentif, standar ganda, atau distribusi kuasa—bukan pribadi tanpa dasar.
+Jangan meloloskan tuduhan motif, vonis kriminal, atau klaim dampak yang tidak didukung SOURCE_BODY.
 
 Keluarkan JSON valid saja:
 {{"status": "PASS", "issues": []}}
@@ -222,9 +231,11 @@ atau
 atau
 {{"status": "REJECT", "issues": [{{"slide": 1, "type": "...", "reason": "..."}}]}}
 
-PASS hanya jika semua slide grounded dan tiap slide punya information gain.
+PASS hanya jika semua slide grounded, tiap slide punya information gain, dan opini editorialnya jelas.
 REPAIR hanya jika bisa memperbaiki dari SOURCE_BODY tanpa fakta baru.
-REJECT jika evidence tidak cukup. Setiap slide hasil repair 40–500 karakter.
+REJECT jika evidence tidak cukup, tulisan datar tanpa tesis/opini, atau serangan diarahkan ke pribadi tanpa dasar.
+Pastikan emosi berasal dari ketimpangan, kontradiksi, risiko, atau dampak yang benar-benar didukung SOURCE_BODY.
+Setiap slide hasil repair 40–500 karakter.
 
 SOURCE_BODY:
 {body}
@@ -292,7 +303,11 @@ Jangan isi slide dengan opini generik, moral kosong, atau pertanyaan retoris tan
 STYLE:
 Bahasa Indonesia percakapan: santai, tajam, konkret, mudah dipahami.
 Gunakan gue/lu jika alami.
-Hindari hiperbola dan framing partisan tanpa evidence.
+Spicy dan emosional: buat pembaca merasa marah, dicurangi, takut, frustrasi, atau terganggu oleh kontradiksi yang ada di source.
+Opini wajib jelas dan kuat, terutama di S1 atau S5; jangan berhenti sebagai laporan netral.
+Serang kebijakan, lembaga, aturan, insentif, standar ganda, dan distribusi kuasa—bukan pribadi.
+Satu punchline kuat cukup; jangan semua slide berteriak.
+Hindari hiperbola, tuduhan motif, vonis kriminal, dan framing partisan tanpa evidence.
 
 QUALITY CHECK INTERNAL:
 Pastikan:
