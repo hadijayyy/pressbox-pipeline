@@ -25,6 +25,7 @@ FEEDS = [
     "https://rss.tempo.co/",
 ]
 POLITICAL_RE = re.compile(r"politik|pemerintah|presiden|dpr|parlemen|menteri|partai|pemilu|pilkada|kpk|koalisi|istana|kebijakan|uu |undang-undang|anggaran|pajak|korupsi", re.I)
+POLITICAL_OPPORTUNITY_RE = re.compile(r"kebijakan|anggaran|pajak|subsidi|bansos|ruu|undang-undang|peraturan|pengawasan|akuntabilitas|transparansi|korupsi|kpk|tppu|aset|konflik\s+kepentingan|penyalahgunaan\s+wewenang|hak\s+publik|pelayanan\s+publik|dpr|parlemen|presiden|menteri|pemerintah", re.I)
 DRAMA_RE = re.compile(r"kontrovers|konflik|ribut|sengketa|kritik|tuding|bantah|protes|skandal|heboh|viral|geger|polemi|pecat|gugat|ditangkap|tersangka", re.I)
 EXCLUDED_RE = re.compile(r"balita|bayi|anak kecil|kekerasan seksual|pencabul|pemerkosaan|pembunuhan|kriminal|penganiayaan|tawuran", re.I)
 UA = "budakorporat-pipeline/1.0"
@@ -93,6 +94,11 @@ def _candidate_score(item: dict, corroboration: int = 0) -> int:
     return (4 if DRAMA_RE.search(hay) else 0) + (3 if POLITICAL_RE.search(hay) else 0) + min(corroboration, 3) + min(len(item.get("description", "")) // 100, 2)
 
 
+def _has_political_opportunity(item: dict) -> bool:
+    """Require a policy, power, public-money, or accountability angle."""
+    return bool(POLITICAL_OPPORTUNITY_RE.search(f"{item['title']} {item.get('description', '')}"))
+
+
 def collect() -> list[dict]:
     seen, out, now = set(), [], datetime.now(timezone.utc)
     title_hits = {}
@@ -102,7 +108,7 @@ def collect() -> list[dict]:
                 published = _published_at(item.get("published", ""))
                 if not published or published < now - MAX_AGE or published > now + timedelta(minutes=10): continue
                 hay = f"{item['title']} {item.get('description', '')}"
-                if EXCLUDED_RE.search(hay) or not POLITICAL_RE.search(hay): continue
+                if EXCLUDED_RE.search(hay) or not POLITICAL_RE.search(hay) or not _has_political_opportunity(item): continue
                 # Drama is ranking signal, not hard gate: politics can be important without conflict wording.
                 normalized = re.sub(r"\W+", " ", item["title"].lower()).strip()
                 title_hits[normalized] = title_hits.get(normalized, 0) + 1
@@ -216,7 +222,7 @@ LLM_MODEL = os.environ.get("BUDAKORPORAT_LLM_MODEL", "cx/gpt-5.6-luna").strip()
 LLM_KEY = os.environ.get("BUDAKORPORAT_LLM_KEY", os.environ.get("HERMES_CUSTOM_43_157_200_187_20128_API_KEY", "")).strip()
 
 AI_EDITOR_PROMPT = """Kamu reviewer editorial fail-closed.
-Review SLIDES only against SOURCE_BODY. Jangan cari fakta baru. Jangan mengubah angka,
+Review setiap slide hanya terhadap EVIDENCE yang ditautkan pada slide itu. SOURCE_BODY hanya konteks; jangan pakai fakta di luar EVIDENCE slide untuk membenarkan klaim. Jangan cari fakta baru. Jangan mengubah angka,
 nama, kutipan, motif, dampak, atau sebab-akibat tanpa dukungan SOURCE_BODY.
 Deteksi klaim tersirat, framing hiperbolik, evidence berulang, angka tidak konsisten, dan tulisan datar.
 Periksa gaya editorial: harus ada tesis/opini yang jelas dan emosi yang lahir dari fakta source.
@@ -227,12 +233,12 @@ Jangan meloloskan tuduhan motif, vonis kriminal, atau klaim dampak yang tidak di
 Keluarkan JSON valid saja:
 {{"status": "PASS", "issues": []}}
 atau
-{{"status": "REPAIR", "issues": [{{"slide": 1, "type": "UNSUPPORTED_CLAIM", "reason": "..."}}], "slides": ["..."]}}
+{{"status": "REPAIR", "issues": [{{"slide": 1, "type": "UNSUPPORTED_CLAIM", "reason": "..."}}]}}
 atau
 {{"status": "REJECT", "issues": [{{"slide": 1, "type": "...", "reason": "..."}}]}}
 
 PASS hanya jika semua slide grounded, tiap slide punya information gain, dan opini editorialnya jelas.
-REPAIR hanya jika bisa memperbaiki dari SOURCE_BODY tanpa fakta baru.
+REPAIR jika generator perlu menulis ulang dari evidence tertaut; jangan keluarkan slides baru.
 REJECT jika evidence tidak cukup, tulisan datar tanpa tesis/opini, atau serangan diarahkan ke pribadi tanpa dasar.
 Pastikan emosi berasal dari ketimpangan, kontradiksi, risiko, atau dampak yang benar-benar didukung SOURCE_BODY.
 Setiap slide hasil repair 40–500 karakter.
@@ -242,7 +248,7 @@ EVIDENCE_PACK, SLIDES, atau metadata prompt ke dalam slide publik.
 SOURCE_BODY:
 {body}
 
-SLIDES:
+SLIDES_WITH_EVIDENCE:
 {slides}
 """
 
@@ -263,7 +269,7 @@ MEKANISME VIRAL YANG DIADAPTASI:
 Jangan meniru kalimat, persona, slogan, cerita, atau ekspresi akun lain.
 
 STRUKTUR:
-Maksimal 5 slide. Jika evidence unik tidak cukup, gunakan lebih sedikit.
+Utamakan 3–4 slide; maksimal 5. Jika evidence unik tidak cukup, gunakan lebih sedikit. Sebelum output, cek mekanis bahwa tidak ada evidence ID yang muncul di lebih dari satu slide.
 
 S1 — HOOK
 Buka dengan kontradiksi konkret antara apa yang terlihat di permukaan dan apa yang ditunjukkan evidence. Jangan buka dengan ringkasan netral. Jangan mengarang konflik, motif, atau kepentingan.
@@ -282,7 +288,7 @@ S4 — EVIDENCE 3 / ESCALATION
 Tambahkan mekanisme, kontradiksi, kronologi, angka, aturan, atau konsekuensi baru yang belum dipakai.
 
 S5 — REVERSAL + CTA
-Balik asumsi awal menggunakan evidence sebelumnya. Tarik satu prinsip praktis dan tutup dengan CTA spesifik seperti cek sumber, bandingkan angka, baca kronologi, atau cek aturan.
+Balik asumsi awal hanya jika tersedia evidence baru yang belum dipakai slide lain. Tarik satu prinsip praktis dan tutup dengan CTA spesifik seperti cek sumber, bandingkan angka, baca kronologi, atau cek aturan.
 
 Jangan tambahkan fakta baru di S5 jika tidak perlu.
 
@@ -306,7 +312,8 @@ STYLE:
 Bahasa Indonesia percakapan: santai, tajam, konkret, mudah dipahami.
 Gunakan gue/lu jika alami.
 Spicy dan emosional: buat pembaca merasa marah, dicurangi, takut, frustrasi, atau terganggu oleh kontradiksi yang ada di source.
-Opini wajib jelas dan kuat, terutama di S1 atau S5; jangan berhenti sebagai laporan netral.
+Mayoritas slide wajib berupa fakta sumber. Maksimal satu slide boleh memuat opini; awali dengan "Analisis:" atau "Penilaian:" dan batasi inferensi pada evidence_ids slide itu.
+Opini wajib jelas dan kuat, terutama di S1 atau S5; jangan berhenti sebagai laporan netral. Jangan membuat pertanyaan spekulatif.
 Serang kebijakan, lembaga, aturan, insentif, standar ganda, dan distribusi kuasa—bukan pribadi.
 Satu punchline kuat cukup; jangan semua slide berteriak.
 Hindari hiperbola, tuduhan motif, vonis kriminal, dan framing partisan tanpa evidence.
@@ -322,7 +329,9 @@ Pastikan:
 OUTPUT:
 JSON valid saja, tanpa markdown, URL, komentar lain, atau nama field internal.
 
-{{\"slides\":[\"...\"]}}
+{{\"slides\":[{{\"text\":\"...\",\"evidence_ids\":[\"E1\"]}}]}}
+
+Setiap slide wajib mencantumkan 1–5 ID dari EVIDENCE_PACK yang benar-benar mendasari text. ID yang sama tidak boleh dipakai di slide berbeda.
 
 Setiap slide 40–500 karakter.
 
@@ -349,6 +358,11 @@ def _evidence_units(body: str) -> list[tuple[str, set[str]]]:
 def _evidence_prompt(body: str) -> str:
     sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", re.sub(r"\s+", " ", body).strip()) if len(s.strip()) >= 40]
     return "\\n".join(f"E{i}: {sentence}" for i, sentence in enumerate(sentences, 1))
+
+
+def _evidence_catalog(body: str) -> dict[str, str]:
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", re.sub(r"\s+", " ", body).strip()) if len(s.strip()) >= 40]
+    return {f"E{i}": sentence for i, sentence in enumerate(sentences, 1)}
 
 
 def _deterministic_draft(item: dict, body: str) -> list[str]:
@@ -391,12 +405,14 @@ def _numeric_consistency_issues(parts: list[str]) -> list[str]:
     return []
 
 
-def _llm_editor(parts: list[str], body: str) -> dict:
+def _llm_editor(slides: list[dict], body: str) -> dict:
     if not (LLM_URL and LLM_MODEL and LLM_KEY):
         raise RuntimeError("AI editor failed closed: LLM config incomplete")
+    catalog = _evidence_catalog(body)
+    review_items = [{"text": slide["text"], "evidence": [catalog[key] for key in slide["evidence_ids"]]} for slide in slides]
     payload = json.dumps({"model": LLM_MODEL, "temperature": 0,
                           "messages": [{"role": "user", "content": AI_EDITOR_PROMPT.format(
-                              body=body[:12000], slides=json.dumps(parts, ensure_ascii=False))}],
+                              body=body[:12000], slides=json.dumps(review_items, ensure_ascii=False))}],
                           "response_format": {"type": "json_object"}}).encode()
     req = Request(LLM_URL, data=payload, headers={"Authorization": f"Bearer {LLM_KEY}",
                    "Content-Type": "application/json", "User-Agent": UA})
@@ -409,26 +425,20 @@ def _llm_editor(parts: list[str], body: str) -> dict:
         raise RuntimeError("AI editor failed closed: response invalid") from exc
     if result.get("status") not in {"PASS", "REPAIR", "REJECT"} or not isinstance(result.get("issues", []), list):
         raise RuntimeError("AI editor failed closed: contract invalid")
-    if result["status"] == "REPAIR":
-        slides = result.get("slides")
-        if not isinstance(slides, list) or not all(isinstance(slide, str) for slide in slides):
-            raise RuntimeError("AI editor failed closed: repair slides invalid")
-        result["slides"] = slides
     return result
 
 
-def _review_and_repair(parts: list[str], item: dict, body: str) -> list[str]:
-    review = _llm_editor(parts, body)
+def _review_and_repair(slides: list[dict], item: dict, body: str) -> list[str]:
+    parts = [slide["text"] for slide in slides]
+    review = _llm_editor(slides, body)
     if review["status"] == "PASS":
         return parts
     if review["status"] == "REJECT":
         raise ValueError(f"AI editor rejected: {review.get('issues', [])}")
-    repaired = review["slides"]
-    validate(repaired, item, body, allow_url=False)
-    return repaired
+    raise ValueError(f"AI editor requested repair: {review.get('issues', [])}")
 
 
-def _llm_draft(item: dict, body: str, correction: str = "") -> list[str]:
+def _llm_draft(item: dict, body: str, correction: str = "") -> list[dict]:
     if not (LLM_URL and LLM_MODEL and LLM_KEY):
         raise RuntimeError("LLM config incomplete; set BUDAKORPORAT_LLM_URL, _MODEL, _KEY")
     payload = json.dumps({"model": LLM_MODEL, "temperature": 0.4,
@@ -445,21 +455,22 @@ def _llm_draft(item: dict, body: str, correction: str = "") -> list[str]:
     try:
         raw = data["choices"][0]["message"]["content"]
         result = json.loads(raw) if isinstance(raw, str) else raw
-        parts = result["slides"]
+        slides = result["slides"]
     except (KeyError, IndexError, TypeError, ValueError) as exc:
         raise RuntimeError("LLM response contract invalid") from exc
-    if not isinstance(parts, list):
+    if not isinstance(slides, list):
         raise RuntimeError("LLM slides contract invalid")
-    normalized = []
-    for part in parts:
-        if isinstance(part, str):
-            normalized.append(part)
-        elif isinstance(part, dict) and part and all(isinstance(v, str) for v in part.values()):
-            # Models sometimes label one slide's fields instead of returning one string.
-            normalized.append(" ".join(part.values()))
-        else:
+    catalog = _evidence_catalog(body)
+    for slide in slides:
+        if not isinstance(slide, dict) or not isinstance(slide.get("text"), str) or not isinstance(slide.get("evidence_ids"), list):
             raise RuntimeError("LLM slides contract invalid")
-    return normalized
+        ids = slide["evidence_ids"]
+        if not 1 <= len(ids) <= 5 or not all(isinstance(key, str) and key in catalog for key in ids):
+            raise RuntimeError("LLM evidence id invalid")
+    used = [key for slide in slides for key in slide["evidence_ids"]]
+    if len(used) != len(set(used)):
+        raise RuntimeError("LLM evidence repeated across slides")
+    return slides
 
 
 def draft(item: dict, body: str, use_llm=True) -> list[str]:
@@ -469,17 +480,18 @@ def draft(item: dict, body: str, use_llm=True) -> list[str]:
     correction = ""
     for attempt in range(3):
         try:
-            parts = _llm_draft(item, body, correction)
+            slides = _llm_draft(item, body, correction)
+            parts = [slide["text"] for slide in slides]
             validate(parts, item, body, allow_url=False)
-            return parts
+            return _review_and_repair(slides, item, body)
         except (RuntimeError, ValueError) as exc:
             last = exc
             log.warning("LLM draft rejected attempt %d: %s", attempt + 1, exc)
             correction = ("\n\nPERBAIKI OUTPUT SEBELUMNYA. Alasan penolakan: "
-                          f"{type(exc).__name__}. Tulis ulang dari SOURCE_BODY saja. "
+                          f"{type(exc).__name__}: {str(exc)[:500]}. Tulis ulang dari SOURCE_BODY saja. "
                           "Pakai 1-5 slide sesuai fakta unik; jangan mengulang fakta atau mengejar jumlah slide. "
                           "Setiap slide harus mengambil evidence berbeda; jika evidence habis, hapus slide. "
-                          "Ikuti fungsi slide berurutan jika didukung sumber. Keluarkan JSON valid, tiap slide 40-500 karakter.")
+                          "Ikuti fungsi slide berurutan jika didukung sumber. Keluarkan JSON valid; tiap slide berupa object text 40-500 karakter dan evidence_ids valid.")
     raise RuntimeError(f"Mistral gagal menghasilkan draft valid setelah 3 percobaan: {last}")
 
 
@@ -533,9 +545,9 @@ def validate(parts: list[str], item: dict, body: str, allow_url=True):
     if any(_INTERNAL_LABEL_RE.search(p) for p in parts): raise ValueError("internal prompt metadata leaked")
     repeated = _repeated_slide_issues(parts)
     if repeated: raise ValueError("; ".join(repeated))
-    evidence_issues = _evidence_slide_issues(parts, body)
-    if evidence_issues: raise ValueError("; ".join(evidence_issues))
+    # Explicit evidence IDs plus per-slide AI review supersede lexical matching.
     joined = "\n".join(parts)
+    if "#" in joined: raise ValueError("hashtag not allowed")
     if allow_url and item["url"] not in joined: raise ValueError("source URL missing")
     if not allow_url and re.search(r"https?://", joined, re.I): raise ValueError("LLM URL leak")
     if len(body) < 200: raise ValueError("source body too thin")
@@ -577,8 +589,6 @@ def run(dry=False, use_llm=True):
                 raise RuntimeError("article hero image missing")
             parts = _safe_draft(item, body, use_llm)
             validate(parts, item, body, allow_url=False)
-            if use_llm:
-                parts = _review_and_repair(parts, item, body)
             break
         except (RuntimeError, ValueError) as exc:
             last = exc
