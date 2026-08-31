@@ -8,6 +8,7 @@ from email.utils import parsedate_to_datetime
 from pathlib import Path
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
+from io import BytesIO
 from urllib.error import HTTPError, URLError
 import xml.etree.ElementTree as ET
 
@@ -219,6 +220,49 @@ def article_image(item: dict) -> str:
     except Exception:
         pass
     return ""
+
+
+def _crop_image_to_4_5(image_url: str) -> str:
+    """Download image, crop to 4:5 ratio (center crop), save to temp file. Returns local path."""
+    try:
+        from PIL import Image
+    except ImportError:
+        log.warning("Pillow not installed; cannot crop image")
+        return image_url
+    
+    try:
+        req = Request(image_url, headers={"User-Agent": "Mozilla/5.0"})
+        with urlopen(req, timeout=15) as resp:
+            img_data = resp.read()
+        
+        img = Image.open(BytesIO(img_data))
+        w, h = img.size
+        
+        target_ratio = 4 / 5  # 0.8
+        current_ratio = w / h
+        
+        if current_ratio > target_ratio:
+            # Too wide — crop width
+            new_w = int(h * target_ratio)
+            left = (w - new_w) // 2
+            img = img.crop((left, 0, left + new_w, h))
+        elif current_ratio < target_ratio:
+            # Too tall — crop height
+            new_h = int(w / target_ratio)
+            top = (h - new_h) // 2
+            img = img.crop((0, top, w, top + new_h))
+        # else: already 4:5, no crop needed
+        
+        # Resize to 1080x1350 for Threads
+        img = img.resize((1080, 1350), Image.LANCZOS)
+        
+        out_path = f"/tmp/threads_crop_{hashlib.md5(image_url.encode()).hexdigest()[:8]}.jpg"
+        img.save(out_path, "JPEG", quality=90)
+        log.info("cropped image %dx%d -> %s", w, h, out_path)
+        return out_path
+    except Exception as e:
+        log.warning("image crop failed (%s); using original URL", e)
+        return image_url
 
 
 def _load_local_env():
@@ -741,6 +785,21 @@ def publish(parts: list[str], dry: bool, image_url: str = ""):
     sys.path.insert(0, "/home/ubuntu/pressbox-pipeline")
     from threads_poster import ThreadsPoster
     access, uid = token()
+    # Crop image to 4:5 for Threads if it's a URL
+    local_image = None
+    if image_url and image_url.startswith("http"):
+        local_image = _crop_image_to_4_5(image_url)
+        if local_image.startswith("/"):
+            # Use local file upload
+            results = []
+            poster = ThreadsPoster(access, uid)
+            for i, p in enumerate(parts):
+                if i == 0 and local_image:
+                    r = poster.post_single(p, image_file=local_image)
+                else:
+                    r = poster.post_single(p)
+                results.append(r.__dict__ if hasattr(r, '__dict__') else r)
+            return results
     return [r.__dict__ for r in ThreadsPoster(access, uid).post_thread(parts, image_urls=[image_url] + [None] * (len(parts) - 1))]
 
 
