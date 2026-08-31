@@ -304,6 +304,7 @@ nama, kutipan, motif, dampak, atau sebab-akibat tanpa dukungan SOURCE_BODY.
 Deteksi klaim tersirat, framing hiperbolik, evidence berulang, angka tidak konsisten, dan tulisan datar.
 **ATURAN KETAT: Jangan ubah fakta sumber.** Jika sumber bilang "tidak ada kebakaran", jangan tulis "api padam" atau "terbakar". Jika sumber bilang "bukan kebakaran", jangan-framing seolah memang kebakaran. Fakta sumber harus persis, bukan diplesetkan.
 **ATURAN KETAT: Angka spesifik harus ada di sumber.** Jika slide menyebut "3 mobil" atau "14 personel", angka itu HARUS muncul di SOURCE_BODY. Jika tidak ada, hapus angka atau ganti deskriptif ("beberapa mobil damkar").
+**ATURAN KETAT: Opini tidak boleh menambah fakta baru.** Jika source bilang "kuliah S2 di London", opini tidak boleh menulis "beli tiket pesawat" — karena "beli tiket" adalah fakta baru yang tidak ada di source. Opini hanya boleh mengekspresikan emosi/reaksi terhadap fakta yang SUDAH ADA di evidence. Contoh SALAH: "Dia malah beli tiket pesawat ke Inggris" (fakta baru: beli tiket). Contoh BENAR: "Dia malah kuliah di luar negeri sementara rakyat susah" (framing emosi terhadap fakta yang sudah ada di source). Jika slide menambah detail fakta baru meski "technically benar", flag sebagai UNSUPPORTED_CLAIM.
 Periksa gaya editorial: draft harus punya POV tajam — jangan cuma ringkasan netral. Tulisan datar tanpa "grease" = REPAIR.
 Contoh REPAIR: "Keputusan ini diambil setelah kajian mendalam" = BORING, harus di-repair jadi sesuatu yang bikin emosi.
 Contoh PASS: "Kajian mendalam? Siapa yang kajian? Yang diuntungkan siapa?" = SPICY, PASS.
@@ -394,6 +395,7 @@ ATURAN FAKTA:
 - Dugaan tetap ditulis sebagai dugaan.
 - Jangan mengasumsikan motif.
 - Opini boleh membandingkan fakta eksplisit dari evidence. Opini juga boleh menarik kesimpulan tajam dari fakta — asal evidence mendukung. Jangan memakai metafora sebagai klaim baru.
+- OPINI TIDAK BOLEH MENAMBAH FAKTA BARU. Jika source bilang "kuliah S2 di London", opini tidak boleh menulis "beli tiket pesawat" — karena "beli tiket" adalah fakta baru yang tidak ada di source. Opini hanya boleh mengekspresikan emosi/reaksi terhadap fakta yang SUDAH ADA di evidence, bukan menambah detail fakta baru meski "technically benar". Contoh SALAH: "Dia malah beli tiket pesawat ke Inggris" (fakta baru: beli tiket). Contoh BENAR: "Dia malah kuliah di luar negeri sementara rakyat susah" (framing emosi terhadap fakta yang sudah ada di source).
 - Jika tidak ada kontradiksi eksplisit di evidence, buat hook dari fakta paling berdampak tanpa menciptakan kontradiksi.
 - Semakin jauh kesimpulan dari fakta sumber, semakin konservatif bahasanya — tapi tetap tajam, jangan netral.
 - Jangan memakai “viral/heboh/gempar” tanpa bukti.
@@ -513,7 +515,7 @@ def _claim_grounding_issues(parts: list[str], body: str) -> list[str]:
 
 
 def _factual_drift_issues(parts: list[str], body: str) -> list[str]:
-    """Reject slides that contradict explicit source statements."""
+    """Reject slides that contradict explicit source statements or add new facts."""
     lower_body = body.lower()
     issues = []
     # Check for "X happened" when source says "X did NOT happen"
@@ -528,6 +530,16 @@ def _factual_drift_issues(parts: list[str], body: str) -> list[str]:
                 for c in contradicts:
                     if c in low:
                         issues.append(f"S{i}: contradicts source (source says '{negated_fact}', slide implies '{c}')")
+        # Check for new facts introduced in opinion
+        # Pattern: "beli [noun]" when source doesn't mention buying
+        new_fact_patterns = [
+            (r'beli\s+(tiket|properti|aset|mobil|rumah|tanah|saham)', "buying"),
+            (r'mengambil\s+(dana|uang|anggaran|dana-desa)', "taking funds"),
+            (r'korupsi|suap|menilep', "corruption"),
+        ]
+        for pattern, label in new_fact_patterns:
+            if re.search(pattern, low) and not re.search(pattern, lower_body):
+                issues.append(f"S{i}: possible new fact '{label}' — check if source supports this claim")
     return issues
 
 
