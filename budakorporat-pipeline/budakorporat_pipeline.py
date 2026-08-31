@@ -826,10 +826,7 @@ def publish(parts: list[str], dry: bool, image_url: str = ""):
             results = []
             poster = ThreadsPoster(access, uid)
             for i, p in enumerate(parts):
-                if i == 0 and local_image:
-                    r = poster.post_single(p, image_file=local_image)
-                else:
-                    r = poster.post_single(p)
+                r = poster.post_single(p, image_file=local_image)
                 results.append(r.__dict__ if hasattr(r, '__dict__') else r)
             return results
     return [r.__dict__ for r in ThreadsPoster(access, uid).post_thread(parts, image_urls=[image_url] + [None] * (len(parts) - 1))]
