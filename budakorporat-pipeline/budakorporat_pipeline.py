@@ -817,21 +817,6 @@ def publish(parts: list[str], dry: bool, image_url: str = ""):
     sys.path.insert(0, "/home/ubuntu/pressbox-pipeline")
     from threads_poster import ThreadsPoster
     access, uid = token()
-    # Crop image to 4:5 for Threads if it's a URL
-    local_image = None
-    if image_url and image_url.startswith("http"):
-        local_image = _crop_image_to_4_5(image_url)
-        if local_image.startswith("/"):
-            # Use local file upload
-            results = []
-            poster = ThreadsPoster(access, uid)
-            for i, p in enumerate(parts):
-                if i == 0:
-                    r = poster.post_single(p, image_file=local_image)
-                else:
-                    r = poster.post_single(p)
-                results.append(r.__dict__ if hasattr(r, '__dict__') else r)
-            return results
     return [r.__dict__ for r in ThreadsPoster(access, uid).post_thread(parts, image_urls=[image_url] + [None] * (len(parts) - 1))]
 
 
