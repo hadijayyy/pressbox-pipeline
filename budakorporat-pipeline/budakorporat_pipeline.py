@@ -838,6 +838,52 @@ def publish(parts: list[str], dry: bool, image_url: str = ""):
 def run(dry=False, use_llm=True):
     state = load_json(STATE, {"posted": []})
     posted = set(state.get("posted", []))
+
+    # --- retry logic: if pending retry and 15 min elapsed, retry same item ---
+    retry = state.get("retry")
+    if retry and not dry:
+        elapsed = int(time.time()) - retry.get("ts", 0)
+        if elapsed >= 900:  # 15 minutes
+            log.info("retrying publish for %s (elapsed %ds)", retry.get("item_key"), elapsed)
+            # find the item from candidates
+            candidates = collect()
+            retry_item = None
+            for c in candidates:
+                if c["key"] == retry["item_key"]:
+                    retry_item = c
+                    break
+            if retry_item:
+                try:
+                    resolve_article_url(retry_item)
+                    body = article_body(retry_item)
+                    image_url = article_image(retry_item)
+                    if not image_url:
+                        raise RuntimeError("article hero image missing")
+                    parts = _safe_draft(retry_item, body, use_llm)
+                    validate(parts, retry_item, body, allow_url=False)
+                    result = publish(parts, dry, image_url)
+                    state.setdefault("posted", []).append(retry_item["key"])
+                    state["last"] = {"url": retry_item["url"], "result": result, "ts": int(time.time())}
+                    state.pop("retry", None)
+                    save_json(STATE, state)
+                    print(json.dumps({"target": USER, "dry_run": dry, "posts": result}, ensure_ascii=False))
+                    return
+                except Exception as exc:
+                    log.exception("retry also failed")
+                    state["retry"]["ts"] = int(time.time())  # reset timer for next retry
+                    state["retry"]["error"] = str(exc)
+                    save_json(STATE, state)
+                    print(json.dumps({"target": USER, "dry_run": dry, "status": "NO_POST_PUBLISH_ERROR", "error": str(exc), "retry_in": "15m"}, ensure_ascii=False))
+                    return
+            else:
+                log.warning("retry item %s not found in candidates, clearing retry", retry.get("item_key"))
+                state.pop("retry", None)
+                save_json(STATE, state)
+        elif not dry:
+            log.info("retry pending for %s in %ds", retry.get("item_key"), 900 - elapsed)
+            print(json.dumps({"target": USER, "dry_run": dry, "status": "RETRY_PENDING", "retry_in": f"{(900 - elapsed)//60}m"}, ensure_ascii=False))
+            return
+
     candidates = [x for x in collect() if x["key"] not in posted]
     if not candidates: raise RuntimeError("no unposted source candidate")
     last = None
@@ -863,10 +909,15 @@ def run(dry=False, use_llm=True):
         result = publish(parts, dry, image_url)
     except Exception as exc:
         log.exception("publish failed; no state committed")
-        print(json.dumps({"target": USER, "dry_run": dry, "status": "NO_POST_PUBLISH_ERROR", "error": str(exc)}, ensure_ascii=False))
+        if not dry:
+            state["retry"] = {"item_key": item["key"], "item_url": item["url"], "item_title": item.get("title", ""), "ts": int(time.time()), "error": str(exc)}
+            save_json(STATE, state)
+        print(json.dumps({"target": USER, "dry_run": dry, "status": "NO_POST_PUBLISH_ERROR", "error": str(exc), "retry_in": "15m"}, ensure_ascii=False))
         return
     if not dry:
-        state.setdefault("posted", []).append(item["key"]); state["last"] = {"url": item["url"], "result": result, "ts": int(time.time())}; save_json(STATE, state)
+        state.setdefault("posted", []).append(item["key"]); state["last"] = {"url": item["url"], "result": result, "ts": int(time.time())}
+        state.pop("retry", None)  # clear pending retry on success
+        save_json(STATE, state)
     print(json.dumps({"target": USER, "dry_run": dry, "posts": result}, ensure_ascii=False))
 
 if __name__ == "__main__":
