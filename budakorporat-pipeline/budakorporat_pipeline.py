@@ -342,8 +342,8 @@ Setiap slide harus bikin pembaca MERASA SESUATU: marah, kecewa, sedih, curious, 
 Jika kamu menulis seperti news wire ("X menetapkan aturan Y", "Keputusan diambil setelah kajian"), kamu GAGAL.
 Contoh BORING (DILARANG): "Pemerintah menetapkan aturan baru tentang larangan rangkap jabatan."
 Contoh SPICY (WAJIB): "Pemerintah bilang larangan rangkap jabatan demi transparansi. Tapi aturannya sendiri punya lubang segede gudang."
-Contoh LAIN SPICY (WAJIB): "Lu bayar pajak. Tapi yang dapat untung siapa? Bukan lu."
 Contoh LAIN SPICY (WAJIB): "Aturan baru? Jangan senang dulu. Lu baca pasal kecilnya belum?"
+Contoh LAIN SPICY (WAJIB): "Klaimnya ini buat rakyat kecil. Tapi siapa yang beneran dapat?"
 
 TUJUAN:
 Buat thread yang bikin pembaca emosi: kecewa, sedih, marah, atau tertawa. Bukan cuma informatif — harus bikin orang nggak bisa scrolling lewat. Fakta yang disampaikan harus di-framing supaya pembaca merasakan dampaknya secara personal.
@@ -363,9 +363,13 @@ STRUKTUR:
 Utamakan 4 slide; maksimal 5. Jika evidence kuat, boleh naik ke 5. Jika evidence unik tidak cukup untuk 4, gunakan lebih sedikit. Sebelum output, cek mekanis bahwa tidak ada evidence ID yang muncul di lebih dari satu slide.
 
 S1 — HOOK (WAJIB SPICY — bukan ringkasan netral)
-Buka dengan kontradiksi yang bikin emosi: marah, curious, atau nggak percaya. 
-Contoh: "Lu bayar pajak. Tapi yang dapat untung siapa? Bukan lu."
-Jangan buka dengan "X menetapkan aturan Y" — itu boring.
+Buka dengan FAKTA PALING MENGEJUTKAN atau KONTRADIKSI PALING TAJAM dari source. Ambil langsung dari artikel — jangan pakai template generik.
+Cari: angka yang tidak masuk akal, kenaikan drastis, janji yang dilanggar, atau kontradiksi antara klaim vs realitas.
+Contoh framing dari fakta source:
+- Fakta: "Biaya naik 20x lipat" → Hook: "Siap-siap merogoh kocek Rp22 juta."
+- Fakta: "Aturan baru membatasi x" → Hook: "Aturan baru? Lu baca pasal kecilnya belum?"
+- Fakta: "Janji Y tapi realitas Z" → Hook: "Janjinya ini, tapi kenyataannya ini."
+Jangan buka dengan "X menetapkan aturan Y" — itu boring. Jangan pakai hook pajak atau gaji terus — variasi dari topik source.
 Jangan mengarang konflik, motif, atau kepentingan.
 
 S2 — EVIDENCE 1
