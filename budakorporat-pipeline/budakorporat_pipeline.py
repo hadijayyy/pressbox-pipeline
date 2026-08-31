@@ -20,6 +20,7 @@ USER = "budakorporat_id"
 USER_ID = "27516379201355016"
 FEEDS = [
     "https://www.cnnindonesia.com/nasional/rss",
+    "https://www.cnnindonesia.com/ekonomi/rss",
     "https://www.cnnindonesia.com/internasional/rss",
     "https://www.cnbcindonesia.com/news/rss",
     "https://www.cnbcindonesia.com/market/rss",
@@ -32,6 +33,7 @@ FEEDS = [
     "https://www.inews.id/feed",
     "https://katadata.co.id/rss",
     "https://www.antaranews.com/rss/terkini.xml",
+    "https://www.mongabay.co.id/feed",
     "https://www.antaranews.com/rss/top-news.xml",
 ]
 POLITICAL_RE = re.compile(r"politik|pemerintah|presiden|dpr|parlemen|menteri|partai|pemilu|pilkada|kpk|koalisi|istana|kebijakan|uu |undang-undang|anggaran|pajak|korupsi", re.I)
@@ -115,6 +117,7 @@ def _has_political_opportunity(item: dict) -> bool:
 def collect() -> list[dict]:
     seen, out, now = set(), [], datetime.now(timezone.utc)
     title_hits = {}
+    title_normalized_map = {}  # normalized -> original items for dedup
     for feed in FEEDS:
         try:
             for item in items(feed):
@@ -124,6 +127,19 @@ def collect() -> list[dict]:
                 if EXCLUDED_RE.search(hay) or not POLITICAL_RE.search(hay) or not _has_political_opportunity(item): continue
                 # Drama is ranking signal, not hard gate: politics can be important without conflict wording.
                 normalized = re.sub(r"\W+", " ", item["title"].lower()).strip()
+                # Title dedup: skip if same topic already collected (fuzzy: 80% word overlap)
+                skip = False
+                for existing_norm in list(title_normalized_map.keys()):
+                    existing_words = set(existing_norm.split())
+                    new_words = set(normalized.split())
+                    if existing_words and new_words:
+                        overlap = len(existing_words & new_words) / min(len(existing_words), len(new_words))
+                        if overlap >= 0.8:
+                            skip = True
+                            break
+                if skip:
+                    continue
+                title_normalized_map.setdefault(normalized, []).append(item)
                 title_hits[normalized] = title_hits.get(normalized, 0) + 1
                 key = hashlib.sha256(item["url"].encode()).hexdigest()
                 if key not in seen:
@@ -388,6 +404,16 @@ Jika evidence hanya cukup untuk 4 slide, berhenti di 4. Jika tidak cukup untuk 4
 Jangan mengulang fakta dengan sinonim.
 Jangan isi slide dengan opini generik, moral kosong, atau pertanyaan retoris tanpa fungsi.
 
+CONTOH THREAD LENGKAP (WAJIB DITIRU POLANYA):
+---
+S1 (HOOK): "DPR baru sahkan RUU yang katanya pro rakyat. Tapi lu baca pasalnya belum? Yang untung siapa?"
+S2 (EVIDENCE 1): "Pasal 7 bilang dana desa bisa dialihkan untuk 'program prioritas nasional'. Artinya uang yang harusnya buat jalan desa, bisa dipindah ke proyek mana aja."
+S3 (EVIDENCE 2): "Dalam APBD 2026, alokasi dana desa turun 15% dibanding tahun lalu. Sementara anggaran infrastruktur ibu kota naik 23%. Ini fakta, bukan opini."
+S4 (EVIDENCE 3): "Yang lebih gila: pengawasan dana desa sekarang harus lewat kementerian. Padahal dulu bisa langsung dari Kemendagri. Siapa yang awasi siapa?"
+S5 (REVERSAL + CTA): "Jadi jangan kaget kalau tahun depan jalan desa makin hancur. Dana udah dipotong, pengawasan udah dipindah. Cek APBD daerah lu sendiri, bandingkan angkanya."
+---
+Setiap slide punya evidence baru, framing tajam, dan dampak personal ke pembaca.
+
 STYLE:
 Bahasa Indonesia percakapan: santai, tajam, konkret, mudah dipahami.
 Gunakan gue/lu jika alami.
@@ -446,12 +472,18 @@ def _evidence_units(body: str) -> list[tuple[str, set[str]]]:
 
 def _evidence_prompt(body: str) -> str:
     sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", re.sub(r"\s+", " ", body).strip()) if len(s.strip()) >= 40]
-    return "\\n".join(f"E{i}: {sentence}" for i, sentence in enumerate(sentences, 1))
+    return "\n".join(f"E{i}: [{sentence[:80]}...]" if len(sentence) > 80 else f"E{i}: {sentence}" for i, sentence in enumerate(sentences, 1))
 
 
 def _evidence_catalog(body: str) -> dict[str, str]:
     sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", re.sub(r"\s+", " ", body).strip()) if len(s.strip()) >= 40]
     return {f"E{i}": sentence for i, sentence in enumerate(sentences, 1)}
+
+def _evidence_snippet(evidence_id: str, body: str) -> str:
+    """Return truncated snippet for evidence ID."""
+    catalog = _evidence_catalog(body)
+    full = catalog.get(evidence_id, "")
+    return full[:80] + "..." if len(full) > 80 else full
 
 
 def _deterministic_draft(item: dict, body: str) -> list[str]:
@@ -735,7 +767,7 @@ def _repeated_slide_issues(parts: list[str]) -> list[str]:
             union = tokens[i] | tokens[j]
             overlap = len(tokens[i] & tokens[j]) / len(union) if union else 0
             # Shared names/locations are allowed; reject only near-identical prose.
-            if overlap >= 0.65:
+            if overlap >= 0.55:
                 issues.append(f"S{i + 1}/S{j + 1}: repeated slide content")
             elif bigrams[i] & bigrams[j]:
                 log.info("slide similarity alarm S%d/S%d: shared phrase", i + 1, j + 1)
