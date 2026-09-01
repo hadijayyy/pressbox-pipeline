@@ -76,6 +76,9 @@ class ThreadsPoster:
         self.access_token = access_token
         self.user_id = user_id
         self.session = session or requests.Session()
+        # requests debug URLs include query-string credentials.
+        logging.getLogger("urllib3.connectionpool").setLevel(logging.WARNING)
+        logging.getLogger("requests.packages.urllib3.connectionpool").setLevel(logging.WARNING)
 
     # ------------------------------------------------------------------
     # Low-level API calls
@@ -223,12 +226,26 @@ class ThreadsPoster:
         try:
             data = resp.json()
         except ValueError:
-            raise ThreadsAPIError(f"Non-JSON response: {resp.text}", resp.status_code)
+            raise ThreadsAPIError(
+                f"HTTP {resp.status_code}: non-JSON response",
+                resp.status_code,
+            )
 
         if resp.status_code >= 400 or "error" in data:
-            err = data.get("error", {})
-            msg = err.get("message", str(data))
-            raise ThreadsAPIError(msg, resp.status_code, data)
+            err = data.get("error") or {}
+            if not isinstance(err, dict):
+                err = {"message": str(err)}
+            msg = err.get("message", "unknown API error")
+            details = []
+            for key in ("type", "code", "error_subcode", "fbtrace_id"):
+                if err.get(key) is not None:
+                    details.append(f"{key}={err[key]}")
+            suffix = f" ({', '.join(details)})" if details else ""
+            raise ThreadsAPIError(
+                f"HTTP {resp.status_code}: {msg}{suffix}",
+                resp.status_code,
+                data,
+            )
 
         return data
 
@@ -255,6 +272,7 @@ class ThreadsPoster:
         parts: list[str],
         image_urls: Optional[list[Optional[str]]] = None,
         stop_on_error: bool = True,
+        existing_results: Optional[list[ThreadPostResult]] = None,
     ) -> list[ThreadPostResult]:
         """
         Post a full multi-part thread sequentially.
@@ -275,10 +293,16 @@ class ThreadsPoster:
         if image_urls is not None and len(image_urls) != len(parts):
             raise ValueError("image_urls must be the same length as parts")
 
-        results: list[ThreadPostResult] = []
-        reply_to_id: Optional[str] = None
+        results: list[ThreadPostResult] = list(existing_results or [])
+        if len(results) > len(parts) or any(
+            result.text != parts[i] or not result.post_id
+            for i, result in enumerate(results)
+        ):
+            raise ValueError("existing_results do not match parts")
+        reply_to_id: Optional[str] = results[-1].post_id if results else None
 
-        for i, text in enumerate(parts):
+        for i in range(len(results), len(parts)):
+            text = parts[i]
             # Never truncate audited content at transport. Truncation can publish
             # an incomplete sentence and hide an upstream contract failure.
             if len(text) > 500:
@@ -295,6 +319,15 @@ class ThreadsPoster:
                     logger.warning("Recovered already-published part %d/%d after API error", i + 1, len(parts))
                     results.append(recovered)
                     reply_to_id = recovered.post_id
+                    continue
+                retryable = not isinstance(e, ThreadsAPIError) or e.status_code is None or e.status_code in {
+                    408, 409, 425, 429,
+                } or 500 <= e.status_code <= 599
+                if not retryable:
+                    setattr(e, "results", results)
+                    logger.error("Failed posting part %d/%d: %s", i + 1, len(parts), e)
+                    if stop_on_error:
+                        raise
                     continue
                 try:
                     time.sleep(2)
