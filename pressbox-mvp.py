@@ -2706,7 +2706,7 @@ REFERENCE-STYLE MECHANICS — CONTRADICTION + EVIDENCE STACK
 
 When ARTICLE_BODY supports it, use this progression:
 
-- S1: observable action or result plus the clearest contradiction, visible gap, or uncomfortable tension. Name the main actor.
+- S1: observable action or result plus the clearest contradiction, visible gap, juxtaposition, or uncomfortable tension. Name the main actor. Use active present-tense verbs. Add one editorial micro-beat.
 - S2: exact proof — quote, number, timing, decision, or documented action.
 - S3: relevant relationship, chronology, or context that changes how the proof is read.
 - S4: comparison, response, exception, or second documented action that raises the pressure.
@@ -2730,13 +2730,23 @@ Open with the strongest supported editorial angle.
 
 Use the biggest relevant actor plus a contradiction, risk, consequence, pressure point, or uncomfortable football question.
 
+JUXTAPOSITION PATTERN — when the article mentions two or more entities taking different actions or reactions, lead with the contrast:
+"[Entity A] did [X] — while [Entity B] did [Y]."
+This is the highest-performing hook pattern. Use it whenever the source supports it.
+
+S1 FORMULA — every S1 must contain all four elements:
+1. Named entity (club, player, manager)
+2. Active, present-tense verb ("is reshaping", "just told", "waited hours")
+3. Concrete detail (number, name, timeframe, quote fragment)
+4. One sharp editorial micro-beat after the fact hook: "That's not just [surface] — it's [deeper meaning]."
+
 Never open with a flat announcement such as:
 
 “X has joined Y.”
 
 The first slide should immediately tell the reader what is questionable, risky, contradictory, unfair, or worth debating.
 
-Keep it punchy.
+Keep it punchy. One strong sentence with an editorial beat beats two flat sentences.
 
 S2 — PROOF
 
@@ -2869,6 +2879,11 @@ Use first-person editorial markers such as “For me” or “In my eyes” spar
 Never claim eyewitness knowledge.
 
 Use tactical language only when ARTICLE_BODY supplies the relevant tactical facts.
+
+VERBS AND TENSE
+
+Use active, present-tense verbs in S1 and S2 for immediacy: "is reshaping", "just told", "waited hours", "deletes".
+Avoid distant past-tense in hooks: "spent", "paid", "arrived", "was signed".
 
 LENGTH
 
