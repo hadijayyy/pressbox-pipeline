@@ -135,6 +135,19 @@ EXCLUDE_KEYWORDS = {
         # Non-football editorial categories / gambling — hard reject
         "zodiak", "gosip artis", "betting", "gambling", "betting tips",
     ],
+    "non_football_sports": [
+        # Tennis
+        "us open", "wimbledon", "australian open", "roland garros",
+        "french open", "tennis", "racket",
+        # Basketball
+        "nba", "basketball", "ncaa",
+        # Formula 1
+        "formula 1", "grand prix", "ferrari f1", "red bull f1",
+        # Cricket
+        "cricket", "test match", "ashes",
+        # Other sports
+        "golf", "rugby", "ufc", "boxing", "nfl", "mlb",
+    ],
 }
 
 
@@ -567,5 +580,3 @@ def select_best_candidate(articles, top_n=1, threshold=60):
         if score >= threshold:
             scored.append((score, article))
     return sorted(scored, key=lambda item: item[0], reverse=True)[:top_n]
-
-
