@@ -348,6 +348,13 @@ class TestExcludeKeywords:
         result = pbox_scoring.check_exclude_keywords("Bank memblokir transaksi")
         assert result is None
 
+    def test_non_football_sports_are_excluded(self):
+        assert pbox_scoring.check_exclude_keywords("Darts Open final PDC")
+        assert pbox_scoring.check_exclude_keywords("US Open tennis exit")
+        assert pbox_scoring.check_exclude_keywords("Third Test match cricket")
+        assert pbox_scoring.check_exclude_keywords("Arsenal Premier League match") is None
+        assert pbox_scoring.check_exclude_keywords("Grand Slam football trophy") is None
+
     def test_ambiguous_cup_with_football_context(self):
         """'cup' removed from AMBIGUOUS_EXCLUDES — no longer triggers exclude."""
         text = "Champions League cup final tonight at Wembley"

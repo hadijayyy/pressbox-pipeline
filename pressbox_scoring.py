@@ -137,16 +137,18 @@ EXCLUDE_KEYWORDS = {
     ],
     "non_football_sports": [
         # Tennis
-        "us open", "wimbledon", "australian open", "roland garros",
-        "french open", "tennis", "racket",
+        "tennis", "atp", "wta", "us open", "wimbledon", "australian open",
+        "roland garros", "french open", "racket", "darts", "pdc",
         # Basketball
         "nba", "basketball", "ncaa",
         # Formula 1
-        "formula 1", "grand prix", "ferrari f1", "red bull f1",
+        "formula 1", "f1", "grand prix", "ferrari f1", "red bull f1",
+        "verstappen", "norris",
         # Cricket
-        "cricket", "test match", "ashes",
+        "cricket", "ipl", "test match", "ashes", "bowled",
         # Other sports
-        "golf", "rugby", "ufc", "boxing", "nfl", "mlb",
+        "golf", "pga", "ryder cup", "rugby", "six nations",
+        "ufc", "boxing", "mma", "nfl", "mlb", "baseball",
     ],
 }
 

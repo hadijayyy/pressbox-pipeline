@@ -323,7 +323,7 @@ def _hook_variant_instruction(variant):
     }.get(variant, "Lead with strongest supported hook.")
 
 from pressbox_common import WIB, HOME, POSTED, load_env, log, clean_words, is_similar, classify_topic_type
-from pressbox_scoring import score_topic as base_score_topic
+from pressbox_scoring import score_topic as base_score_topic, check_exclude_keywords
 import json
 
 # ── ANTI-SATURATION: skip saga/topic posted too often in last 7 days ──
@@ -511,11 +511,121 @@ def _pillar_from_pattern(pattern):
     }.get(pattern, 'Transfer/Matchday')
 
 
+_PILLAR_TARGETS = {
+    "Nostalgia": 0.30,
+    "Transfer/Matchday": 0.30,
+    "Stat-Bomb": 0.25,
+    "Hot Take": 0.15,
+}
+_SERIAL_FORMATS = {
+    "Nostalgia": "Then vs Now",
+    "Transfer/Matchday": "The Decision That Changed Everything",
+    "Stat-Bomb": "One Detail Everyone Missed",
+    "Hot Take": "Football Power Files",
+}
+
+
+def _content_pillar(topic, pattern="d"):
+    """Assign growth pillar from explicit topic signals, then pattern fallback."""
+    text = " ".join(str(topic.get(k) or "") for k in ("title", "description", "content")).lower()
+    if any(w in text for w in ("years ago", "since 19", "since 20", "first time", "history", "historic", "remember", "forgotten", "legend", "prime")):
+        return "Nostalgia"
+    if any(w in text for w in ("transfer", "signed", "signing", "bid", "offer", "contract", "deal", "match", "final", "qualif", "relegat", "title race")):
+        return "Transfer/Matchday"
+    if any(w in text for w in ("record", "stat", "goals", "goals in", "percentage", "first player", "most", "least", "only player")):
+        return "Stat-Bomb"
+    if any(w in text for w in ("controvers", "scandal", "under fire", "slams", "blasts", "row", "rift", "fumes", "backlash", "critici", "reject")):
+        return "Hot Take"
+    return _pillar_from_pattern(pattern)
+
+
+def _pillar_pressure(pillar, recent_posts=None):
+    """Return score adjustment enforcing target mix without hard-rejecting stories."""
+    recent = recent_posts or []
+    if not recent:
+        return 0
+    counts = {name: 0 for name in _PILLAR_TARGETS}
+    for post in recent[-20:]:
+        name = post.get("pillar")
+        if name in counts:
+            counts[name] += 1
+    total = sum(counts.values()) or 1
+    share = counts.get(pillar, 0) / total
+    target = _PILLAR_TARGETS[pillar]
+    if share > target + 0.05:
+        return -12
+    if share < target - 0.05:
+        return 12
+    return 0
+
+
+_MEGASTAR_PATTERNS = tuple(re.compile(r"\b" + re.escape(name) + r"\b", re.I) for name in (
+    "messi", "ronaldo", "mbappe", "haaland", "yamal", "bellingham", "salah",
+    "vinicius", "neymar", "de bruyne", "kane", "palmer", "saka", "lewandowski",
+))
+
+
+def _megastar_centrality(title, body):
+    """Return 1 only when star is title-led and central in body, not name-dropped."""
+    title_lower, body_lower = (title or "").lower(), (body or "").lower()
+    for pattern in _MEGASTAR_PATTERNS:
+        if pattern.search(title_lower) and len(pattern.findall(body_lower)) >= 2:
+            return 1
+    return 0
+
+
+def _serial_format(pillar):
+    return _SERIAL_FORMATS.get(pillar, "One Detail Everyone Missed")
+
+
+_BINARY_CTA_RE = re.compile(
+    r"(?i)(?:\byes\s+or\s+no\b|\bkeep\s+or\s+sell\b|"
+    r"\bright\s+call\s+or\s+coward\s+move\b|"
+    r"\bbiggest\s+mistake\s+or\s+correct\s+decision\b|"
+    r"\b(?:or|either)\b)"
+)
+
+
+def _s6_cta_errors(slides):
+    """Reject open-ended S6 questions; declarative payoff remains valid."""
+    if len(slides or []) < 6:
+        return ["S6 missing"]
+    text = slides[5].get("content", "")
+    if "?" in text and not _BINARY_CTA_RE.search(text):
+        return ["S6 CTA must be binary"]
+    return []
+
+
+def _s6_binary_or_takeaway(text):
+    """True for safe shape: binary question or declarative takeaway."""
+    return "?" not in (text or "") or bool(_BINARY_CTA_RE.search(text))
+
+
+def _cta_instruction(article_text):
+    """Require source-supported binary S6 debate, never engagement bait."""
+    return (
+        "Binary CTA: use S6 question only when ARTICLE_BODY documents two real sides. "
+        "Choose one grounded pair: 'Right call or coward move?', 'Was this fair: yes or no?', "
+        "'Would you keep him: yes or sell?', or 'Biggest mistake or correct decision?'. "
+        "Replace placeholders with source-supported entities/actions. Do not force a binary question or conflict. "
+        "Never use 'What do you think?', 'Thoughts?', or 'Agree or disagree?'. "
+        "If no genuine binary exists, end S6 with one sharp source-backed declarative takeaway."
+    )
+
+
+def _serial_instruction(pillar, serial_format):
+    return (
+        f"SERIAL FORMAT: {serial_format or _serial_format(pillar)}. "
+        f"Pillar: {pillar or 'Transfer/Matchday'}. Use label as recurring editorial packaging; "
+        "do not invent episode number or promise."
+    )
+
+
 def _predict_engagement_trigger(topic, pattern, article_text=""):
     """Generate prediction of WHY this post will get engagement.
     Returns a short string like 'Hot Take: Bellingham appeal, binary Q = replies'."""
     title = (topic.get("title") or "").lower()
-    pillar = _pillar_from_pattern(pattern)
+    pillar = topic.get("_pillar") or _content_pillar(topic, pattern)
     triggers = []
 
     # Name-drop trigger: star player or big club in S1 = instant recognition
@@ -577,11 +687,10 @@ SENTENCE_COUNTS = {1:(1,3), 2:(2,4), 3:(2,4), 4:(1,4), 5:(2,4), 6:(2,4)}
 os.makedirs(f"{HOME}/.hermes/pressbox", exist_ok=True)
 
 env = load_env()
-LLM_KEY = (env.get("MISTRAL_API_KEY")
-           or env.get("HERMES_CUSTOM_43_157_200_187_20128_API_KEY", ""))
-LLM_BASE_URL = env.get("PRESSBOX_LLM_BASE_URL", "http://127.0.0.1:20128/v1").rstrip("/")
-LLM_MODEL = env.get("PRESSBOX_LLM_MODEL", "cx/gpt-5.6-luna")
-MISTRAL_KEY = LLM_KEY  # compatibility for existing tests and fail-closed checks
+LLM_KEY = env.get("MISTRAL_API_KEY", "")
+LLM_BASE_URL = env.get("PRESSBOX_LLM_BASE_URL", "https://api.mistral.ai/v1")
+LLM_MODEL = env.get("PRESSBOX_LLM_MODEL", "ministral-14b-latest")
+MISTRAL_KEY = LLM_KEY
 UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
 
@@ -595,7 +704,7 @@ def _llm_chat(messages, max_tokens, temperature=0.1, json_mode=False):
         f"{LLM_BASE_URL}/chat/completions",
         headers={"Authorization": f"Bearer {LLM_KEY}", "Content-Type": "application/json"},
         json=payload,
-        timeout=(10, 60))
+        timeout=(10, 120))
 
 
 def _llm_content(response):
@@ -1517,6 +1626,11 @@ def filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_su
     results = []
     relaxed = len(topics) < 10
     hotness = hotness or {}
+    try:
+        with open(POSTED) as f:
+            recent_posts = (json.load(f) or {}).get("topics", [])[-20:]
+    except (OSError, ValueError, TypeError):
+        recent_posts = []
     
     # Extract analytics data for dynamic boost
     best_hooks = []
@@ -1565,6 +1679,13 @@ def filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_su
             log(f"   🗑️ Story opportunity: skipped flat announcement '{title[:60]}'")
             continue
         s += story_score
+        pillar = _content_pillar(t)
+        pillar_adjust = _pillar_pressure(pillar, recent_posts)
+        s += pillar_adjust
+        t["_pillar"] = pillar
+        t["_serial_format"] = _serial_format(pillar)
+        if pillar_adjust:
+            log(f"   🧭 Pillar balance: {pillar_adjust:+d} for {pillar} '{title[:50]}'")
         t["_story_opportunity"] = story_score
         t["_story_signals"] = story_signals
         log(f"   📚 Story opportunity: +{story_score} {story_signals} for '{title[:50]}'")
@@ -1607,9 +1728,13 @@ def filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_su
             else:
                 log(f"   🗑️ Statement filler: skipped '{title[:60]}'")
                 continue
-        # Penalty for generic content (no topic type = low engagement)
+        # Prefer writeable football developments over generic profiles/tributes.
+        # Safe fallback needs a concrete result, decision, pressure, or consequence.
         if tt and tt == "other":
-            s -= 10
+            core_signals = story_signals["stakes"] + story_signals["conflict"] + story_signals["consequence"]
+            penalty = 10 if core_signals else 30
+            s -= penalty
+            log(f"   📉 Generic story penalty: -{penalty} for '{title[:50]}'")
         # Niche topic penalty — low engagement content that happens to mention big teams
         _niche_kw = ["kit launch","kit reveal","pink boots","boot deal",
                      "stadium rules","ticket prices","travel guide",
@@ -2458,10 +2583,22 @@ def _s6_strip_ungrounded_binary(slides, assigned_evidence):
         return False
     s6 = slides[5]
     text = s6.get("content", "")
+    evidence_units = " ".join(assigned_evidence.get("slide_6", []))
+
+    # Generic fairness CTA has no two source-backed sides. Keep S6 grounded.
+    generic_binary = re.search(
+        r"\b(?:is|was)\s+(?:this|that)\s+(?:fair|right)\b.*\byes\s+or\s+no\b",
+        text,
+        re.I,
+    )
+    if generic_binary and evidence_units:
+        source_sentence = re.split(r"(?<=[.!?])\s+", evidence_units.strip())[0]
+        s6["content"] = source_sentence.rstrip(".!?") + "."
+        return True
+
     m = _BINARY_S6_RE.search(text)
     if not m:
         return False
-    evidence_units = " ".join(assigned_evidence.get("slide_6", []))
     branch = text[m.end():]
     # Second branch is only grounded if it names an entity that also appears
     # in the assigned evidence for S6.
@@ -2469,6 +2606,14 @@ def _s6_strip_ungrounded_binary(slides, assigned_evidence):
     grounded = any(w in evidence_units.lower() for w in entities) if entities else False
     if grounded:
         return False
+    # Generic binary bait has no source-backed premise; use assigned fact as
+    # declarative payoff instead of publishing unsupported debate framing.
+    if "?" in text and _BINARY_CTA_RE.search(text):
+        generic = {"is", "was", "this", "fair", "yes", "no", "or", "right", "call", "decision", "move"}
+        if not (_claim_tokens(text) - generic) and evidence_units:
+            s6["content"] = evidence_units.split(". ", 1)[0].strip().rstrip(".!?") + "."
+            return True
+
     kept = text[:m.start()].rstrip(" ?")
     if kept:
         s6["content"] = kept + "."
@@ -2558,7 +2703,7 @@ FABRIZIO = '## FABRIZIO-STYLE VOICE / COMMENTATOR DELIVERY\nUse urgent, concrete
 CONSTRAINTS = 'Do not replace source terms with stronger or different terms. Keep source terms, uncertainty, attribution, and scope unchanged.\nDo not turn conditional claims into current facts; do not turn a conditional claim into a current fact. A stance is optional when evidence is thin; a verdict is required when facts support one.\nDo not invent a conflict, urgency, motive, winner, loser, or consequence. Frame judgement as interpretation, never eyewitness knowledge or fact.\nA question is allowed in S6. First-person markers such as "For me" or "In my eyes" must not claim eyewitness knowledge.'
 OVERRIDE = 'SOURCE-ONLY OVERRIDE: Full ARTICLE_BODY remains factual authority. assigned evidence lines are the only factual authority for each slide focus; ARTICLE_TITLE is a label, not evidence.\nCopy source wording when possible. If source cannot support a complete sentence, omit that detail. Delete unsupported detail.\nDo not invent stakes, motives, consequences, reactions, or either/or outcomes. Never upgrade generic terms, partial lists, uncertainty, status, role, or scope.\nIf a slide needs a missing material fact, return needs_more_source.'
 
-def generate_slides(article_text, url, title="", source="", hooks="", cta_pattern="", tone="", pattern="d", evaluator_feedback="", evidence_plan=None, hook_variant="implication", element_guidance=""):
+def generate_slides(article_text, url, title="", source="", hooks="", cta_pattern="", tone="", pattern="d", evaluator_feedback="", evidence_plan=None, hook_variant="implication", element_guidance="", pillar="", serial_format=""):
     """Call LLM to generate 6 editorial slides.
     If evaluator_feedback is provided, appends correction instructions to the prompt.
     Token budget: hard reject >80k chars input, warn >48k chars.
@@ -2706,12 +2851,12 @@ REFERENCE-STYLE MECHANICS — CONTRADICTION + EVIDENCE STACK
 
 When ARTICLE_BODY supports it, use this progression:
 
-- S1: observable action or result plus the clearest contradiction, visible gap, juxtaposition, or uncomfortable tension. Name the main actor. Use active present-tense verbs. Add one editorial micro-beat.
+- S1: observable action or result plus the clearest contradiction, visible gap, or uncomfortable tension. Name the main actor.
 - S2: exact proof — quote, number, timing, decision, or documented action.
 - S3: relevant relationship, chronology, or context that changes how the proof is read.
 - S4: comparison, response, exception, or second documented action that raises the pressure.
 - S5: confirmed consequence or what the documented sequence exposes; state opinion as opinion.
-- S6: one sharp, source-backed verdict or narrow debate question.
+- S6: one sharp, source-backed verdict or binary debate question.
 
 Use only elements present in ARTICLE_BODY. If no literal contradiction exists, use the strongest supported tension instead. Never invent a snub, motive, reaction, comparison, consequence, public response, or emotional meaning. Each slide must introduce new evidence or a new editorial function; rewording an earlier point is not progression.
 
@@ -2730,23 +2875,13 @@ Open with the strongest supported editorial angle.
 
 Use the biggest relevant actor plus a contradiction, risk, consequence, pressure point, or uncomfortable football question.
 
-JUXTAPOSITION PATTERN — when the article mentions two or more entities taking different actions or reactions, lead with the contrast:
-"[Entity A] did [X] — while [Entity B] did [Y]."
-This is the highest-performing hook pattern. Use it whenever the source supports it.
-
-S1 FORMULA — every S1 must contain all four elements:
-1. Named entity (club, player, manager)
-2. Active, present-tense verb ("is reshaping", "just told", "waited hours")
-3. Concrete detail (number, name, timeframe, quote fragment)
-4. One sharp editorial micro-beat after the fact hook: "That's not just [surface] — it's [deeper meaning]."
-
 Never open with a flat announcement such as:
 
 “X has joined Y.”
 
 The first slide should immediately tell the reader what is questionable, risky, contradictory, unfair, or worth debating.
 
-Keep it punchy. One strong sentence with an editorial beat beats two flat sentences.
+Keep it punchy.
 
 S2 — PROOF
 
@@ -2879,11 +3014,6 @@ Use first-person editorial markers such as “For me” or “In my eyes” spar
 Never claim eyewitness knowledge.
 
 Use tactical language only when ARTICLE_BODY supplies the relevant tactical facts.
-
-VERBS AND TENSE
-
-Use active, present-tense verbs in S1 and S2 for immediacy: "is reshaping", "just told", "waited hours", "deletes".
-Avoid distant past-tense in hooks: "spent", "paid", "arrived", "was signed".
 
 LENGTH
 
@@ -3088,12 +3218,12 @@ The full article fact packet is the complete factual universe. Assigned evidence
     user = (
         f"<request>\n  <current_date>{datetime.now().strftime('%Y-%m-%d')}</current_date>\n"
         f"  <selected_pattern>{pattern_label}</selected_pattern>\n"
-        f"  <hook_variant>{hook_variant}: {_hook_variant_instruction(hook_variant)}</hook_variant>\n  <element_guidance>{element_guidance}</element_guidance>\n</request>\n\n"
+        f"  <hook_variant>{hook_variant}: {_hook_variant_instruction(hook_variant)}</hook_variant>\n  <element_guidance>{element_guidance}</element_guidance>\n  <serial>{_serial_instruction(pillar, serial_format)}</serial>\n</request>\n\n"
         f"<primary_article>\n  <title>{title}</title>\n  <source_name>{source_name}</source_name>\n"
         f"  <source_url>{url}</source_url>\n  <ARTICLE_BODY>\n{article_text}\n  </ARTICLE_BODY>\n</primary_article>\n\n"
         f"<EVIDENCE_PACK>\n{_evidence_pack(article_text)}\n</EVIDENCE_PACK>\n\n"
         f"<SLIDE_EVIDENCE>\n{assignments}\n</SLIDE_EVIDENCE>\n\n"
-        "Build one story, not six reports. Each slide needs one or two complete sentences; one strong sentence beats filler. Use the full article fact packet as factual authority; assigned evidence sets slide order and focus only. State the strongest confirmed fact first. Use plain factual statements when source offers no explicit tension. Never invert a statistic, escalate scope words, infer motive or consequence, or add metaphor. S1-S6 must stay faithful, non-escalating paraphrases. When the source lists a set (pairings, fixtures, stats, names), either state the full list or explicitly mark it as an example; never present a partial list as the complete set. Do not write contrastive claims (no clash, without, lacked) unless the source itself states the absence.\n\n"
+        f"Build one story, not six reports. Each slide needs one or two complete sentences; one strong sentence beats filler. Use the full article fact packet as factual authority; assigned evidence sets slide order and focus only. State the strongest confirmed fact first. Use plain factual statements when source offers no explicit tension. Never invert a statistic, escalate scope words, infer motive or consequence, or add metaphor. S1-S6 must stay faithful, non-escalating paraphrases. When the source lists a set (pairings, fixtures, stats, names), either state the full list or explicitly mark it as an example; never present a partial list as the complete set. Do not write contrastive claims (no clash, without, lacked) unless the source itself states the absence.\n\n{_cta_instruction(article_text)}\n\n"
         f"{ref_data}\n\n{_number_hook_rule(article_text)}\n\n{_editorial_constraints()}\n\n{_generation_evidence_override()}"
     )
     fabrizio_voice = _fabrizio_voice(article_text, title)
@@ -3104,7 +3234,7 @@ The full article fact packet is the complete factual universe. Assigned evidence
             f"S{i}: " + " || ".join(assigned_evidence[f"slide_{i}"])
             for i in range(1, 7)
         )
-        user += f"\n\n## SAFE REPAIR MODE — HIGHEST PRIORITY\nIgnore style, arc, hook, CTA, and engagement instructions above for this repair. Rebuild each slide from its literal repair anchors below. Use one anchor sentence per slide whenever possible; copy the exact source wording from the full article fact packet or delete the detail. Do not combine numbers, entities, quantities, scope words, attribution, timing, motive, emotion, or consequences from separate anchor sentences unless the source sentence itself combines them. Preserve uncertainty word-for-word: 'looking like' is not 'only'; 'could' is not 'will'. Never swap which entity owns a number. No metaphors, dramatic labels, fan verdicts, speculation, binary questions, or unsupported premises. S6 must be one plain source-backed sentence, not a question. If an anchor cannot support a complete slide, repeat no claim and return needs_more_source.\n\n## LITERAL REPAIR ANCHORS\n{repair_anchors}\n\n## EVALUATOR REJECTION\n{evaluator_feedback}\nRegenerate ALL 6 editorial slides. Remove every flagged claim; do not defend, reinterpret, or soften it."
+        user += f"\n\n## SAFE REPAIR MODE — HIGHEST PRIORITY\nIgnore style, arc, hook, CTA, and engagement instructions above for this repair. Rebuild each slide from its literal repair anchors below. Use one anchor sentence per slide whenever possible; copy the exact source wording from the full article fact packet or delete the detail. Do not combine numbers, entities, quantities, scope words, attribution, timing, motive, emotion, or consequences from separate anchor sentences unless the source sentence itself combines them. Preserve uncertainty word-for-word: 'looking like' is not 'only'; 'could' is not 'will'. Never swap which entity owns a number. No metaphors, dramatic labels, fan verdicts, or unsupported premises. S6 may use one binary question only when both sides are explicitly source-supported; otherwise use one plain source-backed sentence. If an anchor cannot support a complete slide, repeat no claim and return needs_more_source.\n\n## LITERAL REPAIR ANCHORS\n{repair_anchors}\n\n## EVALUATOR REJECTION\n{evaluator_feedback}\nRegenerate ALL 6 editorial slides. Remove every flagged claim; do not defend, reinterpret, or soften it."
 
     # ── TOKEN BUDGET GATE (final check after user message built) ──
     total_input_chars = len(system) + len(user)
@@ -3119,17 +3249,17 @@ The full article fact packet is the complete factual universe. Assigned evidence
     # Retry triggers: HTTP 429, network/timeout errors only.
     # Non-retryable: 4xx (except 429), empty response, JSON parse fail, contract violations.
     attempt = 1
-    while attempt <= 2:
-        log(f"   LLM attempt {attempt}/2...")
+    while attempt <= 4:
+        log(f"   LLM attempt {attempt}/4...")
         try:
             r = _llm_chat(
                 [{"role": "system", "content": system}, {"role": "user", "content": user}],
                 max_tokens=1800, temperature=0.1, json_mode=True)
 
             if r.status_code == 429:
-                wait = 2 ** attempt + random.random()
+                wait = min(10 * (2 ** (attempt - 1)), 60) + random.random()
                 log(f"   ⏭️ Rate-limited — backoff {wait:.1f}s")
-                if attempt < 2:
+                if attempt < 4:
                     time.sleep(wait)
                     attempt += 1
                     continue
@@ -3140,9 +3270,9 @@ The full article fact packet is the complete factual universe. Assigned evidence
                     return None
             elif r.status_code >= 500:
                 # Transient server error — retry
-                wait = 2 ** attempt + random.random()
+                wait = min(10 * (2 ** (attempt - 1)), 60) + random.random()
                 log(f"   ❌ Server error {r.status_code} — backoff {wait:.1f}s")
-                if attempt < 2:
+                if attempt < 4:
                     time.sleep(wait)
                     attempt += 1
                     continue
@@ -3240,11 +3370,11 @@ The full article fact packet is the complete factual universe. Assigned evidence
             log(f"   ✅ Generated ({output_tokens_est} output tokens est, {total_input_chars // 4} input tokens est)")
             return slides
         except requests.exceptions.RequestException as e:
-            # Transient network/timeout error — retry once
+            # Transient network/timeout error — retry with backoff
             log(f"   ❌ LLM transport error: {e}")
             _log_llm(RUN_ID, "generate_slides", total_input_chars, 0, False, LLM_MODEL, f"TRANSPORT_{type(e).__name__}")
-            if attempt < 2:
-                wait = 2 ** attempt + random.random()
+            if attempt < 4:
+                wait = min(10 * (2 ** (attempt - 1)), 60) + random.random()
                 log(f"   ⏭️ Transport error — backoff {wait:.1f}s")
                 time.sleep(wait)
                 attempt += 1
@@ -3340,7 +3470,7 @@ def notify_telegram(text):
 
 # ── 6. TRACK ───────────────────────────────────────────────────────
 
-def track_post(title, url, source, root_id, permalink, hotness_score=0, article_published_ts=None, slides=None, engagement_trigger=None, pattern="d"):
+def track_post(title, url, source, root_id, permalink, hotness_score=0, article_published_ts=None, slides=None, engagement_trigger=None, pattern="d", pillar="", serial_format="", megastar=False):
     """Append post metadata, engagement trigger prediction, and exact published text."""
     try:
         with open(POSTED) as f:
@@ -3370,7 +3500,9 @@ def track_post(title, url, source, root_id, permalink, hotness_score=0, article_
         entry["s6_has_question"] = "?" in s6
         entry.update(_content_attributes(slides))
         entry["caption"] = slides[0].get("caption", "")
-    entry["pillar"] = _pillar_from_pattern(pattern)
+    entry["pillar"] = pillar or entry.get("pillar") or _content_pillar({"title": title}, pattern)
+    entry["serial_format"] = serial_format or entry.get("serial_format") or _serial_format(entry["pillar"])
+    entry["megastar"] = bool(megastar)
     data["topics"].append(entry)
     # Keep last 200 entries
     data["topics"] = data["topics"][-200:]
@@ -3414,6 +3546,17 @@ def _body_first_shortlist(ranked, limit=15):
             continue
         text, image = fetch_article(url)
         story_text = _story_text(text, title)
+        sport_exclude = check_exclude_keywords(f"{title} {story_text[:3000]}")
+        if sport_exclude in {
+            "tennis", "atp", "wta", "us open", "wimbledon", "roland garros",
+            "australian open", "grand slam", "darts", "pdc", "formula 1", "f1",
+            "verstappen", "norris", "cricket", "ipl", "ashes", "test match", "bowled",
+            "golf", "pga", "ryder cup", "rugby", "six nations", "boxing", "ufc", "mma",
+            "nfl", "nba", "mlb", "baseball",
+        }:
+            rejected.append((title, f"non-football sport ({sport_exclude})"))
+            _record_failure("NON_FOOTBALL_SPORT", t.get("source", ""), title)
+            continue
         body = story_text[:3000].lower()
         football = sum(kw in body for kw in ("goal", "match", "league", "transfer", "manager", "player", "club", "stadium", "referee"))
         commercial = sum(kw in body for kw in ("buy now", "shop now", "discount", "sale", "voucher", "basket", "checkout", "delivery"))
@@ -3437,6 +3580,10 @@ def _body_first_shortlist(ranked, limit=15):
             _record_failure("IMAGE_INVALID", t.get("source", ""), title)
             continue
         t.update(_article_text=story_text, _evidence_plan=evidence_plan, _image_url=image, _age_h=age_h)
+        if _megastar_centrality(title, story_text):
+            t["_megastar"] = True
+            t["_score"] += 20
+            log(f"   ⭐ Megastar body centrality: +20 for '{title[:50]}'")
         t["_score"] += (min(15, len(story_text) // 1000) +
                          (5 if '"' in story_text or re.search(r'\d{3,}', story_text) else 0) +
                          _hard_news_adjustment(title, story_text))
@@ -3677,6 +3824,8 @@ def _generate_best(ranked, analytics_summary, hooks_str, cta_pattern, tone):
                 evaluator_feedback=all_errors,
                 hook_variant=generation_hook,
                 element_guidance=element_guidance,
+                pillar=candidate.get("_pillar", _content_pillar(candidate, pattern)),
+                serial_format=candidate.get("_serial_format", _serial_format(candidate.get("_pillar", ""))),
             )
             if not slides:
                 if _LAST_GENERATION_FAILURE == "LLM_RATE_LIMITED":
@@ -3691,21 +3840,23 @@ def _generate_best(ranked, analytics_summary, hooks_str, cta_pattern, tone):
                 log(f"   ❌ LLM empty (attempt {gen_attempt}) — trying next candidate")
                 break
 
-            contract_errors = _slide_contract_errors(slides)
             editorial_slides = slides[:6]
+            # Normalize unsupported S6 debate before contract and coverage checks.
+            if assigned_evidence and _s6_strip_ungrounded_binary(editorial_slides, assigned_evidence):
+                log("   🛡️ S6 binary question had no source-backed premise — replaced with grounded takeaway")
+            contract_errors = _slide_contract_errors(slides)
             coverage_errors = _coverage_contract_errors(
                 editorial_slides[0].get("_coverage"), art_text, editorial_slides)
             # Hard gate: S6 binary question only allowed when both sides are
             # grounded in assigned evidence. Strip ungrounded "Or ..." branch.
             # Check S6's second branch against full source, not slide-order hints.
-            if assigned_evidence and _s6_strip_ungrounded_binary(editorial_slides, {"slide_6": [art_text]}):
-                log("   🛡️ S6 binary question had no second-side evidence — stripped to grounded takeaway")
             slides_text = " ".join(s["content"] for s in editorial_slides)
             grounding_errors = grounding_check(slides_text, art_text, _extract_proper_nouns(art_text), _extract_stages(art_text))
             number_errors = number_grounding_check(slides_text, art_text, _build_reference_data())
             prevalidation_errors, claim_rows = _claim_audit(editorial_slides, art_text, art_url, assigned_evidence)
             winning_errors = _winning_pattern_errors(editorial_slides, art_text)
-            errors = coverage_errors + contract_errors + grounding_errors + number_errors + prevalidation_errors + winning_errors
+            cta_errors = _s6_cta_errors(editorial_slides)
+            errors = coverage_errors + contract_errors + cta_errors + grounding_errors + number_errors + prevalidation_errors + winning_errors
             _write_claim_audit(claim_rows, "PREVALIDATION_REJECT" if prevalidation_errors else "PREVALIDATION_PASS", art_url, art_title)
             if errors:
                 all_errors = "; ".join(errors)
@@ -3770,7 +3921,7 @@ def _finish(res, hotness, START):
     llm_time = res["llm_time"]
     total = time.time() - START
 
-    final_contract_errors = _slide_contract_errors(slides)
+    final_contract_errors = _slide_contract_errors(slides) + _s6_cta_errors(slides)
     final_coverage_errors = _coverage_contract_errors(
         slides[0].get("_coverage") if slides else None,
         res.get("article_text", ""), slides or [])
@@ -3802,14 +3953,16 @@ def _finish(res, hotness, START):
         sys.exit(1)
 
     # Track
-    engagement_trigger = _predict_engagement_trigger(best, pattern)
+    engagement_trigger = _predict_engagement_trigger(best, pattern, res.get("article_text", ""))
     slides[0]["hook_variant"] = hook_variant
     slides[0]["_score"] = best.get("_score", 0)
     slides[0]["element_selection"] = element_selection
     log(f"   🎯 Trigger: {engagement_trigger}")
     track_post(best["title"], url, best.get("source", ""), root_id, permalink,
                hotness_score=hotness.get(url, 0), article_published_ts=best.get("published_ts"),
-               slides=slides, engagement_trigger=engagement_trigger, pattern=pattern)
+               slides=slides, engagement_trigger=engagement_trigger, pattern=pattern,
+               pillar=best.get("_pillar", ""), serial_format=best.get("_serial_format", ""),
+               megastar=best.get("_megastar", False))
 
     log(f"✅ {best['title']} → {permalink}")
     log(f"⏱️ Total: {total:.1f}s (LLM: {llm_time:.1f}s)")
@@ -3820,7 +3973,7 @@ def _finish(res, hotness, START):
     _pred_views = _query_ring_predicted(best.get("source", ""), _classify_hook(best.get("title", "").lower()),
                               best.get("_topic_type", ""))
     pred_str = f"~{_pred_views:,} views" if _pred_views else ""
-    pillar = _pillar_from_pattern(pattern)
+    pillar = best.get("_pillar") or _content_pillar(best, pattern)
     trigger_str = engagement_trigger.replace(" + ", ", ") if engagement_trigger else ""
     notify_telegram(
         f"✅ <b>Posted!</b>\n\n"

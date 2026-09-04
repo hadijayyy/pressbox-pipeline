@@ -375,13 +375,16 @@ def test_high_risk_transfer_claim_requires_tier_one_source():
     assert mvp._high_risk_claim_allowed("The midfielder trained with his club.", "Goal")
 
 
-def test_high_risk_candidate_is_skipped_for_next_eligible_article():
+def test_high_risk_candidate_does_not_block_safe_candidate():
     mvp = _load_mvp()
     source = inspect.getsource(mvp._rank_candidates)
-    assert 'ranked = [topic for topic in ranked if _high_risk_claim_allowed(' in source
-    assert 'topic.get("_article_text", ""), topic.get("source", ""))]' in source
-    assert 'print("⏸️ Skip — no tier-one source for high-risk claim", flush=True)\n        sys.exit(0)' in source
-    assert source.index('ranked = [topic for topic in ranked if _high_risk_claim_allowed(') < source.index('best = ranked[0]')
+    assert 'SOURCES' in inspect.getsource(mvp)
+    assert 'guardian' in inspect.getsource(mvp)
+    assert 'sky sports' in inspect.getsource(mvp)
+    assert 'unsafe = [topic for topic in ranked if not _high_risk_claim_allowed(' in source
+    assert 'NO_LOW_RISK_SOURCE_GROUNDED_CANDIDATE' in source
+    assert 'no low-risk source-grounded candidate' in source
+    assert source.index('unsafe = [topic for topic in ranked if not _high_risk_claim_allowed(') < source.index('best = ranked[0]')
 
 
 def test_generated_output_exhaustion_is_normal_skip_for_watchdog():

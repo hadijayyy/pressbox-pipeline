@@ -62,6 +62,13 @@ def test_publisher_wrapper_reports_stage_reason_and_never_uses_stale_report():
     assert 'flock -n 200 || exit 0' not in runner
 
 
+def test_wrapper_extracts_timestamped_skip_reason():
+    runner = (Path(__file__).parent.parent / "scripts" / "run-mvp.sh").read_text()
+    assert "grep -E 'Skip —'" in runner
+    assert "normal_skip" not in runner
+    assert "NO_SAFE_CANDIDATE" in runner
+
+
 def test_watchdog_does_not_retry_active_run():
     watchdog = (Path(__file__).parent.parent.parent / "watchdog-pressbox.sh").read_text()
     assert '[[ "$LABEL" == "RUNNING"* ]]' in watchdog

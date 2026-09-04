@@ -39,9 +39,13 @@ retryable_failure() {
 python3 -u pressbox-mvp.py "${PIPE_ARGS[@]}" > /tmp/pressbox-mvp.log 2>&1
 EXIT_CODE=$?
 if [ ! -f "$POST_MARKER" ] \
-   && grep -Eiq 'all candidates failed generation|no body-validated candidates|no topics scraped' /tmp/pressbox-mvp.log; then
+   && grep -Eiq 'all candidates failed generation|no body-validated candidates|no topics scraped|rate.?limit|LLM_RATE_LIMITED|Rate-limited' /tmp/pressbox-mvp.log; then
     echo "Bounded fresh-scrape retry..." >> /tmp/pressbox-mvp.log
-    sleep 10
+    if grep -Eiq 'rate.?limit|LLM_RATE_LIMITED|Rate-limited' /tmp/pressbox-mvp.log; then
+        sleep 120
+    else
+        sleep 10
+    fi
     python3 -u pressbox-mvp.py "${PIPE_ARGS[@]}" --fresh-scrape >> /tmp/pressbox-mvp.log 2>&1
     EXIT_CODE=$?
 fi
@@ -74,12 +78,13 @@ elif [ $EXIT_CODE -eq 75 ]; then
     exit 0
 # Normal skip — exit 0, write SKIP status so watchdog doesn't retry
 elif [ $EXIT_CODE -eq 0 ]; then
-    SKIP_REASON=$(grep -E '^(Pipeline:.*Skip|Pipeline:.*no eligible|Skip —)' /tmp/pressbox-mvp.log | tail -1 | sed 's/^Pipeline: *//' | sed 's/^Skip — *//')
-    [ -z "$SKIP_REASON" ] && SKIP_REASON=$(grep -E 'Pipeline:' /tmp/pressbox-mvp.log | tail -1 | sed 's/^Pipeline: *//')
-    [ -z "$SKIP_REASON" ] && SKIP_REASON="normal_skip"
+    # Logs carry timestamps; anchored parsing lost real skip reasons.
+    SKIP_REASON=$(grep -E 'Skip —' /tmp/pressbox-mvp.log | tail -1 | sed -E 's/^.*Skip —[[:space:]]*//')
+    [ -z "$SKIP_REASON" ] && SKIP_REASON=$(grep -E 'Pipeline:' /tmp/pressbox-mvp.log | tail -1 | sed -E 's/^.*Pipeline:[[:space:]]*//')
+    [ -z "$SKIP_REASON" ] && SKIP_REASON="NO_SAFE_CANDIDATE"
     TS=$(date -Iseconds)
-    echo "SKIP $TS $SKIP_REASON" > /tmp/pressbox-last-status
-    echo "Pressbox MVP: SKIP — $SKIP_REASON"
+    echo "SKIP $TS NO_SAFE_CANDIDATE: $SKIP_REASON" > /tmp/pressbox-last-status
+    echo "Pressbox MVP: SKIP — NO_SAFE_CANDIDATE: $SKIP_REASON"
     exit 0
 # Actual error — notify and propagate exit code
 else

@@ -72,6 +72,18 @@ def test_legacy_evaluator_remains_fail_closed():
     assert not mvp._evaluator_accepts("ERROR")
 
 
+def test_ungrounded_generic_s6_binary_becomes_source_takeaway():
+    mvp = _load_mvp()
+    slides = [{"content": "A complete source-backed sentence."} for _ in range(5)]
+    slides.append({"content": "Is this fair: yes or no?"})
+    assigned = {"slide_6": [
+        "The league will pause every match in the 10th minute this weekend.",
+        "Players will applaud for one minute before play resumes.",
+    ]}
+    assert mvp._s6_strip_ungrounded_binary(slides, assigned)
+    assert slides[5]["content"] == "The league will pause every match in the 10th minute this weekend."
+
+
 if __name__ == "__main__":
     test_claim_audit_accepts_source_claim_and_records_url()
     test_claim_audit_rejects_unsourced_fee()
