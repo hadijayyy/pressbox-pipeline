@@ -2192,7 +2192,9 @@ def _select_viral_pattern(topic, article_text):
                       "shock", "shocked", "stunned", "threatens", "threatened", "threaten",
                       "vows", "fired", "dismissed", "explodes", "erupts", "crisis",
                       "quits", "war of words", "bust-up", "revolt", "rebellion"]
-    tension_words = ["fume", "furious", "not happy", "under fire", "speaks out", "breaks silence"]
+    tension_words = ["fume", "furious", "not happy", "under fire", "speaks out", "breaks silence",
+                     "pulled out", "walked away", "pulled the plug", "fell apart",
+                     "fell through", "chaos", "u-turn", "backed out"]
     tension_match = sum(2 for w in tension_words if w in title)
     pressure_score = sum(1 for w in pressure_words if w in combined) + tension_match
 
