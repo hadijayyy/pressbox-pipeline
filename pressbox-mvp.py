@@ -3550,7 +3550,9 @@ def _body_first_shortlist(ranked, limit=15):
         if sport_exclude in {
             "tennis", "atp", "wta", "us open", "wimbledon", "roland garros",
             "australian open", "grand slam", "darts", "pdc", "formula 1", "f1",
-            "verstappen", "norris", "cricket", "ipl", "ashes", "test match", "bowled",
+            "verstappen", "norris", "mclaren", "gasly", "briatore",
+            "piastri", "hamilton mercedes", "leclerc", "sainz",
+            "cricket", "ipl", "ashes", "test match", "bowled",
             "golf", "pga", "ryder cup", "rugby", "six nations", "boxing", "ufc", "mma",
             "nfl", "nba", "mlb", "baseball",
         }:

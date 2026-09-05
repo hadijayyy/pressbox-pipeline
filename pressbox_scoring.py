@@ -143,7 +143,8 @@ EXCLUDE_KEYWORDS = {
         "nba", "basketball", "ncaa",
         # Formula 1
         "formula 1", "f1", "grand prix", "ferrari f1", "red bull f1",
-        "verstappen", "norris",
+        "verstappen", "norris", "mclaren", "gasly", "briatore",
+        "piastri", "hamilton mercedes", "leclerc", "sainz",
         # Cricket
         "cricket", "ipl", "test match", "ashes", "bowled",
         # Other sports

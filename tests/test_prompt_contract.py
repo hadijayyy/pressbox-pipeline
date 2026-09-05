@@ -76,7 +76,7 @@ def test_reference_mechanics_require_conditional_contrast_and_new_evidence():
         "observable action or result plus the clearest contradiction",
         "Each slide must introduce new evidence or a new editorial function",
         "Never invent a snub, motive, reaction, comparison, consequence",
-        "one sharp, source-backed verdict or narrow debate question",
+        "one sharp, source-backed verdict or binary debate question",
     ):
         assert phrase in text
 
