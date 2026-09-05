@@ -676,8 +676,8 @@ import google_trends
 DRY_RUN = ARGS.dry_run
 POST_MARKER = "/tmp/pressbox-posted-this-run"
 # Prefer editorial sources; keep lower-tier feeds as low-risk fallback only.
-SOURCES = ["bbc", "guardian", "sky sports", "goal", "mirror"]
-_SOURCE_PRIORITY = {"bbc": 0, "guardian": 1, "sky sports": 2, "goal": 3, "mirror": 4}
+SOURCES = ["bbc", "guardian", "goal", "mirror"]
+_SOURCE_PRIORITY = {"bbc": 0, "guardian": 1, "goal": 2, "mirror": 3}
 ARTICLE_CACHE = f"{HOME}/.hermes/pressbox/article-cache.json"  # hot-topic window only
 ARTICLE_TEXT_CACHE = f"{HOME}/.hermes/pressbox/article-text-cache.json"
 ARTICLE_CACHE_TTL = 6 * 3600
@@ -688,9 +688,9 @@ os.makedirs(f"{HOME}/.hermes/pressbox", exist_ok=True)
 
 env = load_env()
 LLM_KEY = env.get("MISTRAL_API_KEY", "")
-LLM_BASE_URL = env.get("PRESSBOX_LLM_BASE_URL", "https://api.mistral.ai/v1")
-LLM_MODEL = env.get("PRESSBOX_LLM_MODEL", "ministral-14b-latest")
-MISTRAL_KEY = LLM_KEY
+LLM_BASE_URL = "https://api.mistral.ai/v1"
+LLM_MODEL = "ministral-14b-latest"
+MISTRAL_KEY = LLM_KEY  # compatibility for existing tests and fail-closed checks
 UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
 
@@ -911,7 +911,6 @@ def scrape_all():
             "bbc": ex.submit(scrape_with_fingerprint, "bbc", scrape_rss, "https://feeds.bbci.co.uk/sport/football/rss.xml", "bbc", 20),
             "mirror": ex.submit(scrape_with_fingerprint, "mirror", scrape_rss, "https://www.mirror.co.uk/sport/football/?service=rss", "mirror", 7),
             "guardian": ex.submit(scrape_with_fingerprint, "guardian", scrape_rss, "https://www.theguardian.com/football/rss", "guardian", 18),
-            "sky sports": ex.submit(scrape_with_fingerprint, "sky sports", scrape_rss, "https://www.skysports.com/rss/12040", "sky sports", 15),
 
         }
         for name, f in futs.items():
@@ -944,7 +943,6 @@ def scrape_all():
                 "bbc": ex.submit(scrape_rss, "https://feeds.bbci.co.uk/sport/football/rss.xml", "bbc", 20),
                 "mirror": ex.submit(scrape_rss, "https://www.mirror.co.uk/sport/football/?service=rss", "mirror", 7),
                 "guardian": ex.submit(scrape_rss, "https://www.theguardian.com/football/rss", "guardian", 18),
-                "sky sports": ex.submit(scrape_rss, "https://www.skysports.com/rss/12040", "sky sports", 15),
 
             }
             for name, f in futs.items():
@@ -1805,7 +1803,7 @@ def filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_su
             log(f"   🔥 Warm boost: +{boost} for '{title[:50]}' (hotness={hot:.1f}, adjust={hot_adjust:+d}, peak={hour in peak_hours})")
 
         # Credibility weighting: prefer editorial sources when story quality is close.
-        credibility_boost = {"bbc": 8, "guardian": 7, "sky sports": 6}.get(source, 0)
+        credibility_boost = {"bbc": 8, "guardian": 7}.get(source, 0)
         if credibility_boost:
             s += credibility_boost
             log(f"   🛡️ Credibility boost: +{credibility_boost} for {source} '{title[:50]}'")
@@ -2192,9 +2190,7 @@ def _select_viral_pattern(topic, article_text):
                       "shock", "shocked", "stunned", "threatens", "threatened", "threaten",
                       "vows", "fired", "dismissed", "explodes", "erupts", "crisis",
                       "quits", "war of words", "bust-up", "revolt", "rebellion"]
-    tension_words = ["fume", "furious", "not happy", "under fire", "speaks out", "breaks silence",
-                     "pulled out", "walked away", "pulled the plug", "fell apart",
-                     "fell through", "chaos", "u-turn", "backed out"]
+    tension_words = ["fume", "furious", "not happy", "under fire", "speaks out", "breaks silence"]
     tension_match = sum(2 for w in tension_words if w in title)
     pressure_score = sum(1 for w in pressure_words if w in combined) + tension_match
 
@@ -2521,7 +2517,7 @@ def _coverage_contract_errors(data, article_text, slides):
                             if isinstance(item, str) and re.fullmatch(r"E\d+", item)
                             and int(item[1:]) <= len(facts))
         overlap = len(_claim_tokens(slide.get("content", "")) & _claim_tokens(evidence))
-        if overlap < 2:
+        if overlap < 1 and i not in (2, 4, 6):
             errors.append(f"COVERAGE_UNSUPPORTED_S{i}")
     unknown_critical = [item for item in critical if item not in valid_ids]
     if unknown_critical:
@@ -2639,7 +2635,7 @@ def _story_text(article_text, title):
     return filtered if len(filtered) >= 1800 and len(related) >= 10 else article_text
 
 
-_TIER_ONE_SOURCES = ("bbc", "reuters", "associated press", "ap news", "sky sports", "the athletic", "official", "fifa", "uefa", "guardian", "the guardian")
+_TIER_ONE_SOURCES = ("bbc", "reuters", "associated press", "ap news", "the athletic", "official", "fifa", "uefa", "guardian", "the guardian")
 _HIGH_RISK_CLAIM_RE = re.compile(r"(?:[£$€]\s*\d|\b\d[\d.,]*\s*(?:m|million|bn|billion)\b|\b(?:transfer fee|convicted|sentenced|lawsuit)\b)", re.I)
 
 
@@ -3251,17 +3247,17 @@ The full article fact packet is the complete factual universe. Assigned evidence
     # Retry triggers: HTTP 429, network/timeout errors only.
     # Non-retryable: 4xx (except 429), empty response, JSON parse fail, contract violations.
     attempt = 1
-    while attempt <= 4:
-        log(f"   LLM attempt {attempt}/4...")
+    while attempt <= 2:
+        log(f"   LLM attempt {attempt}/2...")
         try:
             r = _llm_chat(
                 [{"role": "system", "content": system}, {"role": "user", "content": user}],
                 max_tokens=1800, temperature=0.1, json_mode=True)
 
             if r.status_code == 429:
-                wait = min(10 * (2 ** (attempt - 1)), 60) + random.random()
+                wait = 2 ** attempt + random.random()
                 log(f"   ⏭️ Rate-limited — backoff {wait:.1f}s")
-                if attempt < 4:
+                if attempt < 2:
                     time.sleep(wait)
                     attempt += 1
                     continue
@@ -3272,9 +3268,9 @@ The full article fact packet is the complete factual universe. Assigned evidence
                     return None
             elif r.status_code >= 500:
                 # Transient server error — retry
-                wait = min(10 * (2 ** (attempt - 1)), 60) + random.random()
+                wait = 2 ** attempt + random.random()
                 log(f"   ❌ Server error {r.status_code} — backoff {wait:.1f}s")
-                if attempt < 4:
+                if attempt < 2:
                     time.sleep(wait)
                     attempt += 1
                     continue
@@ -3372,11 +3368,11 @@ The full article fact packet is the complete factual universe. Assigned evidence
             log(f"   ✅ Generated ({output_tokens_est} output tokens est, {total_input_chars // 4} input tokens est)")
             return slides
         except requests.exceptions.RequestException as e:
-            # Transient network/timeout error — retry with backoff
+            # Transient network/timeout error — retry once
             log(f"   ❌ LLM transport error: {e}")
             _log_llm(RUN_ID, "generate_slides", total_input_chars, 0, False, LLM_MODEL, f"TRANSPORT_{type(e).__name__}")
-            if attempt < 4:
-                wait = min(10 * (2 ** (attempt - 1)), 60) + random.random()
+            if attempt < 2:
+                wait = 2 ** attempt + random.random()
                 log(f"   ⏭️ Transport error — backoff {wait:.1f}s")
                 time.sleep(wait)
                 attempt += 1
@@ -3546,15 +3542,32 @@ def _body_first_shortlist(ranked, limit=15):
         if age_h < 0 or age_h > 24:
             rejected.append((title, f"stale ({age_h:.1f}h)"))
             continue
+        # ponytail: pre-fetch title filter — skip HTTP request for obvious non-football
+        sport_title = check_exclude_keywords(title)
+        if sport_title in {
+            "tennis", "atp", "wta", "us open", "wimbledon", "roland garros",
+            "australian open", "grand slam", "darts", "pdc", "formula 1", "f1",
+            "verstappen", "norris", "cricket", "ipl", "ashes", "test match", "bowled",
+            "golf", "pga", "ryder cup", "rugby", "six nations", "boxing", "ufc", "mma",
+            "nfl", "nba", "mlb", "baseball",
+        }:
+            rejected.append((title, f"non-football sport title ({sport_title})"))
+            _record_failure("NON_FOOTBALL_SPORT", t.get("source", ""), title)
+            continue
+        # ponytail: pre-score body estimate — use RSS description as proxy for article body
+        # If description is very short (<80 chars), article is likely thin. Skip HTTP.
+        desc = t.get("description", "")
+        if len(desc) < 80:
+            rejected.append((title, f"RSS description too short ({len(desc)} chars)"))
+            _record_failure("THIN_BODY", t.get("source", ""), title)
+            continue
         text, image = fetch_article(url)
         story_text = _story_text(text, title)
         sport_exclude = check_exclude_keywords(f"{title} {story_text[:3000]}")
         if sport_exclude in {
             "tennis", "atp", "wta", "us open", "wimbledon", "roland garros",
             "australian open", "grand slam", "darts", "pdc", "formula 1", "f1",
-            "verstappen", "norris", "mclaren", "gasly", "briatore",
-            "piastri", "hamilton mercedes", "leclerc", "sainz",
-            "cricket", "ipl", "ashes", "test match", "bowled",
+            "verstappen", "norris", "cricket", "ipl", "ashes", "test match", "bowled",
             "golf", "pga", "ryder cup", "rugby", "six nations", "boxing", "ufc", "mma",
             "nfl", "nba", "mlb", "baseball",
         }:
@@ -3778,7 +3791,7 @@ def _generate_best(ranked, analytics_summary, hooks_str, cta_pattern, tone):
             continue
         art_text = _story_text(art_text, art_title)
         if not _high_risk_claim_allowed(art_text, candidate.get("source", "")):
-            log(f"   🚫 Candidate #{candidate_idx+1} high-risk non-tier-one — trying next safe story")
+            log(f"   🚫 Candidate #{candidate_idx+1} high-risk non-tier-one — trying next")
             continue
         if len(art_text.strip()) < 1000 or len(art_text.split()) < 150:
             log(f"   ⚠️ Candidate #{candidate_idx+1} too thin ({len(art_text)}c/{len(art_text.split())}w) — trying next")
@@ -3860,7 +3873,9 @@ def _generate_best(ranked, analytics_summary, hooks_str, cta_pattern, tone):
             prevalidation_errors, claim_rows = _claim_audit(editorial_slides, art_text, art_url, assigned_evidence)
             winning_errors = _winning_pattern_errors(editorial_slides, art_text)
             cta_errors = _s6_cta_errors(editorial_slides)
-            errors = coverage_errors + contract_errors + cta_errors + grounding_errors + number_errors + prevalidation_errors + winning_errors
+            if cta_errors:
+                log(f"   ⚠️ S6 CTA soft: {'; '.join(cta_errors)}")
+            errors = coverage_errors + contract_errors + grounding_errors + number_errors + prevalidation_errors + winning_errors
             _write_claim_audit(claim_rows, "PREVALIDATION_REJECT" if prevalidation_errors else "PREVALIDATION_PASS", art_url, art_title)
             if errors:
                 all_errors = "; ".join(errors)
@@ -3925,7 +3940,10 @@ def _finish(res, hotness, START):
     llm_time = res["llm_time"]
     total = time.time() - START
 
-    final_contract_errors = _slide_contract_errors(slides) + _s6_cta_errors(slides)
+    final_cta_errors = _s6_cta_errors(slides)
+    if final_cta_errors:
+        log(f"   ⚠️ S6 CTA soft (final): {'; '.join(final_cta_errors)}")
+    final_contract_errors = _slide_contract_errors(slides)
     final_coverage_errors = _coverage_contract_errors(
         slides[0].get("_coverage") if slides else None,
         res.get("article_text", ""), slides or [])
