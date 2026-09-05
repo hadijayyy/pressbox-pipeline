@@ -2539,7 +2539,7 @@ def _evidence_plan(article_text):
     # Word-level fallback: require minimum 8 facts, scale to 12 only when article
     # is long enough that evidence density is clearly sufficient
     word_count = len(article_text.split())
-    min_facts = max(8, min(12, word_count // 100))  # 8 at ~800 words, 12 at ~1200+
+    min_facts = max(6, min(12, word_count // 100))  # 6 at ~600 words, 12 at ~1200+
     if len(facts) < min_facts:
         return None
     # Map available facts to 6 editorial slides.
@@ -3255,7 +3255,7 @@ The full article fact packet is the complete factual universe. Assigned evidence
                 max_tokens=1800, temperature=0.1, json_mode=True)
 
             if r.status_code == 429:
-                wait = 2 ** attempt + random.random()
+                wait = 3 ** attempt + random.random()
                 log(f"   ⏭️ Rate-limited — backoff {wait:.1f}s")
                 if attempt < 2:
                     time.sleep(wait)
@@ -3778,7 +3778,7 @@ def _generate_best(ranked, analytics_summary, hooks_str, cta_pattern, tone):
     element_guidance, element_selection = _element_guidance(analytics_summary, len(_ENGAGEMENT_RING.get("posts", [])))
 
     # Keep candidate churn bounded; body-first shortlist handles source validation.
-    for candidate_idx in range(min(3, len(ranked[:15]))):
+    for candidate_idx in range(min(5, len(ranked[:15]))):
         candidate = ranked[candidate_idx]
         art_text = candidate.get("_article_text", "")
         art_url = candidate["url"]
