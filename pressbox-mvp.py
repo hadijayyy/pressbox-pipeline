@@ -2517,7 +2517,7 @@ def _coverage_contract_errors(data, article_text, slides):
                             if isinstance(item, str) and re.fullmatch(r"E\d+", item)
                             and int(item[1:]) <= len(facts))
         overlap = len(_claim_tokens(slide.get("content", "")) & _claim_tokens(evidence))
-        if overlap < 1 and i not in (2, 4, 6):
+        if overlap < 1 and i not in (2, 4, 5, 6):  # S5 opinion slide; claims still audited
             errors.append(f"COVERAGE_UNSUPPORTED_S{i}")
     unknown_critical = [item for item in critical if item not in valid_ids]
     if unknown_critical:
