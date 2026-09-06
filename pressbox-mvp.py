@@ -2871,6 +2871,12 @@ S1 — THESIS
 
 Open with the strongest supported editorial angle.
 
+Do not attach a year, ranking, record, age, club status, competition label, or player achievement to a person unless ARTICLE_BODY explicitly confirms that exact detail. Never infer a year from ARTICLE_TITLE.
+
+The thesis must create immediate, source-supported pressure. Do not use generic labels such as “high-risk, high-reward”, “smart gamble”, “wasted opportunity”, or “mid-table” unless ARTICLE_BODY supplies the specific evidence behind that label.
+
+S1 must name the accountable decision-maker or club when the article documents a decision. Aim criticism at the decision or football logic, not an invented motive.
+
 Use the biggest relevant actor plus a contradiction, risk, consequence, pressure point, or uncomfortable football question.
 
 Never open with a flat announcement such as:
