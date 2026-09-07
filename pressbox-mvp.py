@@ -676,8 +676,8 @@ import google_trends
 DRY_RUN = ARGS.dry_run
 POST_MARKER = "/tmp/pressbox-posted-this-run"
 # Prefer editorial sources; keep lower-tier feeds as low-risk fallback only.
-SOURCES = ["bbc", "guardian", "goal", "mirror"]
-_SOURCE_PRIORITY = {"bbc": 0, "guardian": 1, "goal": 2, "mirror": 3}
+SOURCES = ["bbc", "guardian", "sky sports", "goal", "mirror"]
+_SOURCE_PRIORITY = {"bbc": 0, "guardian": 1, "sky sports": 2, "goal": 3, "mirror": 4}
 ARTICLE_CACHE = f"{HOME}/.hermes/pressbox/article-cache.json"  # hot-topic window only
 ARTICLE_TEXT_CACHE = f"{HOME}/.hermes/pressbox/article-text-cache.json"
 ARTICLE_CACHE_TTL = 6 * 3600
@@ -3563,7 +3563,7 @@ def _body_first_shortlist(ranked, limit=15):
         # ponytail: pre-score body estimate — use RSS description as proxy for article body
         # If description is very short (<80 chars), article is likely thin. Skip HTTP.
         desc = t.get("description", "")
-        if len(desc) < 80:
+        if desc and len(desc) < 80:
             rejected.append((title, f"RSS description too short ({len(desc)} chars)"))
             _record_failure("THIN_BODY", t.get("source", ""), title)
             continue
