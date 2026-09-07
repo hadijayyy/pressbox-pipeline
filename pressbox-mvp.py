@@ -686,6 +686,13 @@ MAX_CHARS = 450  # Pressbox editorial per-slide limit
 SENTENCE_COUNTS = {1:(1,3), 2:(2,4), 3:(2,4), 4:(1,4), 5:(2,4), 6:(2,4)}
 os.makedirs(f"{HOME}/.hermes/pressbox", exist_ok=True)
 
+def _atomic_json_dump(path, data):
+    """Write JSON atomically (tmp + os.replace) so crashes can't corrupt state files."""
+    tmp = f"{path}.tmp"
+    with open(tmp, "w") as f:
+        json.dump(data, f, indent=2)
+    os.replace(tmp, path)
+
 env = load_env()
 LLM_KEY = env.get("MISTRAL_API_KEY", "")
 LLM_BASE_URL = "https://api.mistral.ai/v1"
@@ -911,6 +918,7 @@ def scrape_all():
             "bbc": ex.submit(scrape_with_fingerprint, "bbc", scrape_rss, "https://feeds.bbci.co.uk/sport/football/rss.xml", "bbc", 20),
             "mirror": ex.submit(scrape_with_fingerprint, "mirror", scrape_rss, "https://www.mirror.co.uk/sport/football/?service=rss", "mirror", 7),
             "guardian": ex.submit(scrape_with_fingerprint, "guardian", scrape_rss, "https://www.theguardian.com/football/rss", "guardian", 18),
+            "sky sports": ex.submit(scrape_with_fingerprint, "sky sports", scrape_rss, "https://www.skysports.com/rss/12040", "sky sports", 18),
 
         }
         for name, f in futs.items():
@@ -943,6 +951,7 @@ def scrape_all():
                 "bbc": ex.submit(scrape_rss, "https://feeds.bbci.co.uk/sport/football/rss.xml", "bbc", 20),
                 "mirror": ex.submit(scrape_rss, "https://www.mirror.co.uk/sport/football/?service=rss", "mirror", 7),
                 "guardian": ex.submit(scrape_rss, "https://www.theguardian.com/football/rss", "guardian", 18),
+                "sky sports": ex.submit(scrape_rss, "https://www.skysports.com/rss/12040", "sky sports", 18),
 
             }
             for name, f in futs.items():
@@ -1258,8 +1267,7 @@ def pull_engagement(poster):
         time.sleep(0.3)  # Rate limit courtesy
     
     if updated or failed:
-        with open(POSTED, "w") as f:
-            json.dump(data, f, indent=2)
+        _atomic_json_dump(POSTED, data)
         if updated:
             log(f"📊 Updated metrics for {updated} posts")
         if failed:
@@ -3510,8 +3518,7 @@ def track_post(title, url, source, root_id, permalink, hotness_score=0, article_
     data["topics"].append(entry)
     # Keep last 200 entries
     data["topics"] = data["topics"][-200:]
-    with open(POSTED, "w") as f:
-        json.dump(data, f, indent=2)
+    _atomic_json_dump(POSTED, data)
 
 # ── 7. PRE-FLIGHT ──────────────────────────────────────────────────
 
