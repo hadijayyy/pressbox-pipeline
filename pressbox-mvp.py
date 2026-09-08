@@ -2119,7 +2119,8 @@ def evaluator_check(slides, article_text, url, assigned_evidence=None):
         "7. QUALITY: grammar errors, incoherent flow, too many slides\n"
         "8. MISLEADING: headline says X but article says Y\n"
         "9. TONE: flag analysis only when it adds an unsupported claim. A slide may report verified facts without a stance.\n"
-        "10. S6 QUESTION: a binary/debate question in the final slide is ALLOWED when both sides are grounded in the article (e.g. article mentions a tactical change AND the risk it carries). Do not reject a question merely because it is a question. Reject it only if it invents a side, motive, or consequence the article never mentions.\n\n"
+        "10. S6 QUESTION: a binary/debate question in the final slide is ALLOWED when both sides are grounded in the article (e.g. article mentions a tactical change AND the risk it carries). Do not reject a question merely because it is a question. Reject it only if it invents a side, motive, or consequence the article never mentions.\n"
+        "11. DEPTH BALANCE: a slide is TOO SHALLOW when it retells a fact with zero editorial angle AND adds no tension, decision, trade-off, or football consequence. That is REVISE. Do NOT flag sharp, source-grounded opinion or pointed questions — that depth is wanted. Flag condescension or unexplained jargon only when a casual fan could not follow the sentence.\n\n"
         "RULE: Check every claim against the full source article. Flag added facts, changed numbers, stronger certainty, invented motive, or unsupported consequence. Do not flag a natural idiom or faithful paraphrase when meaning is unchanged.\n\n"
         "Respond in EXACTLY this JSON format:\n"
         '{"decision": "APPROVE|REVISE|REJECT", "reasons": ["reason1", "reason2"]}\n'
@@ -2412,8 +2413,13 @@ def _claim_audit(slides, article_text, url, assigned_evidence=None):
                 continue
             tokens = _claim_tokens(claim)
             overlap = sorted(tokens & evidence_tokens)
+            # Number support uses the FULL article text: _source_units drops
+            # short comma-split chunks (e.g. "record in Ligue 1." < 20 chars),
+            # which silently removes named-figure digits and false-flags
+            # "Ligue 1" as an unsupported number.
             numbers = re.findall(r"(?:£|€|\$)\s?[\d,.]+|\b\d+(?:[.,]\d+)?%?", claim)
-            missing_numbers = [n for n in numbers if n.replace(",", "") not in evidence_text.replace(",", "")]
+            full_norm = article_text.replace(",", "")
+            missing_numbers = [n for n in numbers if n.replace(",", "") not in full_norm]
             best_ratio = max([
                 len(tokens & _claim_tokens(unit)) / max(1, len(tokens)) for unit in evidence
             ] or [0])
@@ -2462,7 +2468,11 @@ def _fabrizio_voice(article_text, title=""):
         f"{FABRIZIO}\n"
         f"Opener rule: {opener}. {angle}.\n"
         "Explain football actions in plain language. Use source-supported tension, risk, pressure, "
-        "contradiction, or unfairness; never add dirty language, personal abuse, motive, or consequence."
+        "contradiction, or unfairness; never add dirty language, personal abuse, motive, or consequence.\n"
+        "Write like a top pundit talking to match-going fans: every slide carries one sharp football "
+        "insight (contradiction, decision, trade-off, power play) explained in short, plain sentences "
+        "a casual fan uses. Analytical jargon (xG, progressive passes, low block, double pivot, PPDA) "
+        "is banned unless the article itself uses it. No lecture tone, no academic phrasing."
     )
 
 
