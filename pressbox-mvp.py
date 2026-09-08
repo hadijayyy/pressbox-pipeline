@@ -2354,6 +2354,46 @@ def _claim_tokens(text):
     return {w.lower() for w in re.findall(r"[A-Za-zÀ-ÿ0-9£€$]+", text) if len(w) > 2 and w.lower() not in stop}
 
 
+def _substitution_direction_errors(slides, article_text):
+    """Fail closed when a slide frames a player as benched/unused while the
+    source records that player coming off the pitch (substitution inverted).
+    Regression gate: Rodri 'came off in the 62nd minute' -> 'on the bench for
+    62 minutes' passed lexical-overlap gates because tokens matched."""
+    errors = []
+    played_rx = re.compile(
+        r"\b(came off|went off|subbed off|was substituted|replaced by|replacing him)\b"
+        r"[^.]{0,80}?\bin the (\d+)(?:st|nd|rd|th)? minute", re.I)
+    bench_rx = re.compile(
+        r"\b(?:left on the bench|started (?:the match )?on the bench|"
+        r"(?:on the )?bench for (\d+)(?:st|nd|rd|th)? minute|"
+        r"unused (?:sub|substitute)|did not (?:come|get) on)\b", re.I)
+    played_names = set()
+    played_minutes = set()
+    for unit in _source_units(article_text):
+        m = played_rx.search(unit)
+        if m:
+            played_minutes.add(m.group(2))
+            played_names |= {w.lower() for w in re.findall(r"[A-Z][a-zà-ÿ]{3,}", unit)}
+    if not played_names:
+        return errors
+    for i, slide in enumerate(slides[:6], 1):
+        for claim in re.split(r"(?<=[.!?])\s+", slide.get("content", "").strip()):
+            if not claim:
+                continue
+            bm = bench_rx.search(claim)
+            if not bm:
+                continue
+            minute_mismatch = False
+            if bm.group(1) and bm.group(1) in played_minutes:
+                minute_mismatch = True  # same minute: source says subbed, slide says benched
+            claim_names = {w.lower() for w in re.findall(r"[A-Z][a-zà-ÿ]{3,}", claim)}
+            if minute_mismatch or (claim_names & played_names):
+                errors.append(
+                    f"SUBSTITUTION_DIRECTION_S{i}: source records a player coming off "
+                    f"but slide frames them as benched/unused: {claim[:160]}")
+    return errors
+
+
 def _claim_audit(slides, article_text, url, assigned_evidence=None):
     """Pre-evaluator lexical entailment gate. Fail closed; source URL is attached."""
     source_units = _source_units(article_text)
@@ -2386,6 +2426,7 @@ def _claim_audit(slides, article_text, url, assigned_evidence=None):
             rows.append(row)
             if reason and reason.startswith("unsupported"):
                 errors.append(f"PREVALIDATION: S{i} {reason}: {claim[:180]}")
+    errors.extend(_substitution_direction_errors(slides or [], article_text))
     return errors, rows
 
 
@@ -2525,7 +2566,7 @@ def _coverage_contract_errors(data, article_text, slides):
                             if isinstance(item, str) and re.fullmatch(r"E\d+", item)
                             and int(item[1:]) <= len(facts))
         overlap = len(_claim_tokens(slide.get("content", "")) & _claim_tokens(evidence))
-        if overlap < 1 and i not in (2, 4, 5, 6):  # S5 opinion slide; claims still audited
+        if overlap < 1 and i not in (5, 6):  # S5 opinion, S6 CTA/question; factual slides need evidence
             errors.append(f"COVERAGE_UNSUPPORTED_S{i}")
     unknown_critical = [item for item in critical if item not in valid_ids]
     if unknown_critical:
@@ -2706,7 +2747,7 @@ def _slide_contract_errors(slides, editorial=True):
 
 
 FABRIZIO = '## FABRIZIO-STYLE VOICE / COMMENTATOR DELIVERY\nUse urgent, concrete delivery when facts justify it. Lead with the biggest name or clearest number, then land the football meaning.\nKeep every take clean, sharp, conversational, and source-grounded. Emoji allowed only when editorially useful.\nDo not imitate a journalist, claim private access, or use dirty language. One strong sentence beats filler.'
-CONSTRAINTS = 'Do not replace source terms with stronger or different terms. Keep source terms, uncertainty, attribution, and scope unchanged.\nDo not turn conditional claims into current facts; do not turn a conditional claim into a current fact. A stance is optional when evidence is thin; a verdict is required when facts support one.\nDo not invent a conflict, urgency, motive, winner, loser, or consequence. Frame judgement as interpretation, never eyewitness knowledge or fact.\nA question is allowed in S6. First-person markers such as "For me" or "In my eyes" must not claim eyewitness knowledge.'
+CONSTRAINTS = 'Do not replace source terms with stronger or different terms. Keep source terms, uncertainty, attribution, and scope unchanged.\nDo not turn conditional claims into current facts; do not turn a conditional claim into a current fact. A stance is optional when evidence is thin; a verdict is required when facts support one.\nDo not invent a conflict, urgency, motive, winner, loser, or consequence. Frame judgement as interpretation, never eyewitness knowledge or fact.\nSUBSTITUTION DIRECTION: check the source verb before writing — "came off in the Nth minute" means the player STARTED and played; never write "left on the bench" / "on the bench for N minutes" for that player. An unused substitute has no minute number.\nA question is allowed in S6. First-person markers such as "For me" or "In my eyes" must not claim eyewitness knowledge.'
 OVERRIDE = 'SOURCE-ONLY OVERRIDE: Full ARTICLE_BODY remains factual authority. assigned evidence lines are the only factual authority for each slide focus; ARTICLE_TITLE is a label, not evidence.\nCopy source wording when possible. If source cannot support a complete sentence, omit that detail. Delete unsupported detail.\nDo not invent stakes, motives, consequences, reactions, or either/or outcomes. Never upgrade generic terms, partial lists, uncertainty, status, role, or scope.\nIf a slide needs a missing material fact, return needs_more_source.'
 
 def generate_slides(article_text, url, title="", source="", hooks="", cta_pattern="", tone="", pattern="d", evaluator_feedback="", evidence_plan=None, hook_variant="implication", element_guidance="", pillar="", serial_format=""):
