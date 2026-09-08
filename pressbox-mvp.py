@@ -2404,6 +2404,8 @@ def _claim_audit(slides, article_text, url, assigned_evidence=None):
         evidence = source_units
         evidence_text = " ".join(evidence)
         evidence_tokens = _claim_tokens(evidence_text)
+        # Log the slide's assigned evidence (diagnostic); audit check stays full-source.
+        logged_evidence = (assigned_evidence or {}).get(f"slide_{i}") or evidence[:2]
         for claim in re.split(r"(?<=[.!?])\s+", slide.get("content", "").strip()):
             claim = claim.strip()
             if not claim:
@@ -2422,7 +2424,7 @@ def _claim_audit(slides, article_text, url, assigned_evidence=None):
                 reason = f"review: low lexical overlap {best_ratio:.0%}"
             elif len(overlap) < 2:
                 reason = "review: compact paraphrase"
-            row = {"slide": i, "claim": claim, "evidence": evidence[:2], "source_url": url, "reason": reason or "supported"}
+            row = {"slide": i, "claim": claim, "evidence": logged_evidence[:2], "source_url": url, "reason": reason or "supported"}
             rows.append(row)
             if reason and reason.startswith("unsupported"):
                 errors.append(f"PREVALIDATION: S{i} {reason}: {claim[:180]}")
@@ -2747,7 +2749,7 @@ def _slide_contract_errors(slides, editorial=True):
 
 
 FABRIZIO = '## FABRIZIO-STYLE VOICE / COMMENTATOR DELIVERY\nUse urgent, concrete delivery when facts justify it. Lead with the biggest name or clearest number, then land the football meaning.\nKeep every take clean, sharp, conversational, and source-grounded. Emoji allowed only when editorially useful.\nDo not imitate a journalist, claim private access, or use dirty language. One strong sentence beats filler.'
-CONSTRAINTS = 'Do not replace source terms with stronger or different terms. Keep source terms, uncertainty, attribution, and scope unchanged.\nDo not turn conditional claims into current facts; do not turn a conditional claim into a current fact. A stance is optional when evidence is thin; a verdict is required when facts support one.\nDo not invent a conflict, urgency, motive, winner, loser, or consequence. Frame judgement as interpretation, never eyewitness knowledge or fact.\nSUBSTITUTION DIRECTION: check the source verb before writing — "came off in the Nth minute" means the player STARTED and played; never write "left on the bench" / "on the bench for N minutes" for that player. An unused substitute has no minute number.\nA question is allowed in S6. First-person markers such as "For me" or "In my eyes" must not claim eyewitness knowledge.'
+CONSTRAINTS = 'Do not replace source terms with stronger or different terms. Keep source terms, uncertainty, attribution, and scope unchanged.\nDo not turn conditional claims into current facts; do not turn a conditional claim into a current fact. A stance is optional when evidence is thin; a verdict is required when facts support one.\nDo not invent a conflict, urgency, motive, winner, loser, or consequence. Frame judgement as interpretation, never eyewitness knowledge or fact.\nSUBSTITUTION DIRECTION: check the source verb before writing — "came off in the Nth minute" means the player STARTED and played; never write "left on the bench" / "on the bench for N minutes" for that player. An unused substitute has no minute number.\nCOMPRESSION CERTAINTY: keep the exact stage and certainty — a trial is not a signing, a range ("2-3 weeks") is not a countdown, interest is not agreement. Never rewrite a source process into a completed fact ("three weeks away from signing" when the source says a trial lasted weeks).\nA question is allowed in S6. First-person markers such as "For me" or "In my eyes" must not claim eyewitness knowledge.'
 OVERRIDE = 'SOURCE-ONLY OVERRIDE: Full ARTICLE_BODY remains factual authority. assigned evidence lines are the only factual authority for each slide focus; ARTICLE_TITLE is a label, not evidence.\nCopy source wording when possible. If source cannot support a complete sentence, omit that detail. Delete unsupported detail.\nDo not invent stakes, motives, consequences, reactions, or either/or outcomes. Never upgrade generic terms, partial lists, uncertainty, status, role, or scope.\nIf a slide needs a missing material fact, return needs_more_source.'
 
 def generate_slides(article_text, url, title="", source="", hooks="", cta_pattern="", tone="", pattern="d", evaluator_feedback="", evidence_plan=None, hook_variant="implication", element_guidance="", pillar="", serial_format=""):
