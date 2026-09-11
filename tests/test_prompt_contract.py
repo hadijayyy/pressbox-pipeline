@@ -136,3 +136,38 @@ def test_story_opportunity_keeps_grounded_announcement_with_consequence():
     assert signals["numbers"] >= 1
     assert signals["consequence"] >= 1
     assert not reject
+
+def test_analytic_moves_block_present():
+    text = SOURCE.read_text()
+    assert "ANALYTIC MOVES" in text
+    for move in ("MECHANISM", "INCENTIVE", "POWER", "STANDARD", "TRADE-OFF", "CONTRADICTION"):
+        assert move in text
+    assert "A move rearranges supplied facts. It never introduces a new one." in text
+    assert "Mark the move as reasoning, not as knowledge" in text
+    assert "Never manufacture a motive, a hidden plan, a winner, a loser, or a consequence." in text
+    assert "A sentence that only restates the source has made no move." in text
+
+
+def test_s3_is_analytic_slot_and_keeps_grounding_ban():
+    text = SOURCE.read_text()
+    assert "S3 \u2014 MEANING" in text
+    assert "This is the analytical slide." in text
+    assert "Use exactly one analytic move: MECHANISM or INCENTIVE." in text
+    assert "Do not restate the source. A descriptive sentence has made no move." in text
+    assert "Do not add outside tactical, financial, historical, competitive, or transfer context." in text
+
+
+def test_evaluator_authorizes_labeled_interpretation():
+    text = SOURCE.read_text()
+    assert "12. LABELED INTERPRETATION" in text
+    assert "13. S3 MOVE" in text
+    assert "A qualifier is not hedging - do not flag it." in text
+
+
+def test_scorer_negative_tokens_are_title_only():
+    text = SOURCE.read_text()
+    lines = [l for l in text.splitlines() if l.startswith("_HARD_NEWS_NEGATIVE")]
+    assert lines, "scorer token constants missing"
+    line = lines[0]
+    assert '"why "' not in line, "generic word 'why' must not be a negative signal"
+    assert '"analysis"' not in line, "analytic framing must not be penalised"
