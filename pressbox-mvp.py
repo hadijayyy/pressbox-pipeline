@@ -2222,7 +2222,9 @@ def evaluator_check(slides, article_text, url, assigned_evidence=None):
         "8. MISLEADING: headline says X but article says Y\n"
         "9. TONE: flag analysis only when it adds an unsupported claim. A slide may report verified facts without a stance.\n"
         "10. S6 QUESTION: a binary/debate question in the final slide is ALLOWED when both sides are grounded in the article (e.g. article mentions a tactical change AND the risk it carries). Do not reject a question merely because it is a question. Reject it only if it invents a side, motive, or consequence the article never mentions.\n"
-        "11. DEPTH BALANCE: a slide is TOO SHALLOW when it retells a fact with zero editorial angle AND adds no tension, decision, trade-off, or football consequence. That is REVISE. Do NOT flag sharp, source-grounded opinion or pointed questions — that depth is wanted. Flag condescension or unexplained jargon only when a casual fan could not follow the sentence.\n\n"
+        "11. DEPTH BALANCE: a slide is TOO SHALLOW when it retells a fact with zero editorial angle AND adds no tension, decision, trade-off, or football consequence. That is REVISE. Do NOT flag sharp, source-grounded opinion or pointed questions — that depth is wanted. Flag condescension or unexplained jargon only when a casual fan could not follow the sentence.\n"
+        "12. LABELED INTERPRETATION: a slide may reason about the supplied facts. APPROVE it when the reasoning is marked as interpretation with a qualifier ('That means', 'That reads as', 'The logic here', 'If that holds', 'Worth asking') AND names the supplied fact it reasons from. Flag it only when the reasoning adds a fact, motive, plan, winner, loser, or consequence the article never states, or when the reading is presented as knowledge rather than as a reading. A qualifier is not hedging - do not flag it.\n"
+        "13. S3 MOVE: S3 is the analytical slide. A MECHANISM move (how the supplied facts produce the outcome) or an INCENTIVE move (who benefits, who absorbs the cost) is APPROVE when it stays inside the article's facts. A descriptive S3 that only restates the source has made no move - that is REVISE.\n"
         "RULE: Check every claim against the full source article. Flag added facts, changed numbers, stronger certainty, invented motive, or unsupported consequence. Do not flag a natural idiom or faithful paraphrase when meaning is unchanged.\n\n"
         "Respond in EXACTLY this JSON format:\n"
         '{"decision": "APPROVE|REVISE|REJECT", "reasons": ["reason1", "reason2"]}\n'
@@ -3009,13 +3011,27 @@ def _high_risk_claim_allowed(text, source):
     return not _HIGH_RISK_CLAIM_RE.search(text) or any(name in source.lower() for name in _TIER_ONE_SOURCES)
 
 
+_HARD_NEWS_POSITIVE = (
+    "confirmed", "appointed", "signed", "rejected", "announced", "won", "lost",
+    "debut", "final", "result", "returns", "transfer",
+)
+_HARD_NEWS_NEGATIVE = ("wrong track", "reminiscent", "opinion", "column", "profile")
+
+
 def _hard_news_adjustment(title, body):
-    """Prefer reportable developments over opinion/profile framing."""
-    text = f"{title} {body}".lower()
-    positive = ("confirmed", "appointed", "signed", "rejected", "announced", "won", "lost",
-                "debut", "final", "result", "returns", "transfer")
-    negative = ("why ", "wrong track", "reminiscent", "analysis", "opinion", "column", "profile")
-    return 5 * sum(word in text for word in positive) - 8 * sum(word in text for word in negative)
+    """Prefer reportable developments over opinion/profile framing.
+
+    Positive signals read title + body. Negative framing signals read the TITLE
+    only: ordinary prose contains "why"/"opinion"/"analysis" as plain words, so
+    scanning the body penalised legitimate reports and analysis pieces (9 of 68
+    cached candidates, incl. a quote headline "...so why don't..." scored -8
+    against its own positives). Analytic framing is wanted, so "why " and
+    "analysis" are no longer negative signals at all.
+    """
+    title_l = (title or "").lower()
+    text_l = f"{title_l} {(body or '').lower()}"
+    return (5 * sum(word in text_l for word in _HARD_NEWS_POSITIVE)
+            - 8 * sum(word in title_l for word in _HARD_NEWS_NEGATIVE))
 
 
 _LEADING_FRAGMENT_RE = re.compile(
@@ -3176,6 +3192,31 @@ The second invents an internal state.
 
 Do not weaken a valid football judgement just because the underlying facts require careful attribution.
 
+ANALYTIC MOVES
+
+Analysis is the part that makes the copy worth reading. Every editorial slide must run one named analytic move.
+
+Move library — use exactly one per slide, do not name it in the copy:
+
+- MECHANISM — how the supplied facts produce this situation
+- INCENTIVE — who benefits, and who absorbs the cost
+- POWER — who can decide, and who can only react
+- STANDARD — the same situation judged two different ways
+- TRADE-OFF — what was given up to get what was gained
+- CONTRADICTION — stated intention against supplied action
+
+Rules for every analytic sentence:
+
+- A move rearranges supplied facts. It never introduces a new one.
+- Mark the move as reasoning, not as knowledge, with a qualifier: “That means”, “That reads as”, “The logic here”, “If that holds”, “Worth asking”.
+- Name the supplied fact you are reasoning from inside the sentence, so a reader can check it.
+- Never manufacture a motive, a hidden plan, a winner, a loser, or a consequence.
+- If the supplied facts cannot support the move, drop the move. Do not fill the gap with guesswork.
+
+Analysis is not summary and not hedging. A sentence that only restates the source has made no move.
+
+Analysis is bold. Its factual premises stay conservative.
+
 CRITICAL LENS
 
 Before writing, silently identify:
@@ -3263,15 +3304,28 @@ Do not repeat S1.
 
 S3 — MEANING
 
-Explain why that fact matters in football terms.
+This is the analytical slide. Explain how the supplied fact produces the situation.
 
-Use only implications that logically follow from ARTICLE_BODY.
+Use exactly one analytic move: MECHANISM or INCENTIVE.
+
+MECHANISM = how the supplied facts lead to this outcome.
+
+INCENTIVE = who benefits and who absorbs the cost, according to the supplied facts.
 
 Answer:
 
 “So what does this actually mean?”
 
-Do not add outside tactical, financial, historical, competitive, or transfer context.
+Rules:
+
+- Reason only from facts already inside ARTICLE_BODY. Do not add outside tactical, financial, historical, competitive, or transfer context.
+- Mark it as reasoning with a qualifier: “That means”, “That reads as”, “The logic here”, “If that holds”, “Worth asking”.
+- Name the supplied fact you reason from inside the sentence, so a reader can check it.
+- Do not restate the source. A descriptive sentence has made no move.
+- Never invent a motive, hidden plan, winner, loser, or consequence.
+- If the facts cannot support the move, state the narrower meaning they do support.
+
+S3 must not repeat the tension S4 exposes.
 
 S4 — PRESSURE
 

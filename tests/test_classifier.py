@@ -788,3 +788,52 @@ class TestS6BinaryGate:
         changed = mod._s6_strip_ungrounded_binary(slides, ev)
         assert changed is False
         assert slides[5]["content"] == "A question is allowed in S6."
+
+
+class TestHardNewsAdjustment:
+    """Scorer regression: negative framing signals must read the TITLE only.
+
+    Before the fix the negative tokens were matched against f"{title} {body}",
+    so ordinary prose ("...so why don't we...") sank otherwise reportable
+    candidates. 9 of 68 cached candidates were hit that way.
+    """
+
+    def _load(self):
+        return _load_mvp()
+
+    def test_quote_in_body_does_not_penalise(self):
+        mod = self._load()
+        score = mod._hard_news_adjustment(
+            "Mourinho: against Inter we could have scored eight goals",
+            "The coach said: \"so why don't we score eight?\" before the final.",
+        )
+        assert score > 0
+
+    def test_opinion_word_in_body_does_not_penalise(self):
+        mod = self._load()
+        score = mod._hard_news_adjustment(
+            "Club confirms new deal",
+            "An opinion among supporters is that the transfer was slow.",
+        )
+        assert score > 0
+
+    def test_why_headline_no_longer_penalised(self):
+        mod = self._load()
+        assert mod._hard_news_adjustment("Why the manager changed shape", "") == 0
+
+    def test_analysis_headline_no_longer_penalised(self):
+        mod = self._load()
+        assert mod._hard_news_adjustment("Analysis: the midfield rebuild", "") == 0
+
+    def test_title_framing_still_penalised(self):
+        mod = self._load()
+        assert mod._hard_news_adjustment("Why the manager is on the wrong track", "") < 0
+
+    def test_positive_signals_still_read_body(self):
+        mod = self._load()
+        assert mod._hard_news_adjustment("", "he confirmed and signed") == 10
+
+    def test_empty_inputs_safe(self):
+        mod = self._load()
+        assert mod._hard_news_adjustment("", "") == 0
+        assert mod._hard_news_adjustment(None, None) == 0
