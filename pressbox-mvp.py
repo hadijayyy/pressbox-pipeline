@@ -355,6 +355,106 @@ def _recent_topic_frequency(candidate_title, days=_SATURATION_DAYS, max_count=_S
         log(f"   ⚠️ Saturation guard error ({e}) — fail-open, not blocking")
         return False
 
+# ── SAME-STORY GUARD (24h): entity + event class, kills saga cannibalization ──
+# 11 Sep: Kartal resignation posted 5x in one day (06:28/08:35/11:44/15:55/18:00).
+# Title-similarity saturation missed it — each outlet worded the headline differently.
+_STORY_WINDOW_HOURS = 24
+_ENTITY_STOP = {
+    "total", "all", "two", "three", "dream", "explosive", "baffled", "chaos", "shock",
+    "wants", "want", "why", "how", "what", "when", "who", "the", "and", "for",
+    "fifa", "uefa", "champions", "league", "premier", "world", "cup", "europa", "conference",
+    "transfer", "news", "live", "video", "watch", "report", "sources", "exclusive", "inside",
+    "united", "city", "utd", "fc", "afc", "cf", "sc", "boss", "star", "stars", "manager",
+    "coach", "player", "players", "club", "team", "goal", "goals", "final", "match", "season",
+    "sport", "sports", "football", "soccer", "bbc", "mirror", "guardian", "goal", "sky",
+    "skysports", "espn", "mail", "sun", "times", "telegraph", "independent", "express",
+    "standard", "talk", "metro", "athletic", "onefootball", "articles", "lists",
+    "www", "com", "org", "net", "en", "uk", "html", "amp", "index", "story", "post",
+    "january", "february", "march", "april", "may", "june", "july", "august", "september",
+    "october", "november", "december", "jan", "feb", "mar", "apr", "jun", "jul", "aug",
+    "sep", "sept", "oct", "nov", "dec", "monday", "tuesday", "wednesday", "thursday",
+    "friday", "saturday", "sunday", "hours", "hour", "day", "days", "night", "today",
+    "yesterday", "week", "weeks", "month", "months", "year", "years", "ahead", "return",
+    "back", "after", "before", "over", "under", "with", "from", "into", "about", "against",
+    "first", "second", "third", "next", "last", "new", "old", "more", "most", "only",
+    "his", "her", "their", "its", "our", "your", "out", "not", "but", "you", "they",
+    "injury", "injuries", "blow", "update", "latest", "clash", "draw", "draws", "win",
+    "wins", "loss", "losses", "defeat", "window", "deal", "deals", "contract", "contracts",
+    "career", "future", "exit", "comeback", "message", "warning", "verdict", "reaction",
+    "reactions", "hero", "free", "agent", "agents", "fee", "money", "million",
+    "billion", "pounds", "euro", "euros", "dollar", "dollars", "stretcher", "blanks",
+    "squad", "lineup", "gaffer", "sensation", "sensational", "price", "prices",
+}
+_STORY_EVENTS = {
+    "resign": r"\bresign\w*|\bquit\w*|\bstep(?:s|ping)?\s+down\b|\bstand(?:s|ing)?\s+down\b|\bwalk(?:s|ed)?\s+away\b|\bdeparture\b",
+    "sack": r"\bsack\w*|\baxed?\b|\bdismiss\w*|\bfired\b|\bshow\w*\s+the\s+door\b",
+    "appoint": r"\bappoint\w*|\bunveil\w*|\btakes?\s+charge\b|\bnew\s+(?:boss|manager|head\s+coach)\b",
+    "transfer": r"\btransfer\w*|\bsign(?:s|ed|ing)?\b|\bjoins?\b|\bmedical\b|\bloan\b|\bmove[sd]?\s+to\b",
+    "ban": r"\bban(?:s|ned)?\b|\bsuspend\w*|\bcharged?\b|\bpoints?\s+deduction\b",
+    "injury": r"\binjur\w*|\bsidelin\w*|\bruled\s+out\b|\bout\s+for\s+\w+\s+(?:weeks?|months?)\b",
+}
+# Club + transfer/injury repeats are legitimately separate news; club + saga is cannibalization.
+_SAGA_EVENTS = {"resign", "sack", "appoint"}
+
+
+def _fold_ascii(text):
+    t = unicodedata.normalize("NFKD", text or "")
+    return "".join(c for c in t if not unicodedata.combining(c)).lower()
+
+
+def _story_entities(title, url):
+    """Names in play: capitalised title words + meaningful URL slug tokens."""
+    ents = set()
+    for w in re.findall(r"\b[A-Z][a-zA-Z'\-]{2,}", title or ""):
+        f = _fold_ascii(w)
+        if len(f) >= 4 and f not in _ENTITY_STOP:
+            ents.add(f)
+    slug = re.sub(r"https?://[^/]+", "", url or "")
+    for w in re.split(r"[^a-z0-9]+", _fold_ascii(slug)):
+        if len(w) >= 5 and w not in _ENTITY_STOP and not w.isdigit():
+            ents.add(w)
+    return ents
+
+
+def _story_events(title, url):
+    text = _fold_ascii(f"{title} {url}")
+    return {k for k, rx in _STORY_EVENTS.items() if re.search(rx, text)}
+
+
+def _daily_story_duplicate(title, url, now=None):
+    """Return the colliding past post when this candidate repeats the same story."""
+    now = now or datetime.now().astimezone()
+    cutoff = (now - timedelta(hours=_STORY_WINDOW_HOURS)).isoformat()
+    ents, evs = _story_entities(title, url), _story_events(title, url)
+    if not ents or not evs:
+        return None
+    try:
+        with open(POSTED) as f:
+            data = json.load(f)
+        topics = data.get("topics", []) if isinstance(data, dict) else data
+    except Exception as e:
+        log(f"   ⚠️ Story guard error ({e}) — fail-open, not blocking")
+        return None
+    for t in topics:
+        if (t.get("posted_at") or "") < cutoff:
+            continue
+        shared_ents = _story_entities(t.get("title", ""), t.get("url", "")) & ents
+        shared_evs = _story_events(t.get("title", ""), t.get("url", "")) & evs
+        if not shared_ents or not shared_evs:
+            continue
+        if (shared_evs & _SAGA_EVENTS) or len(shared_ents) >= 2:
+            return t
+    return None
+
+
+def _story_guard_blocks(title, url):
+    prev = _daily_story_duplicate(title, url)
+    if prev:
+        log(f"   🔁 Same story <{_STORY_WINDOW_HOURS}h: '{title[:55]}' "
+            f"≈ '{prev.get('title', '')[:45]}' ({prev.get('posted_at', '')[:16]}) — skipping")
+        return True
+    return False
+
 # ── FEEDBACK LOOP: AUTO-GENERATED PROMPT LEARNINGS ──
 RECENT_LEARNINGS_PATH = f"{HOME}/.hermes/pressbox/recent_learnings.txt"
 
@@ -1672,6 +1772,8 @@ def filter_and_score(topics, posted_urls, posted_ws, boosts, skips, analytics_su
         if url in posted_urls: continue
         # Anti-saturation: skip saga/topic repeated too often in last 7 days
         if _recent_topic_frequency(title): continue
+        # Same-story guard: same entity + same event class inside 24h = cannibalization
+        if _story_guard_blocks(title, url): continue
         threshold = 0.50 if relaxed else 0.35
         if is_similar(title, posted_ws, threshold): continue
         # Skip low-performing topic types from analytics
@@ -2395,6 +2497,202 @@ def _substitution_direction_errors(slides, article_text):
     return errors
 
 
+_MINUTE_PATTERNS = (
+    re.compile(r"\b(\d{1,3})(?:st|nd|rd|th)\s+min(?:ute)?s?\b", re.I),
+    re.compile(r"\bmin(?:ute)?s?\s+(\d{1,3})\b", re.I),
+    re.compile(r"\b(\d{1,3})\s+min(?:ute)?s?\b", re.I),
+    re.compile(r"\b(\d{1,3})['\u2019]", re.I),
+)
+_AGE_PATTERNS = (
+    re.compile(r"\b(\d{1,3})[- ]year[- ]old\b", re.I),
+    re.compile(r"\baged\s+(\d{1,3})\b", re.I),
+    re.compile(r"\b(\d{1,3})\s+years?\s+old\b", re.I),
+)
+
+
+def _attribute_numbers(patterns, text):
+    found = set()
+    for rx in patterns:
+        for m in rx.finditer(text or ""):
+            found |= {g for g in m.groups() if g}
+    return found
+
+
+def _number_attribute_errors(claim, article_text):
+    """Fail closed when a slide binds a figure to the wrong attribute.
+
+    Regression gate: source "Shortly after the restart, 24-year-old Brown
+    dinked the ball over Mile Svilar..." produced slide "Brown's equaliser
+    (24th minute) came after Mason Greenwood's pass". The literal 24 exists
+    in the article, so the plain number gate passed; the attribute (age ->
+    match minute) was silently swapped."""
+    errors = []
+    for n in sorted(_attribute_numbers(_MINUTE_PATTERNS, claim)):
+        if n not in article_text:
+            continue  # plain missing-number gate already reports this
+        if n not in _attribute_numbers(_MINUTE_PATTERNS, article_text):
+            errors.append(
+                f"unsupported number context: slide says minute {n}, "
+                f"source records no {n} minute")
+    for n in sorted(_attribute_numbers(_AGE_PATTERNS, claim)):
+        if n not in article_text:
+            continue
+        if n not in _attribute_numbers(_AGE_PATTERNS, article_text):
+            errors.append(
+                f"unsupported number context: slide says age {n}, "
+                f"source records no {n}-year-old")
+    return errors
+
+
+_QUANTITY_UNITS = r"(?:min(?:ute)?s?|hours?|months?|years?)"
+_QUANTITY_WORDS = {
+    "a": 1, "an": 1, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
+    "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12,
+    "thirteen": 13, "fourteen": 14, "fifteen": 15, "sixteen": 16, "seventeen": 17,
+    "eighteen": 18, "nineteen": 19, "twenty": 20, "thirty": 30, "forty": 40,
+    "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90, "hundred": 100,
+}
+_QUANTITY_CANON = {"min": "minute", "mins": "minute", "minute": "minute", "minutes": "minute",
+                   "hour": "hour", "hours": "hour", "month": "month", "months": "month",
+                   "year": "year", "years": "year"}
+_QUANTITY_NUM = (r"(?:\d{1,4}(?:[.,]\d+)?|"
+                 + "|".join(sorted(_QUANTITY_WORDS, key=len, reverse=True)) + r")")
+_UNIT_HALF_RX = re.compile(rf"\b(?:an?|one)[\s-]+{_QUANTITY_UNITS}[\s-]+and[\s-]+a[\s-]+half\b", re.I)
+_HALF_UNIT_RX = re.compile(rf"\bhalf[\s-]+(?:an?[\s-]+)?{_QUANTITY_UNITS}\b", re.I)
+_QUANTITY_RX = re.compile(rf"\b({_QUANTITY_NUM})[\s-]+({_QUANTITY_UNITS})\b", re.I)
+
+
+def _normalize_quantities(text):
+    """"an hour and a half" -> "1.5 hour" so halves are not read as whole units."""
+    t = _UNIT_HALF_RX.sub("1.5 hour", text or "")
+    t = re.sub(rf"\b(?:an?|one)[\s-]+and[\s-]+a[\s-]+half[\s-]+{_QUANTITY_UNITS}\b",
+               "1.5 hour", t, flags=re.I)
+    return _HALF_UNIT_RX.sub("0.5 hour", t)
+
+
+def _unit_quantities(text):
+    """{(canonical_unit, value, written_as_word)} for duration/period quantities."""
+    out = set()
+    for m in _QUANTITY_RX.finditer(_normalize_quantities(text)):
+        num, unit = m.group(1).lower(), m.group(2).lower()
+        canon = _QUANTITY_CANON.get(unit)
+        if not canon:
+            continue
+        written = not num[0].isdigit()
+        val = float(num.replace(",", "")) if not written else float(_QUANTITY_WORDS[num])
+        out.add((canon, val, written))
+    return out
+
+
+def _quantity_attribute_errors(claim, article_text):
+    """Fail closed when a slide states a duration/period the source never records.
+
+    Regression gate: source "not playing competitively since early July" produced
+    slide "rusty after seven months out of action" (~2 months), and source "an hour
+    and a half each way" produced "an hour each way". Both numbers were written as
+    words, so the digit-only gates saw nothing."""
+    source = {(u, v) for u, v, _ in _unit_quantities(article_text)}
+    errors = []
+    for unit, val, written in sorted(_unit_quantities(claim)):
+        if unit in ("minute", "year") and not written:
+            continue  # digit minute / digit age handled by _MINUTE_PATTERNS / _AGE_PATTERNS
+        if (unit, val) not in source:
+            recorded = sorted(f"{v:g} {u}" for u, v in source) or "none"
+            errors.append(
+                f"unsupported quantity: slide says {val:g} {unit}(s), "
+                f"source records {recorded}")
+    return errors
+
+
+_WORD_FOR_NUM = {v: k for k, v in _QUANTITY_WORDS.items() if k not in ("a", "an")}
+
+
+# ── CROSS-POST CONSISTENCY (24h): same player, same match, incompatible goal role ──
+# 11 Sep: 06:28 slide said "Greenwood assisted Archie Brown's equaliser" and 11:44 said
+# "Brown, who scored the opener against Roma" — both live, both about the same goal.
+_GOAL_ROLES = {
+    "opener": r"\b(?:opener|opened the scoring|broke the deadlock|the first goal|first goal)\b",
+    "equaliser": r"\b(?:equaliser|equalizer|leveller|leveler|equalised|equalized|"
+                r"levelled the (?:score|game|tie)|leveled the (?:score|game|tie)|made it 1-1)\b",
+}
+_ROLE_CONFLICTS = (("opener", "equaliser"), ("equaliser", "opener"))
+_ROLE_CONTEXT_STOP = _ENTITY_STOP | {"his", "her", "the", "that", "this", "his", "their", "while", "still"}
+
+
+def _role_claims(text):
+    """[(role, scorer, context_tokens)] for goal-role sentences in text.
+
+    scorer = capitalised word nearest before the role word ("Brown's equaliser" -> brown);
+    context = the sentence's other capitalised names, used to prove same match.
+    """
+    out = []
+    for sentence in re.split(r"(?<=[.!?])\s+", text or ""):
+        cap_words = [(m.start(), _fold_ascii(m.group())) for m in
+                     re.finditer(r"\b[A-Z][a-zA-Z'\u2019\-]{2,}", sentence)]
+        # "Brown's" / "Brown\u2019s" -> "brown" so possessive forms still match plain names.
+        cap_words = [(p, re.sub(r"['\u2019\-]s?$", "", w)) for p, w in cap_words]
+        cap_words = [(p, w) for p, w in cap_words if len(w) >= 4 and w not in _ROLE_CONTEXT_STOP]
+        if not cap_words:
+            continue
+        caps = {w for _, w in cap_words}
+        for role, rx in _GOAL_ROLES.items():
+            m = re.search(rx, sentence, re.I)
+            if not m:
+                continue
+            preceding = [(p, w) for p, w in cap_words if p < m.start()]
+            if not preceding:
+                continue
+            scorer = max(preceding)[1]
+            out.append((role, scorer, caps - {scorer}))
+    return out
+
+
+def _cross_post_conflict_errors(slides, title="", url="", now=None):
+    """Fail closed when a slide contradicts a goal attribution published in the last 24h."""
+    text = " ".join(s.get("content", "") for s in (slides or []))
+    claims = _role_claims(text)
+    if not claims:
+        return []
+    now = now or datetime.now().astimezone()
+    cutoff = (now - timedelta(hours=_STORY_WINDOW_HOURS)).isoformat()
+    try:
+        with open(POSTED) as f:
+            data = json.load(f)
+        topics = data.get("topics", []) if isinstance(data, dict) else data
+    except Exception as e:
+        log(f"   ⚠️ Cross-post guard error ({e}) — fail-open, not blocking")
+        return []
+    errors = []
+    for t in topics:
+        if (t.get("posted_at") or "") < cutoff:
+            continue
+        prior_text = " ".join(t.get("slides") or [])
+        if not prior_text:
+            continue
+        for prole, pscorer, pctx in _role_claims(prior_text):
+            for crole, cscorer, cctx in claims:
+                if (crole, prole) not in _ROLE_CONFLICTS or pscorer != cscorer:
+                    continue
+                if not (pctx & cctx):
+                    continue
+                errors.append(
+                    f"contradicts {t.get('posted_at', '')[:16]} post: "
+                    f"{cscorer.capitalize()} was called {prole!r} there and {crole!r} here")
+    return errors
+
+
+def _number_supported(num_token, article_text):
+    """Digits and spelled-out numbers are the same fact (source "three" vs slide "3")."""
+    if num_token.replace(",", "") in article_text.replace(",", ""):
+        return True
+    try:
+        val = int(float(num_token.replace(",", "").rstrip("%")))
+    except ValueError:
+        return False
+    word = _WORD_FOR_NUM.get(val)
+    return bool(word and re.search(rf"\b{word}\b", article_text, re.I))
+
+
 def _claim_audit(slides, article_text, url, assigned_evidence=None):
     """Pre-evaluator lexical entailment gate. Fail closed; source URL is attached."""
     source_units = _source_units(article_text)
@@ -2419,13 +2717,19 @@ def _claim_audit(slides, article_text, url, assigned_evidence=None):
             # "Ligue 1" as an unsupported number.
             numbers = re.findall(r"(?:£|€|\$)\s?[\d,.]+|\b\d+(?:[.,]\d+)?%?", claim)
             full_norm = article_text.replace(",", "")
-            missing_numbers = [n for n in numbers if n.replace(",", "") not in full_norm]
+            missing_numbers = [n for n in numbers if not _number_supported(n, full_norm)]
+            attribute_errors = _number_attribute_errors(claim, article_text)
+            quantity_errors = _quantity_attribute_errors(claim, article_text)
             best_ratio = max([
                 len(tokens & _claim_tokens(unit)) / max(1, len(tokens)) for unit in evidence
             ] or [0])
             reason = ""
             if missing_numbers:
                 reason = f"unsupported number(s): {', '.join(missing_numbers)}"
+            elif attribute_errors:
+                reason = attribute_errors[0]
+            elif quantity_errors:
+                reason = quantity_errors[0]
             elif len(tokens) >= 4 and best_ratio < 0.20:
                 reason = f"review: low lexical overlap {best_ratio:.0%}"
             elif len(overlap) < 2:
@@ -3937,11 +4241,12 @@ def _generate_best(ranked, analytics_summary, hooks_str, cta_pattern, tone):
             grounding_errors = grounding_check(slides_text, art_text, _extract_proper_nouns(art_text), _extract_stages(art_text))
             number_errors = number_grounding_check(slides_text, art_text, _build_reference_data())
             prevalidation_errors, claim_rows = _claim_audit(editorial_slides, art_text, art_url, assigned_evidence)
+            xpost_errors = _cross_post_conflict_errors(editorial_slides, art_title, art_url)
             winning_errors = _winning_pattern_errors(editorial_slides, art_text)
             cta_errors = _s6_cta_errors(editorial_slides)
             if cta_errors:
                 log(f"   ⚠️ S6 CTA soft: {'; '.join(cta_errors)}")
-            errors = coverage_errors + contract_errors + grounding_errors + number_errors + prevalidation_errors + winning_errors
+            errors = coverage_errors + contract_errors + grounding_errors + number_errors + prevalidation_errors + xpost_errors + winning_errors
             _write_claim_audit(claim_rows, "PREVALIDATION_REJECT" if prevalidation_errors else "PREVALIDATION_PASS", art_url, art_title)
             if errors:
                 all_errors = "; ".join(errors)

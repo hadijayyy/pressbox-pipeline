@@ -72,6 +72,185 @@ def test_legacy_evaluator_remains_fail_closed():
     assert not mvp._evaluator_accepts("ERROR")
 
 
+def test_claim_audit_rejects_number_bound_to_wrong_attribute():
+    """Regression: source age -> slide match minute (24-year-old -> 24th minute)."""
+    mvp = _load_mvp()
+    source = (
+        "Archie Brown scored a crucial equaliser as Fenerbahce held Roma to a 1-1 draw. "
+        "Shortly after the restart, 24-year-old Brown dinked the ball over Mile Svilar "
+        "following a clever pass from Mason Greenwood to level the scoreline."
+    )
+    errors, rows = mvp._claim_audit(
+        [{"content": "Brown's equaliser (24th minute) came after Mason Greenwood's pass."}],
+        source,
+        "https://example.com/brown",
+        {"slide_1": [source]},
+    )
+    assert any("unsupported number context" in error for error in errors), errors
+    assert rows[0]["reason"] == "unsupported number context: slide says minute 24, source records no 24 minute"
+
+
+def test_claim_audit_allows_genuine_source_minute():
+    mvp = _load_mvp()
+    source = "He scored in the 24th minute after a clever pass from a team-mate."
+    errors, rows = mvp._claim_audit(
+        [{"content": "He scored in the 24th minute after a clever pass from a team-mate."}],
+        source,
+        "https://example.com/minute",
+        {"slide_1": [source]},
+    )
+    assert errors == [], errors
+
+
+def test_claim_audit_rejects_word_number_quantity_not_in_source():
+    """Regression: source had no duration at all; slide invented "seven months"."""
+    mvp = _load_mvp()
+    source = (
+        "James Rodriguez is unattached and has not played competitively since early July, "
+        "though he has been training alone to stay fit while he waits for a new club."
+    )
+    errors, rows = mvp._claim_audit(
+        [{"content": "Rodriguez looks rusty after seven months out of action and needs a new club."}],
+        source,
+        "https://example.com/james",
+        {"slide_1": [source]},
+    )
+    assert any("unsupported quantity" in error for error in errors), errors
+    assert rows[0]["reason"].startswith("unsupported quantity: slide says 7 month")
+
+
+def test_claim_audit_rejects_half_unit_downgrade():
+    """Regression: source "an hour and a half each way" -> slide "an hour each way"."""
+    mvp = _load_mvp()
+    source = (
+        "Her mother drove her four times a week to training, an hour and a half each way, "
+        "with barely enough fuel money to make the trip."
+    )
+    errors, rows = mvp._claim_audit(
+        [{"content": "Her mother drove her four times a week to training, an hour each way, with barely enough fuel money."}],
+        source,
+        "https://example.com/cooney",
+        {"slide_1": [source]},
+    )
+    assert any("unsupported quantity" in error for error in errors), errors
+
+
+def test_claim_audit_allows_digit_and_word_number_equivalence():
+    mvp = _load_mvp()
+    source = "The striker is expected to be out for three months after the scan result."
+    errors, rows = mvp._claim_audit(
+        [{"content": "The striker is expected to be out for 3 months after the scan result."}],
+        source,
+        "https://example.com/scan",
+        {"slide_1": [source]},
+    )
+    assert errors == [], errors
+
+
+def test_story_guard_blocks_same_saga_inside_24h(tmp_path, monkeypatch):
+    import json
+    from datetime import datetime, timedelta
+    mvp = _load_mvp()
+    now = datetime.now().astimezone()
+    posted = tmp_path / "posted_topics.json"
+    posted.write_text(json.dumps({"topics": [{
+        "title": "Fenerbahce boss stuns club by quitting after Roma draw",
+        "url": "https://www.bbc.com/sport/football/articles/c8r6vyjpye2o",
+        "posted_at": (now - timedelta(hours=3)).isoformat(),
+    }]}))
+    monkeypatch.setattr(mvp, "POSTED", str(posted))
+    assert mvp._story_guard_blocks(
+        "Fenerbahce manager resigns from fourth stint in charge",
+        "https://www.mirror.co.uk/sport/football/news/fenerbahce-manager-archie-brown-37650105",
+    )
+
+
+def test_story_guard_allows_different_event_for_same_entity(tmp_path, monkeypatch):
+    import json
+    from datetime import datetime, timedelta
+    mvp = _load_mvp()
+    now = datetime.now().astimezone()
+    posted = tmp_path / "posted_topics.json"
+    posted.write_text(json.dumps({"topics": [{
+        "title": "Sesko sends clear message to Carrick on night of few revelations",
+        "url": "https://www.mirror.co.uk/sport/football/news/benjamin-sesko-man-utd-carrick-35123456",
+        "posted_at": (now - timedelta(hours=2)).isoformat(),
+    }]}))
+    monkeypatch.setattr(mvp, "POSTED", str(posted))
+    assert not mvp._story_guard_blocks(
+        "Two goals in two games: Sesko makes his case",
+        "https://www.bbc.com/sport/football/articles/c770d63d850o",
+    )
+
+
+def _posted_fixture(tmp_path, monkeypatch, mvp, entries):
+    import json
+    posted = tmp_path / "posted_topics.json"
+    posted.write_text(json.dumps({"topics": entries}))
+    monkeypatch.setattr(mvp, "POSTED", str(posted))
+
+
+def test_cross_post_guard_rejects_contradicting_goal_role(tmp_path, monkeypatch):
+    """Regression: 06:28 published 'Brown's equaliser', 11:44 published 'opener'."""
+    from datetime import datetime, timedelta
+    mvp = _load_mvp()
+    now = datetime.now().astimezone()
+    _posted_fixture(tmp_path, monkeypatch, mvp, [{
+        "title": "Fenerbahce manager resigns from fourth stint hours after Mason Greenwood decision",
+        "url": "https://www.mirror.co.uk/sport/football/news/fenerbahce-mason-greenwood-37650105",
+        "posted_at": (now - timedelta(hours=5)).isoformat(),
+        "slides": [
+            "His resignation came after a 1-1 draw with Roma, where Greenwood assisted Archie Brown's equaliser against Roma.",
+        ],
+    }])
+    errors = mvp._cross_post_conflict_errors(
+        [{"content": "Brown, who scored the opener against Roma, was told by the club's media assistant mid-interview."}],
+        "Baffled Champions League star learns his manager resigned",
+        "https://www.mirror.co.uk/sport/football/news/fenerbahce-manager-archie-brown-news-37650130",
+        now=now,
+    )
+    assert errors, "expected contradiction"
+    assert "equaliser" in errors[0] and "opener" in errors[0]
+
+
+def test_cross_post_guard_allows_different_scorer(tmp_path, monkeypatch):
+    from datetime import datetime, timedelta
+    mvp = _load_mvp()
+    now = datetime.now().astimezone()
+    _posted_fixture(tmp_path, monkeypatch, mvp, [{
+        "title": "Fenerbahce manager resigns after Roma draw",
+        "url": "https://www.theguardian.com/football/2026/sep/10/fenerbahce-coach-resigns-ismail-kartal-roma-champions-league",
+        "posted_at": (now - timedelta(hours=5)).isoformat(),
+        "slides": ["Roma took the lead in the 39th minute and Fenerbahce equalised before half-time."],
+    }])
+    errors = mvp._cross_post_conflict_errors(
+        [{"content": "Cristante scored the opener for Roma after 39 minutes."}],
+        "Kartal resigns",
+        "https://www.theguardian.com/football/2026/sep/10/kartal",
+        now=now,
+    )
+    assert errors == [], errors
+
+
+def test_cross_post_guard_ignores_posts_outside_24h(tmp_path, monkeypatch):
+    from datetime import datetime, timedelta
+    mvp = _load_mvp()
+    now = datetime.now().astimezone()
+    _posted_fixture(tmp_path, monkeypatch, mvp, [{
+        "title": "Fenerbahce beat Roma",
+        "url": "https://www.mirror.co.uk/sport/football/news/greenwood-37650105",
+        "posted_at": (now - timedelta(hours=30)).isoformat(),
+        "slides": ["Greenwood assisted Archie Brown's equaliser against Roma."],
+    }])
+    errors = mvp._cross_post_conflict_errors(
+        [{"content": "Brown scored the opener against Roma."}],
+        "Brown interview",
+        "https://www.mirror.co.uk/sport/football/news/brown-37650130",
+        now=now,
+    )
+    assert errors == [], errors
+
+
 def test_ungrounded_generic_s6_binary_becomes_source_takeaway():
     mvp = _load_mvp()
     slides = [{"content": "A complete source-backed sentence."} for _ in range(5)]
