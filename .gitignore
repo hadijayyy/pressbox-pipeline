@@ -13,3 +13,6 @@ article_cache.json
 .trends_cache.json
 declare/
 *.bak-*
+
+# stray analysis scratch from other pipelines (never a source of truth)
+budakorporat-pipeline/
