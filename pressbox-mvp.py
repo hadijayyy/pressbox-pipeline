@@ -686,6 +686,33 @@ _BINARY_CTA_RE = re.compile(
 )
 
 
+_BANNED_OPENERS = {
+    2: ("That means", "That reads as", "The logic here"),
+    4: ("For me", "In my eyes"),
+}
+
+
+def _voice_repetition_errors(slides):
+    """Deterministic voice gate: ban stock opener incantations.
+
+    Root cause (2026-09-12 audit): the S3 prompt listed literal starter phrases
+    as templates, so the model pasted the same scaffolding into every post —
+    "That means" opened S3 in 18/18 posts, and "For me, this isn't just X - it's
+    a warning" opened S5 in 59/200 archived posts. Templates in a prompt become
+    the output. The template lists are gone; this gate keeps them gone.
+    """
+    errors = []
+    for idx, openers in _BANNED_OPENERS.items():
+        if len(slides or []) <= idx:
+            continue
+        text = (slides[idx].get("content") or "").lstrip().lstrip("“\"'")
+        for opener in openers:
+            if text.lower().startswith(opener.lower()):
+                errors.append(f"S{idx + 1} opens with banned stock phrase '{opener}'")
+                break
+    return errors
+
+
 def _s6_cta_errors(slides):
     """Reject open-ended S6 questions; declarative payoff remains valid."""
     if len(slides or []) < 6:
@@ -2649,6 +2676,106 @@ def _role_claims(text):
     return out
 
 
+_BINDING_CLUBS = (
+    "Manchester United", "Manchester City", "Man United", "Man City", "Man Utd",
+    "Liverpool", "Chelsea", "Arsenal", "Tottenham", "Spurs", "Newcastle",
+    "Aston Villa", "Real Madrid", "Barcelona", "Barca", "Bayern Munich", "Bayern",
+    "Juventus", "PSG", "Paris Saint-Germain", "Inter", "AC Milan", "Napoli",
+    "Atletico Madrid", "West Ham", "Wrexham", "Leeds", "Everton", "Brighton",
+    "Fulham", "Brentford", "Wolves", "Crystal Palace", "Nottingham Forest",
+    "Bournemouth", "Burnley", "Sunderland", "Roma", "Lazio", "Sevilla",
+)
+_BINDING_WINDOW = 60
+
+
+def _club_binding_errors(slides, article_text):
+    """Fail when a slide asserts '<Club>'s <Person>' but the source never binds
+    that person to that club.
+
+    Root cause (2026-09-12): the Guardian piece lists the Champions League game
+    counts of the managers of Man City (6), Man United (1) and Liverpool (0),
+    and separately lists Guardiola's 191 games. A slide rendered it as
+    "Manchester United's Pep Guardiola" — right name, wrong club. The plain
+    name whitelist in grounding_check cannot see attribution, only presence.
+    """
+    if not article_text:
+        return []
+    src = re.sub(r"\s+", " ", article_text).lower()
+    errors = []
+    for i, slide in enumerate(slides, 1):
+        text = slide.get("content", "") if isinstance(slide, dict) else str(slide)
+        for club in _BINDING_CLUBS:
+            for m in re.finditer(
+                r"\b" + re.escape(club) + r"['\u2019]s\s+"
+                r"([A-Z][\w\u00C0-\u024F-]+(?:\s+[A-Z][\w\u00C0-\u024F-]+)+)", text):
+                person = m.group(1)
+                # Only attribution-level errors: the person must exist in the
+                # source somewhere, otherwise it is a plain hallucination that
+                # grounding_check already handles. Match on the surname so
+                # source "Guardiola" still covers a slide's "Pep Guardiola".
+                surname = person.split()[-1].lower()
+                if surname not in src:
+                    continue
+                if _source_binds_club_person(src, club, person):
+                    continue
+                errors.append(
+                    f"ROLE_BINDING_S{i}: '{club}'s {person}' — source never binds "
+                    f"{person} to {club}")
+    return errors
+
+
+def _source_binds_club_person(src_lower, club, person):
+    """True when `club` is the nearest club to a `person` mention, within cap.
+
+    A flat proximity window is not enough: the Guardian piece mentions
+    "Manchester City (six), Manchester United (one) and Liverpool (none)" and
+    Guardiola only 200+ chars later, so any window wide enough to catch a real
+    binding also catches that misattribution. Requiring the club to be the
+    NEAREST club to the person and inside _BINDING_WINDOW separates the two:
+    "Manchester City manager Pep Guardiola" binds, the list does not.
+    """
+    person_l = person.lower()
+    spans = []
+    for c in _BINDING_CLUBS:
+        for needle in {c.lower(), _club_alias(c)}:
+            for m in re.finditer(re.escape(needle), src_lower):
+                spans.append((m.start(), m.end(), c))
+    spans.sort()
+    if not spans:
+        return False
+    for pm in re.finditer(re.escape(person_l), src_lower):
+        best = None
+        for cs, ce, c in spans:
+            if ce <= pm.start():
+                dist = pm.start() - ce
+            elif cs >= pm.end():
+                dist = cs - pm.end()
+            else:
+                dist = 0
+            if dist <= _BINDING_WINDOW and (best is None or dist < best[0]):
+                best = (dist, c)
+        if best and _club_alias(best[1]) == _club_alias(club):
+            return True
+    return False
+
+
+_CLUB_CANON = {
+    "manchester united": "man utd", "man united": "man utd", "man utd": "man utd",
+    "manchester city": "man city", "man city": "man city",
+    "tottenham": "tottenham", "spurs": "tottenham",
+    "barcelona": "barcelona", "barca": "barcelona",
+    "paris saint-germain": "psg", "psg": "psg",
+    "bayern": "bayern", "bayern munich": "bayern",
+    "inter": "inter", "inter milan": "inter",
+    "ac milan": "ac milan", "atletico madrid": "atletico madrid",
+}
+
+
+def _club_alias(club):
+    """Canonical key so 'Man City' and 'Manchester City' compare equal."""
+    return _CLUB_CANON.get(club.lower(), club.lower())
+
+
 def _cross_post_conflict_errors(slides, title="", url="", now=None):
     """Fail closed when a slide contradicts a goal attribution published in the last 24h."""
     text = " ".join(s.get("content", "") for s in (slides or []))
@@ -3209,7 +3336,7 @@ Rules for every analytic sentence:
 
 - A move rearranges supplied facts. It never introduces a new one.
 - Mark the move as reasoning, not as knowledge, with a qualifier: “That means”, “That reads as”, “The logic here”, “If that holds”, “Worth asking”.
-- Name the supplied fact you are reasoning from inside the sentence, so a reader can check it.
+- Name the supplied fact you are reasoning from inside the sentence, in plain words, so a reader can check it. Never print an evidence ID such as (E3) in the copy.
 - Never manufacture a motive, a hidden plan, a winner, a loser, or a consequence.
 - If the supplied facts cannot support the move, drop the move. Do not fill the gap with guesswork.
 
@@ -3319,8 +3446,9 @@ Answer:
 Rules:
 
 - Reason only from facts already inside ARTICLE_BODY. Do not add outside tactical, financial, historical, competitive, or transfer context.
-- Mark it as reasoning with a qualifier: “That means”, “That reads as”, “The logic here”, “If that holds”, “Worth asking”.
-- Name the supplied fact you reason from inside the sentence, so a reader can check it.
+- Mark it as reasoning with a qualifier in your own words. Do not default to the same stock opener every post.
+- Do not start the slide with a signpost phrase. Start with the reasoning itself: the effect, the cost, or the mechanism.
+- Name the supplied fact you reason from inside the sentence, in plain words, so a reader can check it. Never print an evidence ID such as (E3) in the copy.
 - Do not restate the source. A descriptive sentence has made no move.
 - Never invent a motive, hidden plan, winner, loser, or consequence.
 - If the facts cannot support the move, state the narrower meaning they do support.
@@ -3353,21 +3481,13 @@ Avoid generic endings such as:
 
 “Both sides have a point.”
 
-Useful structures include:
+The verdict must name the decision at stake and the person or body accountable for it. A verdict that names no actor is a mood, not a judgement.
 
-“For me, this is…”
+Open with the judgement itself. Do not warm up with a personal marker.
 
-“The bigger problem is…”
+Avoid opening with “For me”. State the call directly.
 
-“That logic does not hold up.”
-
-“This looks more like a gamble than a solution.”
-
-“The club cannot have it both ways.”
-
-“This solves X but creates Y.”
-
-Use these only when supported. Do not mechanically repeat them.
+Start with the strongest noun or verb of your verdict, not with a throat-clearing phrase.
 
 The judgement may be strong.
 
@@ -3822,6 +3942,38 @@ def load_threads_token():
         return d.get("access_token"), str(d.get("user_id",""))
     except Exception: return None, None
 
+def _strip_internal_tags(text):
+    """Remove internal evidence IDs that must never reach published copy.
+
+    Root cause (2026-09-12): the analytic-move prompt asked the model to "name
+    the supplied fact", and the evidence packet labels facts as [E1], [E3]...
+    The model copied those labels into the sentence. 13 tags reached 2 live
+    posts. Prompt now forbids it; this is the deterministic backstop.
+    """
+    if not text:
+        return text
+    original = text
+    # "(E3)" / "(E3, E15)" / " ( E3 ) " / "[E7]" — with optional spacing.
+    text = re.sub(r"\s*[\(\[]\s*E\d+(?:\s*[,;/]\s*E\d+)*\s*[\)\]]", "", text)
+    # Bare trailing "E3" glued to a word boundary, only when E-numbered form.
+    text = re.sub(r"(?<=\s)\bE\d{1,3}\b(?=[\s.,;:!?]|$)", "", text)
+    if text == original:
+        return text  # nothing removed — leave clean copy untouched
+    # Repair only whitespace the removal itself left behind.
+    text = re.sub(r"\s+([.,;:!?])", r"\1", text)
+    return re.sub(r"\s{2,}", " ", text).strip()
+
+
+def _validate_no_internal_tags(slides):
+    """Fail closed if internal tags survive into publishable copy."""
+    errors = []
+    for i, slide in enumerate(slides, 1):
+        raw = slide.get("content", "") if isinstance(slide, dict) else str(slide)
+        if re.search(r"[\(\[]\s*E\d+(?:\s*[,;/]\s*E\d+)*\s*[\)\]]", raw):
+            errors.append(f"S{i} contains internal evidence tag")
+    return errors
+
+
 def _space_sentences(text):
     """Single flowing paragraph; preserve source URL as its own paragraph."""
     literal_url_break = "\\n\\nhttp" in text
@@ -3848,7 +4000,7 @@ def post_to_threads(slides, image_url=None):
     from threads_poster import ThreadsPoster
     poster = ThreadsPoster(access_token=token, user_id=user_id)
 
-    parts = [_space_sentences(s["content"]) for s in slides]
+    parts = [_space_sentences(_strip_internal_tags(s["content"])) for s in slides]
     images = [image_url] + [None]*(len(parts)-1) if image_url else None
 
     try:
@@ -4282,6 +4434,12 @@ def _generate_best(ranked, analytics_summary, hooks_str, cta_pattern, tone):
                 break
 
             editorial_slides = slides[:6]
+            # Deterministic backstop: strip internal evidence IDs the model may
+            # have copied from EVIDENCE_PACK labels. Done before any check so a
+            # mechanical tag leak never costs a candidate or a post slot.
+            for _s in editorial_slides:
+                if isinstance(_s, dict) and _s.get("content"):
+                    _s["content"] = _strip_internal_tags(_s["content"])
             # Normalize unsupported S6 debate before contract and coverage checks.
             if assigned_evidence and _s6_strip_ungrounded_binary(editorial_slides, assigned_evidence):
                 log("   🛡️ S6 binary question had no source-backed premise — replaced with grounded takeaway")
@@ -4298,9 +4456,12 @@ def _generate_best(ranked, analytics_summary, hooks_str, cta_pattern, tone):
             xpost_errors = _cross_post_conflict_errors(editorial_slides, art_title, art_url)
             winning_errors = _winning_pattern_errors(editorial_slides, art_text)
             cta_errors = _s6_cta_errors(editorial_slides)
+            tag_errors = _validate_no_internal_tags(editorial_slides)
+            binding_errors = _club_binding_errors(editorial_slides, art_text)
+            voice_errors = _voice_repetition_errors(editorial_slides)
             if cta_errors:
                 log(f"   ⚠️ S6 CTA soft: {'; '.join(cta_errors)}")
-            errors = coverage_errors + contract_errors + grounding_errors + number_errors + prevalidation_errors + xpost_errors + winning_errors
+            errors = coverage_errors + contract_errors + grounding_errors + number_errors + prevalidation_errors + xpost_errors + winning_errors + tag_errors + binding_errors + voice_errors
             _write_claim_audit(claim_rows, "PREVALIDATION_REJECT" if prevalidation_errors else "PREVALIDATION_PASS", art_url, art_title)
             if errors:
                 all_errors = "; ".join(errors)

@@ -263,6 +263,67 @@ def test_ungrounded_generic_s6_binary_becomes_source_takeaway():
     assert slides[5]["content"] == "The league will pause every match in the 10th minute this weekend."
 
 
+def test_internal_evidence_tag_is_stripped_from_copy():
+    """Regression (2026-09-12): model copied EVIDENCE_PACK labels into slides.
+    16 live slides across 5 posts shipped '(E2)', '(E3, E15)' etc."""
+    mvp = _load_mvp()
+    assert mvp._strip_internal_tags(
+        "That means Alonso's move (E2) backfired and loyalty (E13) met a bench."
+    ) == "That means Alonso's move backfired and loyalty met a bench."
+    assert mvp._strip_internal_tags(
+        "The logic here: workload is high (E3, E15)."
+    ) == "The logic here: workload is high."
+    assert mvp._strip_internal_tags("Flick's record [E4] is a mirage.") == \
+        "Flick's record is a mirage."
+
+
+def test_internal_tag_stripper_leaves_clean_copy_untouched():
+    """The stripper must not normalise spacing in copy that has no tag."""
+    mvp = _load_mvp()
+    clean = "Inter's mental battle begins  -  not against ghosts."
+    assert mvp._strip_internal_tags(clean) == clean
+    assert mvp._strip_internal_tags("No tags here at all.") == "No tags here at all."
+
+
+def test_internal_tag_validator_fails_closed():
+    mvp = _load_mvp()
+    tagged = [{"content": "That means Alonso's move (E2) backfired."}]
+    assert mvp._validate_no_internal_tags(tagged)
+    assert mvp._validate_no_internal_tags([{"content": "Clean sentence."}]) == []
+
+
+def test_club_binding_flags_wrong_club_attribution():
+    """Regression (2026-09-12): Guardian article listed the CL game counts of the
+    managers of Man City (6), Man United (1), Liverpool (0), then separately
+    Guardiola's 191. A slide rendered it 'Manchester United's Pep Guardiola'."""
+    mvp = _load_mvp()
+    source = (
+        "Inter's Cristian Chivu has 10 Champions League games under his belt, which "
+        "is more than the managers of Manchester City (six), Manchester United (one) "
+        "and Liverpool (none). Ancelotti leads on 218 Champions League games, ahead "
+        "of Alex Ferguson (206), Guardiola and Arsene Wenger (both 191)."
+    )
+    slides = [{"content": "join Manchester United's Pep Guardiola as a one-game manager."}]
+    errors = mvp._club_binding_errors(slides, source)
+    assert errors, "wrong-club attribution must be flagged"
+    assert "ROLE_BINDING_S1" in errors[0]
+
+
+def test_club_binding_allows_correct_attribution():
+    mvp = _load_mvp()
+    source = "Manchester City manager Pep Guardiola won the competition twice."
+    slides = [{"content": "Manchester City's Pep Guardiola is in the draw again."}]
+    assert mvp._club_binding_errors(slides, source) == []
+
+
+def test_club_binding_ignores_plain_hallucination():
+    """A person absent from the source is grounding_check's job, not this gate."""
+    mvp = _load_mvp()
+    source = "Arsenal drew with Chelsea on Sunday."
+    slides = [{"content": "Arsenal's Zinedine Zebra scored twice."}]
+    assert mvp._club_binding_errors(slides, source) == []
+
+
 if __name__ == "__main__":
     test_claim_audit_accepts_source_claim_and_records_url()
     test_claim_audit_rejects_unsourced_fee()
