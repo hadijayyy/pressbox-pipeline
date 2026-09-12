@@ -686,10 +686,55 @@ _BINARY_CTA_RE = re.compile(
 )
 
 
-_BANNED_OPENERS = {
-    2: ("That means", "That reads as", "The logic here"),
+_STOCK_OPENERS = {
+    2: ("That means", "That reads as", "The logic here", "What that means"),
     4: ("For me", "In my eyes"),
 }
+# Varied qualifiers used to replace a stock opener. Deterministic, no LLM.
+_STOCK_ROTATION = (
+    "The read:",
+    "On this evidence,",
+    "If that holds,",
+    "Put differently,",
+    "What that leaves:",
+    "Strip it back:",
+)
+
+
+def _neutralize_stock_openers(slides, seed=0):
+    """Deterministic de-metronome: swap or drop a stock opener in place.
+
+    Root cause (2026-09-12 audit): the S3/S5 prompts listed literal starter
+    phrases as templates, so every post opened identically ("That means" 18/18
+    at S3; "For me, this isn't just X - it's a warning" 59/200 at S5). The
+    templates are removed from the prompt; this keeps the copy varied even when
+    a weak model still reaches for the familiar phrase.
+
+    The interpretation marker is preserved (swapped to a rotation member) rather
+    than deleted, so analytical copy stays honestly labelled as reasoning.
+    Returns the number of slides changed.
+    """
+    changed = 0
+    for idx, openers in _STOCK_OPENERS.items():
+        if len(slides or []) <= idx or not isinstance(slides[idx], dict):
+            continue
+        text = slides[idx].get("content") or ""
+        stripped = text.lstrip().lstrip("\u201c\"'")
+        for opener in openers:
+            if not stripped.lower().startswith(opener.lower()):
+                continue
+            rest = stripped[len(opener):].lstrip().lstrip(",").lstrip()
+            replacement = _STOCK_ROTATION[(seed + idx) % len(_STOCK_ROTATION)]
+            if rest:
+                # Keep the remainder verbatim: lowercasing the first letter
+                # corrupted proper nouns ("Derby" -> "derby", "Real Madrid").
+                slides[idx]["content"] = f"{replacement} {rest}"
+            else:
+                slides[idx]["content"] = text  # nothing to salvage; leave as-is
+                continue
+            changed += 1
+            break
+    return changed
 
 
 def _voice_repetition_errors(slides):
@@ -702,7 +747,7 @@ def _voice_repetition_errors(slides):
     the output. The template lists are gone; this gate keeps them gone.
     """
     errors = []
-    for idx, openers in _BANNED_OPENERS.items():
+    for idx, openers in _STOCK_OPENERS.items():
         if len(slides or []) <= idx:
             continue
         text = (slides[idx].get("content") or "").lstrip().lstrip("“\"'")
@@ -2184,6 +2229,25 @@ _COMMON_KNOWLEDGE_ENTITIES = frozenset({
     "Wembley", "Etihad Stadium",
     "Premier League title", "title race", "top four", "relegation zone",
     "transfer window", "January", "August", "summer",
+    # Club nicknames
+    "Los Blancos", "Los Merengues", "Los Colchoneros", "Los Galácticos",
+    "Los Culés", "Blaugrana", "Los Blancos", "Los Merengues",
+    "Die Roten", "Die Bayern", "Die Münchner", "Die Königsblauen",
+    "Die Schwarzgelben", "Die Schwarzroten", "Die Königsblauen",
+    "Die Rot-Weißen", "Die Gelb-Schwarzen",
+    "Les Parisiens", "Les Bleus", "Les Verts", "Les Rouge et Noir",
+    "I Bianconeri", "I Nerazzurri", "I Rossoneri", "I Nerazzurri",
+    "I Diavoli", "I Bianconeri",
+    "The Reds", "The Blues", "The Whites", "The Gunners",
+    "The Toon", "The Claret and Blues", "The Villans",
+    "The Saints", "The Seagulls", "The Magpies", "The Cobblers",
+    "The Terriers", "The Shrimps", "The Potters", "The Saints",
+    "The Saints", "The Shrimps",
+    "The Reds", "The Whites", "The Blues", "The Gunners",
+    "The Toon", "The Claret and Blues", "The Villans",
+    "The Saints", "The Seagulls", "The Magpies", "The Cobblers",
+    "The Terriers", "The Shrimps", "The Potters",
+    "The Saints",
 })
 
 def grounding_check(slides_text, article_text, article_names, article_stages):
@@ -2250,7 +2314,7 @@ def evaluator_check(slides, article_text, url, assigned_evidence=None):
         "9. TONE: flag analysis only when it adds an unsupported claim. A slide may report verified facts without a stance.\n"
         "10. S6 QUESTION: a binary/debate question in the final slide is ALLOWED when both sides are grounded in the article (e.g. article mentions a tactical change AND the risk it carries). Do not reject a question merely because it is a question. Reject it only if it invents a side, motive, or consequence the article never mentions.\n"
         "11. DEPTH BALANCE: a slide is TOO SHALLOW when it retells a fact with zero editorial angle AND adds no tension, decision, trade-off, or football consequence. That is REVISE. Do NOT flag sharp, source-grounded opinion or pointed questions — that depth is wanted. Flag condescension or unexplained jargon only when a casual fan could not follow the sentence.\n"
-        "12. LABELED INTERPRETATION: a slide may reason about the supplied facts. APPROVE it when the reasoning is marked as interpretation with a qualifier ('That means', 'That reads as', 'The logic here', 'If that holds', 'Worth asking') AND names the supplied fact it reasons from. Flag it only when the reasoning adds a fact, motive, plan, winner, loser, or consequence the article never states, or when the reading is presented as knowledge rather than as a reading. A qualifier is not hedging - do not flag it.\n"
+        "12. LABELED INTERPRETATION: a slide may reason about the supplied facts. APPROVE it when the reasoning is marked as interpretation with a qualifier in the writer's own words (any natural hedging phrase, not a fixed list) AND names the supplied fact it reasons from. Flag it only when the reasoning adds a fact, motive, plan, winner, loser, or consequence the article never states, or when the reading is presented as knowledge rather than as a reading. A qualifier is not hedging - do not flag it.\n"
         "13. S3 MOVE: S3 is the analytical slide. A MECHANISM move (how the supplied facts produce the outcome) or an INCENTIVE move (who benefits, who absorbs the cost) is APPROVE when it stays inside the article's facts. A descriptive S3 that only restates the source has made no move - that is REVISE.\n"
         "RULE: Check every claim against the full source article. Flag added facts, changed numbers, stronger certainty, invented motive, or unsupported consequence. Do not flag a natural idiom or faithful paraphrase when meaning is unchanged.\n\n"
         "Respond in EXACTLY this JSON format:\n"
@@ -2735,6 +2799,13 @@ def _source_binds_club_person(src_lower, club, person):
     "Manchester City manager Pep Guardiola" binds, the list does not.
     """
     person_l = person.lower()
+    # The source usually carries only the surname ("Mastantuono", "Guardiola")
+    # while the slide writes the full name. Searching the full string finds
+    # nothing and turns every correct attribution into a false positive, so
+    # try the surname first and fall back to the full form.
+    needles = [person_l.split()[-1]] if person_l.split() else []
+    if person_l not in needles:
+        needles.append(person_l)
     spans = []
     for c in _BINDING_CLUBS:
         for needle in {c.lower(), _club_alias(c)}:
@@ -2743,7 +2814,9 @@ def _source_binds_club_person(src_lower, club, person):
     spans.sort()
     if not spans:
         return False
-    for pm in re.finditer(re.escape(person_l), src_lower):
+    positions = [pm for needle in needles
+                 for pm in re.finditer(re.escape(needle), src_lower)]
+    for pm in positions:
         best = None
         for cs, ce, c in spans:
             if ce <= pm.start():
@@ -3115,8 +3188,33 @@ def _s6_strip_ungrounded_binary(slides, assigned_evidence):
     return True
 
 
+_BOILERPLATE_RE = re.compile(
+    r"(?:Play Super 6[^.!?]*[.!?]|Enter for free[.!?]?|"
+    r"You can discuss the topics[^.!?]*[.!?]|"
+    r"For more stories like this[^.!?]*[.!?]|"
+    r"Sign up for[^.!?]*newsletter[^.!?]*[.!?])",
+    re.I,
+)
+
+
+def _strip_boilerplate(text):
+    """Remove outlet promo/footer boilerplate before scoring or gating.
+
+    Sky Sports match reports append 'Play Super 6 for a chance to win £250k!
+    Enter for free.' to every article. That prize figure tripped the high-risk
+    currency gate (``_HIGH_RISK_CLAIM_RE``) and hard-rejected 3 of the 8
+    body-validated candidates in the 2026-09-12 dry run, even though the story
+    contained no fee claim at all.
+    """
+    if not text:
+        return text
+    cleaned = _BOILERPLATE_RE.sub(" ", text)
+    return re.sub(r"\s{2,}", " ", cleaned) if cleaned != text else text
+
+
 def _story_text(article_text, title):
     """Drop roundup tangents that do not mention the title's main entities."""
+    article_text = _strip_boilerplate(article_text)
     ignored = {"news", "transfer", "transfers", "latest", "update", "updates", "major", "hint"}
     entities = [w.lower() for w in re.findall(r"[A-Za-zÀ-ÿ]{4,}", title) if w.lower() not in ignored]
     sentences = re.split(r'(?<=[.!?])\s+', article_text.strip())
@@ -3307,7 +3405,7 @@ Attack the football logic, not the person.
 
 Good:
 
-“The club says X but has now done Y. For me, that contradiction is difficult to defend.”
+“The club says X but has now done Y. That contradiction is difficult to defend.”
 
 Bad:
 
@@ -3335,7 +3433,7 @@ Move library — use exactly one per slide, do not name it in the copy:
 Rules for every analytic sentence:
 
 - A move rearranges supplied facts. It never introduces a new one.
-- Mark the move as reasoning, not as knowledge, with a qualifier: “That means”, “That reads as”, “The logic here”, “If that holds”, “Worth asking”.
+- Mark the move as reasoning, not as knowledge, with a qualifier in your own words. Never reuse a fixed opener phrase across posts.
 - Name the supplied fact you are reasoning from inside the sentence, in plain words, so a reader can check it. Never print an evidence ID such as (E3) in the copy.
 - Never manufacture a motive, a hidden plan, a winner, a loser, or a consequence.
 - If the supplied facts cannot support the move, drop the move. Do not fill the gap with guesswork.
@@ -3552,7 +3650,7 @@ Avoid:
 - slurs
 - harassment
 
-Use first-person editorial markers such as “For me” or “In my eyes” sparingly.
+Use first-person editorial markers sparingly, and never open a slide with one.
 
 Never claim eyewitness knowledge.
 
@@ -4440,7 +4538,11 @@ def _generate_best(ranked, analytics_summary, hooks_str, cta_pattern, tone):
             for _s in editorial_slides:
                 if isinstance(_s, dict) and _s.get("content"):
                     _s["content"] = _strip_internal_tags(_s["content"])
-            # Normalize unsupported S6 debate before contract and coverage checks.
+            # Deterministic voice repair: swap a stock opener for a varied
+            # qualifier instead of burning the attempt. Variety is a quality
+            # preference, never a reason to lose a posting slot.
+            if _neutralize_stock_openers(editorial_slides, seed=gen_attempt):
+                log("   🎙️ Stock opener neutralized for variety")
             if assigned_evidence and _s6_strip_ungrounded_binary(editorial_slides, assigned_evidence):
                 log("   🛡️ S6 binary question had no source-backed premise — replaced with grounded takeaway")
             contract_errors = _slide_contract_errors(slides)
@@ -4461,7 +4563,9 @@ def _generate_best(ranked, analytics_summary, hooks_str, cta_pattern, tone):
             voice_errors = _voice_repetition_errors(editorial_slides)
             if cta_errors:
                 log(f"   ⚠️ S6 CTA soft: {'; '.join(cta_errors)}")
-            errors = coverage_errors + contract_errors + grounding_errors + number_errors + prevalidation_errors + xpost_errors + winning_errors + tag_errors + binding_errors + voice_errors
+            if voice_errors:
+                log(f"   ⚠️ Voice soft: {'; '.join(voice_errors)}")
+            errors = coverage_errors + contract_errors + grounding_errors + number_errors + prevalidation_errors + xpost_errors + winning_errors + tag_errors + binding_errors
             _write_claim_audit(claim_rows, "PREVALIDATION_REJECT" if prevalidation_errors else "PREVALIDATION_PASS", art_url, art_title)
             if errors:
                 all_errors = "; ".join(errors)
