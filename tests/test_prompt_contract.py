@@ -28,7 +28,11 @@ def test_system_prompt_enforces_untrusted_source_contract():
     assert "Each slide:\n\n- one or two complete sentences" in text
     assert "maximum 15 words per sentence" not in text
     assert "passionate football analyst reacting to the supplied facts" in text
-    assert 'Use first-person editorial markers such as “For me” or “In my eyes” sparingly.' in text
+    assert 'Use first-person editorial markers sparingly, and never open a slide with one.' in text
+    # Prompt must not TEACH the banned openers as templates. It may only
+    # mention them as negative instructions or in the banned-phrase registry.
+    assert 'such as “For me” or “In my eyes”' not in text, "prompt must not teach banned stock opener"
+    assert 'qualifier: “That means”' not in text, "prompt must not teach banned stock opener"
     assert "Never claim eyewitness knowledge." in text
     assert "SAFE REPAIR MODE" in text
     assert "copy the exact source wording from the full article fact packet" in text
